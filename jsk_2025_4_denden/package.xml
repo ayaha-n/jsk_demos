@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>jsk_2025_4_denden</name>
+  <version>0.0.0</version>
+  <description>The jsk_2025_4_denden package</description>
+  <maintainer email="k-okada@jsk.imi.i.u-tokyo.ac.jp">Kei Okada</maintainer>
+  <maintainer email="obinata@jsk.imi.i.u-tokyo.ac.jp">Yoshiki Obinata</maintainer>
+
+  <license>BSD</license>
+
+  <author email="nagata@jsk.imi.i.u-tokyo.ac.jp">Ayaha Nagata</author>
+  
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>rospy</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_export_depend>rospy</build_export_depend>
+  <build_export_depend>std_msgs</build_export_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <build_depend>sound_play</build_depend>
+  <exec_depend>sound_play</exec_depend>
+  <export>
+  </export>
+</package>
