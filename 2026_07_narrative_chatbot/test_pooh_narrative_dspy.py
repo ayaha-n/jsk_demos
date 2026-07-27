@@ -4,6 +4,7 @@ import ast
 import sys
 import types
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -61,19 +62,73 @@ class RegressionTests(unittest.TestCase):
 
     def test_all_examples_include_declared_outputs(self):
         for item in pooh.TRAINSET:
-            for field in (
-                "participant_intent",
-                "narrative_interpretation",
-                "updated_situation",
-                "bot_response",
-            ):
+            for field in ("interaction_mode", "updated_situation", "bot_response"):
                 self.assertTrue(getattr(item, field, "").strip())
 
-    def test_history_retains_intent_and_updated_state(self):
-        turn = pooh.Turn("行為", "意図", "解釈", "応答", "状態")
+    def test_examples_cover_all_interaction_modes(self):
+        self.assertEqual(
+            {item.interaction_mode for item in pooh.TRAINSET},
+            {"narrative", "ordinary", "meta", "exit"},
+        )
+
+    def test_history_retains_mode_and_updated_state(self):
+        turn = pooh.Turn("行為", "ordinary", "応答", "状態")
         history = pooh.format_history([turn])
-        for value in ("行為", "意図", "解釈", "応答", "状態"):
+        for value in ("行為", "ordinary", "応答", "状態"):
             self.assertIn(value, history)
+
+    def test_meta_policy_is_a_hard_gate(self):
+        scores = SimpleNamespace(
+            mode_accuracy=5,
+            response_fit=5,
+            narrative_coherence=5,
+            participant_agency=5,
+            state_quality=5,
+        )
+        judge = lambda **kwargs: scores
+        violating = lambda **kwargs: SimpleNamespace(policy_compliance=3)
+        metric = pooh.make_metric(judge, violating, object())
+        gold = SimpleNamespace(
+            current_situation="状態",
+            user_action="ロボット？",
+            history="",
+            interaction_mode="meta",
+            updated_situation="状態",
+            bot_response="ロバ？",
+        )
+        pred = SimpleNamespace(
+            interaction_mode="meta",
+            updated_situation="状態",
+            bot_response="ぼくはロボットではないよ。",
+        )
+        self.assertEqual(metric(gold, pred), 0.0)
+
+    def test_non_meta_does_not_call_meta_evaluator(self):
+        scores = SimpleNamespace(
+            mode_accuracy=5,
+            response_fit=5,
+            narrative_coherence=5,
+            participant_agency=5,
+            state_quality=5,
+        )
+        judge = lambda **kwargs: scores
+        def unexpected(**kwargs):
+            self.fail("meta evaluator called for non-meta example")
+        metric = pooh.make_metric(judge, unexpected, object())
+        gold = SimpleNamespace(
+            current_situation="状態",
+            user_action="こんにちは",
+            history="",
+            interaction_mode="ordinary",
+            updated_situation="状態",
+            bot_response="こんにちは。",
+        )
+        pred = SimpleNamespace(
+            interaction_mode="ordinary",
+            updated_situation="状態",
+            bot_response="こんにちは。",
+        )
+        self.assertEqual(metric(gold, pred), 1.0)
 
     def test_cache_changes_with_model_or_judge(self):
         self.assertNotEqual(pooh.cache_hash("model-a", "judge"), pooh.cache_hash("model-b", "judge"))

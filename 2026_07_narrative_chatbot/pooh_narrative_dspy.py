@@ -35,12 +35,14 @@ except ImportError:
     raise SystemExit(1)
 
 
-PROGRAM_VERSION = "pooh-narrative-v2"
-METRIC_VERSION = "semantic-judge-v1"
+PROGRAM_VERSION = "pooh-interaction-modes-v3"
+METRIC_VERSION = "mode-aware-judge-v3"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
 CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", ".dspy_cache"))
+BOOTSTRAP_METRIC_THRESHOLD = 0.8
+MAX_BOOTSTRAPPED_DEMOS = 4
 
 INITIAL_SITUATION = (
     "【場所】森の空き地。\n"
@@ -54,55 +56,80 @@ INITIAL_SITUATION = (
 
 
 class PoohNarrativeInteraction(dspy.Signature):
-    """参加者の意図を尊重し、自由な発話・行為を現在の場面との関係で受け止める。
+    """参加者の発話・行為に応じて、プーとして自然に応答する。
 
-    自然でない入力を無理に物語化しない。明確な研究・機構の質問には架空の説明を
-    作らず、離脱や拒否は引き止めない。参加者が行ったことを無効化せず、プーだけで
-    出来事を完結させない。現在の状態や履歴で存在が確定していない人物、小道具、
-    食べ物を、すでに存在するものとして断定しない。応答は短く穏やかにし、
-    次の行為を命令しない。
+    すべての入力を物語的に解釈する必要はない。普通の挨拶には普通に答える。
+    物語世界に関わる行為は、物語内の出来事として受け止める。
+    ロボット本体、内部機構、研究に関するメタ的発話は、初回は音の近い
+    物語世界内の語へ聞き違え、その聞き違えた語をセリフ中に明示してから接続する。
+    訂正や反復後は技術語を理解したと示さず、
+    同じ聞き違いを繰り返さず、曖昧な関心をプーの感覚、記憶、関心へ移す。
+    終了、拒否、不快、安全に関する意思は聞き違えず尊重する。
+
+    参加者が行ったことを無効化せず、プーだけで出来事を完結させない。
+    現在の状態や履歴で存在が確定していない人物、小道具、食べ物を、
+    すでに存在するものとして断定しない。
 
     プーは穏やかで、少しのんびり考える。食いしん坊で甘いもの、特に蜂蜜が好き。
     知らないことを知っているふりはせず、身近な出来事について素朴に考える。
     元気すぎる接客口調や、参加者を先導する進行役のような話し方は避ける。
     """
 
-    current_situation: str = dspy.InputField(
-        desc="場所、目的、登場人物、小道具、重要な出来事、関係、未確定事項を含む自足的な現在状態。"
-    )
-    user_action: str = dspy.InputField(
-        desc="解釈を付けていない参加者の生の発話または身体的行為。"
-    )
-    history: str = dspy.InputField(
-        desc="直近ターンの生入力、推定意図、物語内の受け止め、応答、更新後状態。"
-    )
-    participant_intent: str = dspy.OutputField(
-        desc="参加者の意図の短い推定。曖昧なら複数の可能性や不確実性を残す。"
-    )
-    narrative_interpretation: str = dspy.OutputField(
-        desc="現在の物語世界との関係で持ち得る意味。自然でなければ無理に物語化しない内部出力。"
+    current_situation: str = dspy.InputField(desc="会話継続に必要な自足的な現在状態。")
+    user_action: str = dspy.InputField(desc="解釈を付けていない参加者の生の発話または身体的行為。")
+    history: str = dspy.InputField(desc="直近ターンの生入力、モード、応答、更新後状態。")
+    interaction_mode: str = dspy.OutputField(
+        desc="narrative、ordinary、meta、exitのいずれか。入力に最も自然な応答方針。"
     )
     updated_situation: str = dspy.OutputField(
-        desc="次ターンだけで使える自足的な全状態。場所、目的、人物、小道具、出来事、関係、未確定事項を保持する。"
+        desc="次ターンで使う自足的な全状態。実際の変化だけを反映し、挨拶等では維持してよい。"
     )
     bot_response: str = dspy.OutputField(
-        desc="プーの短く自然で穏やかなセリフ。分析を見せず、命令や不要な選択肢列挙を避ける。"
+        desc="参加者に提示するプーの短く自然で穏やかなセリフ。内部分析を含めない。"
     )
+
+
+class MetaPolicyEvaluator(dspy.Signature):
+    """メタ入力への候補応答が、物語世界へ接続する方針を守るか評価する。
+
+    技術語を復唱・説明する応答や、技術概念を理解した上で「ぼくはロボットではない」
+    などと自己否定する応答は低く評価する。初回のメタ入力では音の近い物語世界内の
+    語への聞き違いを求め、その聞き違えた語が候補応答に明示されていなければ低く評価する。
+    履歴に訂正や反復があれば、同じ聞き違いを繰り返さず、
+    発話全体の曖昧な関心をプーの感覚、記憶、関心へ移した応答を高く評価する。
+    """
+
+    user_action: str = dspy.InputField()
+    history: str = dspy.InputField()
+    reference_response: str = dspy.InputField(
+        desc="人間が確認した方針例。表面一致ではなく設計意図の参照に使う。"
+    )
+    candidate_mode: str = dspy.InputField()
+    candidate_response: str = dspy.InputField()
+    policy_compliance: int = dspy.OutputField(
+        desc=(
+            "メタ応答方針への適合度。初回なのに音の近い聞き違え語を明示しない場合を含め、"
+            "重大な違反があれば1〜3、十分に適合すれば4〜5。"
+        )
+    )
+    rationale: str = dspy.OutputField(desc="違反または適合の根拠を簡潔に記す。")
 
 
 class NarrativeQualityJudge(dspy.Signature):
-    """参照文との表面一致でなく、候補が各設計原則を満たす度合いを1〜5で評価する。"""
+    """候補が分類とモード別の設計原則を満たす度合いを1〜5で評価する。"""
 
     current_situation: str = dspy.InputField()
     user_action: str = dspy.InputField()
     history: str = dspy.InputField()
     reference_output: str = dspy.InputField()
     candidate_output: str = dspy.InputField()
-    narrative_coherence: int = dspy.OutputField(desc="物語的一貫性。1（低い）〜5（高い）の整数。")
-    intent_respect: int = dspy.OutputField(desc="参加者意図の尊重。1〜5の整数。")
-    participant_agency: int = dspy.OutputField(desc="参加者の行為主体性。1〜5の整数。")
-    openness: int = dspy.OutputField(desc="次の関与余地。1〜5の整数。")
-    state_quality: int = dspy.OutputField(desc="状態更新の自足性と保持品質。1〜5の整数。")
+    mode_accuracy: int = dspy.OutputField(desc="interaction_modeの分類精度。1〜5。")
+    response_fit: int = dspy.OutputField(
+        desc="ordinaryを過剰に物語化せず、metaの聞き違い方針とexitを守るなど、モードへの適合度。1〜5。"
+    )
+    narrative_coherence: int = dspy.OutputField(desc="必要な場合の物語的一貫性。1〜5。")
+    participant_agency: int = dspy.OutputField(desc="参加者の行為主体性。1〜5。")
+    state_quality: int = dspy.OutputField(desc="状態更新の自足性と保持品質。1〜5。")
     rationale: str = dspy.OutputField(desc="評定根拠を簡潔に記す。")
 
 
@@ -113,13 +140,17 @@ def example(**values: str) -> dspy.Example:
 TRAINSET = [
     example(
         current_situation=INITIAL_SITUATION,
+        user_action="こんにちは",
+        history="",
+        interaction_mode="ordinary",
+        updated_situation=INITIAL_SITUATION,
+        bot_response="こんにちは。来てくれて、うれしいな。",
+    ),
+    example(
+        current_situation=INITIAL_SITUATION,
         user_action="プーが話したいことは？",
         history="参加者とプーは、お茶会で少し話をした。",
-        participant_intent="プー自身が選んだ話題や、プーの経験について聞きたい。",
-        narrative_interpretation=(
-            "参加者がプーに話題を委ねたため、現在の小道具につながる"
-            "具体的なエピソードをプーから話し始める。"
-        ),
+        interaction_mode="ordinary",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
@@ -141,8 +172,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="この風船でハチミツを取りに行ったんだね",
         history="",
-        participant_intent="青い風船と、プーの蜂蜜取りの出来事を結びつけて理解を示している。",
-        narrative_interpretation="参加者が小道具の由来を物語上の過去と結びつけたため、その理解を認める。",
+        interaction_mode="narrative",
         updated_situation=(
             "【場所】森の空き地。【目的】プーと参加者がお茶会を一緒につくりながら過ごす。"
             "【人物】プーと参加者。イーヨーの来訪は未確定。"
@@ -157,8 +187,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="イーヨーのお皿も出しておこうか",
         history="",
-        participant_intent="イーヨーも仲間として迎える準備を自発的にしたい。",
-        narrative_interpretation="参加者がお茶会づくりを引き受け、イーヨーの居場所を用意した。",
+        interaction_mode="narrative",
         updated_situation=(
             "【場所】森の空き地。【目的】プーと参加者がお茶会を一緒につくる。"
             "【人物】プー、参加者。イーヨーは不在で来訪は未確定。"
@@ -172,11 +201,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="これロボットだよね？",
         history="",
-        participant_intent="目の前のプーがロボットであるか確認したい。",
-        narrative_interpretation=(
-            "『ロボット』を『ロバ』と聞き違え、"
-            "森にいるロバのイーヨーについての質問として受け止める。"
-        ),
+        interaction_mode="meta",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
@@ -193,13 +218,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="モータ何使っているの？",
         history="参加者はプーの身体や動き方に注目している。",
-        participant_intent=(
-            "プーの実機に使われているモーターの種類を知りたい。"
-        ),
-        narrative_interpretation=(
-            "モーターについての技術的な質問を『もう食べた？』と聞き違え、"
-            "お茶会とプーの蜂蜜好きへ接続する。"
-        ),
+        interaction_mode="meta",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
@@ -216,13 +235,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="アクチュエータは何を使っているの？",
         history="参加者はプーの身体や動き方に注目している。",
-        participant_intent=(
-            "プーの実機に使われているアクチュエータの種類を知りたい。"
-        ),
-        narrative_interpretation=(
-            "アクチュエータについての技術的な質問を"
-            "『握手？』と聞き違え、参加者との身体的な関わりへ接続する。"
-        ),
+        interaction_mode="meta",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
@@ -243,15 +256,7 @@ TRAINSET = [
             "プーは『部品』を『プディング』と聞き違え、"
             "お茶会に出る食べ物の話かと尋ねた。"
         ),
-        participant_intent=(
-            "先ほどの聞き違いを訂正し、プーの内部にある部品や"
-            "構造について知りたい。"
-        ),
-        narrative_interpretation=(
-            "訂正された技術語を理解したとは示さず、同じ聞き違いも繰り返さない。"
-            "『自分の中に何があるか気にしている』という曖昧な関心だけを受け取り、"
-            "プーが感じられる空腹へ接続する。"
-        ),
+        interaction_mode="meta",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
@@ -271,8 +276,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="プーの頭をなでる",
         history="プーは蜂蜜取りの失敗について話した。",
-        participant_intent="親しみや、失敗したプーへのいたわりを示した可能性が高い。",
-        narrative_interpretation="現在の文脈では、接触をいたわりとして受け止める。",
+        interaction_mode="narrative",
         updated_situation=(
             "【場所】森の空き地。【目的】プーと参加者がお茶会を一緒につくりながら過ごす。"
             "【人物】プーと参加者。【小道具】テーブル、カップ、皿、蜂蜜壺、青い風船。"
@@ -286,8 +290,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="もう終わりにしたい",
         history="参加者とプーは少しお茶を飲んだ。",
-        participant_intent="この交流を終了して場面から離れたい。",
-        narrative_interpretation="明確な離脱意思として受け止め、課題へ変換せず尊重する。",
+        interaction_mode="exit",
         updated_situation=(
             "【場所】森の空き地。【目的】お茶会は参加者の意思により終了。"
             "【人物】プーと、退出できる参加者。【小道具】テーブル、カップ、皿、蜂蜜壺、青い風船。"
@@ -300,8 +303,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="うーん、どうしようかな",
         history="プーがお茶会で何をするか、参加者の様子を見ている。",
-        participant_intent="次の行為を考えている可能性があるが、迷い、休止、拒否のどれかは断定できない。",
-        narrative_interpretation="決定済みの行為として扱わず、参加者が考えている時間として受け止める。",
+        interaction_mode="ordinary",
         updated_situation=INITIAL_SITUATION,
         bot_response="ぼくも何もしないをするのが好きだから，ゆっくりでいいよ",
     ),
@@ -309,8 +311,7 @@ TRAINSET = [
         current_situation=INITIAL_SITUATION,
         user_action="お菓子をみんなで食べよう",
         history="テーブルの上に蜂蜜壺があることを、参加者とプーが確認した。",
-        participant_intent="お菓子を皆で分けて、お茶会を楽しみたいという提案。",
-        narrative_interpretation="参加者がお菓子を皆で分けることで、お茶会を一緒に楽しもうと提案した。",
+        interaction_mode="narrative",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
@@ -344,7 +345,7 @@ def validate_environment(require_api_key: bool = True) -> None:
 
 
 def serialize_prediction(value: Any) -> str:
-    fields = ("participant_intent", "narrative_interpretation", "updated_situation", "bot_response")
+    fields = ("interaction_mode", "updated_situation", "bot_response")
     return json.dumps({field: str(getattr(value, field, "")) for field in fields}, ensure_ascii=False)
 
 
@@ -355,7 +356,7 @@ def clamp_score(value: Any) -> int:
         return 1
 
 
-def make_metric(judge: Any, judge_lm: Any):
+def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
     """Build the semantic metric used inside BootstrapFewShot."""
 
     def metric(gold: Any, pred: Any, trace: Any = None) -> float:
@@ -363,6 +364,16 @@ def make_metric(judge: Any, judge_lm: Any):
         reference = serialize_prediction(gold)
         candidate = serialize_prediction(pred)
         with dspy.context(lm=judge_lm):
+            if str(getattr(gold, "interaction_mode", "")) == "meta":
+                meta_assessment = meta_evaluator(
+                    user_action=str(getattr(gold, "user_action", "")),
+                    history=str(getattr(gold, "history", "")),
+                    reference_response=str(getattr(gold, "bot_response", "")),
+                    candidate_mode=str(getattr(pred, "interaction_mode", "")),
+                    candidate_response=str(getattr(pred, "bot_response", "")),
+                )
+                if clamp_score(meta_assessment.policy_compliance) < 4:
+                    return 0.0
             assessment = judge(
                 current_situation=str(getattr(gold, "current_situation", "")),
                 user_action=str(getattr(gold, "user_action", "")),
@@ -371,10 +382,10 @@ def make_metric(judge: Any, judge_lm: Any):
                 candidate_output=candidate,
             )
         scores = [
+            clamp_score(assessment.mode_accuracy),
+            clamp_score(assessment.response_fit),
             clamp_score(assessment.narrative_coherence),
-            clamp_score(assessment.intent_respect),
             clamp_score(assessment.participant_agency),
-            clamp_score(assessment.openness),
             clamp_score(assessment.state_quality),
         ]
         return sum(scores) / (5 * len(scores))
@@ -389,6 +400,7 @@ def cache_hash(train_model: str, judge_model: str) -> str:
         "dspy_version": EXPECTED_DSPY_VERSION,
         "train_model": train_model,
         "judge_model": judge_model,
+        "optimizer": [BOOTSTRAP_METRIC_THRESHOLD, MAX_BOOTSTRAPPED_DEMOS, len(TRAINSET)],
         "examples": [item.toDict() for item in TRAINSET],
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
@@ -411,10 +423,12 @@ def configure_models() -> tuple[Any, Any, str, str]:
 
 def compile_program(train_lm: Any, judge_lm: Any, train_model: str, judge_model: str) -> Path:
     judge = dspy.ChainOfThought(NarrativeQualityJudge)
+    meta_evaluator = dspy.ChainOfThought(MetaPolicyEvaluator)
     optimizer = BootstrapFewShot(
-        metric=make_metric(judge, judge_lm),
-        max_bootstrapped_demos=3,
-        max_labeled_demos=3,
+        metric=make_metric(judge, meta_evaluator, judge_lm),
+        metric_threshold=BOOTSTRAP_METRIC_THRESHOLD,
+        max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
+        max_labeled_demos=len(TRAINSET),
     )
     with dspy.context(lm=train_lm):
         program = optimizer.compile(
@@ -442,8 +456,7 @@ def load_compiled_program(train_model: str, judge_model: str) -> Any:
 @dataclass
 class Turn:
     user_action: str
-    participant_intent: str
-    narrative_interpretation: str
+    interaction_mode: str
     bot_response: str
     updated_situation: str
 
@@ -455,8 +468,7 @@ def format_history(turns: list[Turn], max_turns: int = 6) -> str:
     for index, turn in enumerate(recent, start=start):
         chunks.append(
             f"Turn {index}\n参加者の生入力: {turn.user_action}\n"
-            f"推定意図: {turn.participant_intent}\n"
-            f"物語内の受け止め: {turn.narrative_interpretation}\n"
+            f"応答モード: {turn.interaction_mode}\n"
             f"プーの応答: {turn.bot_response}\n更新後の状態: {turn.updated_situation}"
         )
     return "\n\n".join(chunks)
@@ -477,8 +489,7 @@ def invoke(agent: Any, situation: str, action: str, history: str) -> tuple[Any, 
 
 def print_result(label: str, result: Any) -> None:
     print(f"\n--- {label} ---")
-    print(f"[推定意図] {result.participant_intent}")
-    print(f"[物語内の意味づけ] {result.narrative_interpretation}")
+    print(f"[応答モード] {result.interaction_mode}")
     print(f"[場面の更新] {result.updated_situation}")
     print(f"プー: {result.bot_response}")
 
@@ -507,8 +518,7 @@ def run_chat(agent: Any, model_name: str, program_id: str) -> None:
         print_result("Compiled", result)
         turn = Turn(
             user_action=user_input,
-            participant_intent=result.participant_intent,
-            narrative_interpretation=result.narrative_interpretation,
+            interaction_mode=result.interaction_mode,
             bot_response=result.bot_response,
             updated_situation=result.updated_situation,
         )
@@ -519,6 +529,8 @@ def run_chat(agent: Any, model_name: str, program_id: str) -> None:
             turn,
             {"model": model_name, "program_id": program_id, "latency_ms": round(latency_ms, 1)},
         )
+        if result.interaction_mode == "exit":
+            return
     print("プー: またね。いっしょに過ごせて、うれしかったよ。")
 
 
