@@ -1,0 +1,7 @@
+.dspy_cache/
+.tools/
+.venv/
+logs/
+.env
+__pycache__/
+*.py[cod]
