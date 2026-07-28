@@ -52,7 +52,13 @@ sys.modules.setdefault("dspy", fake)
 sys.modules.setdefault("dspy.teleprompt", teleprompt)
 
 import pooh_narrative_dspy as pooh
-from mishearing_cases import MISHEARING_CASES
+from mishearing_cases import (
+    MISHEARING_CASES,
+    UNCERTAIN_RESPONSE_TEMPLATES,
+    make_uncertain_echo,
+    normalize_term,
+    uncertain_candidate_for,
+)
 
 
 class RegressionTests(unittest.TestCase):
@@ -65,7 +71,8 @@ class RegressionTests(unittest.TestCase):
 
     def test_bot_response_field_forbids_direct_technical_terms(self):
         description = pooh.GeneratePoohResponse.bot_response.kwargs["desc"]
-        self.assertIn("技術語や技術概念を直接出さない", description)
+        self.assertIn("物語世界外の技術語全体を直接出さない", description)
+        self.assertIn("不確かな短い音", description)
 
     def test_all_examples_include_declared_outputs(self):
         for item in pooh.TRAINSET:
@@ -207,6 +214,42 @@ class RegressionTests(unittest.TestCase):
             bot_response="こんにちは。",
         )
         self.assertEqual(metric(gold, pred), 1.0)
+
+    def test_uncertain_echo_is_short_and_changes_the_term(self):
+        expected = {
+            "ロボット": "ロボ",
+            "モーター": "モタ",
+            "サーボ": "サボ",
+        }
+        for technical_term, expected_echo in expected.items():
+            echo = make_uncertain_echo(technical_term)
+            self.assertEqual(echo, expected_echo)
+            self.assertLessEqual(len(echo), 3)
+            self.assertNotEqual(
+                normalize_term(echo),
+                normalize_term(technical_term),
+            )
+            candidate = uncertain_candidate_for(technical_term)
+            allowed = {
+                template.format(echo=echo)
+                for template in UNCERTAIN_RESPONSE_TEMPLATES
+            }
+            self.assertIn(candidate.possible_response, allowed)
+
+    def test_prior_technical_mentions_count_user_input_only(self):
+        history = (
+            "Turn 1\n参加者の生入力: ロボットなの？\n応答モード: meta\n"
+            "プーの応答: ロバ？\n"
+            "Turn 2\n参加者の生入力: ロボットのことだよ\n応答モード: meta"
+        )
+        self.assertEqual(
+            pooh.count_prior_technical_mentions(history, ["ロボット"]),
+            2,
+        )
+        self.assertEqual(
+            pooh.count_prior_technical_mentions(history, ["モーター"]),
+            0,
+        )
 
     def test_reviewed_mishearing_dictionary(self):
         expressions = [case.technical_expression for case in MISHEARING_CASES]

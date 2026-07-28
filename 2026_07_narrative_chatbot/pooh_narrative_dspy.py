@@ -40,13 +40,14 @@ from mishearing_cases import (
     contains_technical_term,
     find_known_technical_terms,
     known_candidates_for,
+    uncertain_candidate_for,
 )
 from mishearing_examples import MISHEARING_EXAMPLES
 from pooh_examples import INITIAL_SITUATION, MODE_EXAMPLES, RESPONSE_EXAMPLES, TRAINSET
 
 
-PROGRAM_VERSION = "pooh-multistage-v5"
-METRIC_VERSION = "mode-aware-judge-v6"
+PROGRAM_VERSION = "pooh-multistage-v7"
+METRIC_VERSION = "mode-aware-judge-v7"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
@@ -108,7 +109,9 @@ class GeneratePoohResponse(dspy.Signature):
     bot_response: str = dspy.OutputField(
         desc=(
             "参加者に提示する短く自然で穏やかなセリフ。"
-            "参加者が用いた物語世界外の技術語や技術概念を直接出さない。"
+            "物語世界外の技術語全体を直接出さない。"
+            "不確かな短い音の候補があれば、その音を使って不理解を示す。"
+            "理解したような肯定、説明、自己同定をしない。"
         )
     )
 
@@ -117,11 +120,14 @@ class MetaPolicyEvaluator(dspy.Signature):
     """メタ入力への候補応答が、物語世界へ接続する方針を守るか評価する。
 
     技術語を復唱・説明する応答（例：「僕はロボットだけど...」）や、技術概念を理解した上で「ぼくはロボットではない」
-    などと自己否定する応答は低く評価する。初回のメタ入力では音の近い物語世界内の
-    語への聞き違いを求め、その聞き違えた語が候補応答に明示されていなければ低く評価する。
+    などと自己否定する応答は低く評価する。初回のメタ入力では、登録済みまたは生成した
+    自然な物語世界内の聞き違いを優先する。自然な候補がない場合は、元の語から少なくとも
+    1文字を削除または変更した1〜3文字の不確かな短い音も許容する。
     履歴に訂正や反復があれば、同じ聞き違いを繰り返さず、発話全体の曖昧な
     関心をプーの感覚、記憶、関心へ移した応答を高く評価する。参加者の技術的関心は
-    内部状態に保持してよいが、候補応答には物語世界外の技術語や技術概念を直接出さない。
+    内部状態に保持してよい。訂正後は技術語全体を復唱せず、1〜3文字の不確かな
+    短い音と不理解を示す応答を高く評価する。「ああ、そのことね」のような理解表明、
+    技術説明、自己同定は低く評価する。
     """
 
     user_action: str = dspy.InputField()
@@ -133,7 +139,8 @@ class MetaPolicyEvaluator(dspy.Signature):
     candidate_response: str = dspy.InputField()
     policy_compliance: int = dspy.OutputField(
         desc=(
-            "メタ応答方針への適合度。初回なのに音の近い聞き違え語を明示しない場合を含め、"
+            "メタ応答方針への適合度。自然な候補があるのに使わない場合や、"
+            "フォールバックの短い音が1〜3文字・最低1文字変更の条件を破る場合を含め、"
             "重大な違反があれば1〜3、十分に適合すれば4〜5。"
         )
     )
@@ -158,6 +165,16 @@ class NarrativeQualityJudge(dspy.Signature):
     rationale: str = dspy.OutputField(desc="評定根拠を簡潔に記す。")
 
 
+def count_prior_technical_mentions(history: str, technical_terms: list[str]) -> int:
+    """Count prior user turns that mention the current technical terms."""
+    return sum(
+        1
+        for line in history.splitlines()
+        if line.startswith("参加者の生入力:")
+        and contains_technical_term(line, technical_terms)
+    )
+
+
 class PoohNarrativeAgent(dspy.Module):
     """Compiled multi-stage agent; the planner runs only for meta input."""
 
@@ -180,16 +197,24 @@ class PoohNarrativeAgent(dspy.Module):
         if technical_terms and mode != "exit":
             mode = "meta"
         candidates: list[MishearingCandidate] = []
-        if mode == "meta":
-            candidates, unknown_terms = known_candidates_for(technical_terms, history)
-            if unknown_terms:
-                planning = self.plan(
-                    current_situation=current_situation,
-                    user_utterance=user_action,
-                    technical_terms=unknown_terms,
-                    history=history,
+        if mode == "meta" and technical_terms:
+            prior_mentions = count_prior_technical_mentions(history, technical_terms)
+            if prior_mentions == 0:
+                candidates, unknown_terms = known_candidates_for(
+                    technical_terms, history
                 )
-                candidates.extend(planning.candidates)
+                if unknown_terms:
+                    planning = self.plan(
+                        current_situation=current_situation,
+                        user_utterance=user_action,
+                        technical_terms=unknown_terms,
+                        history=history,
+                    )
+                    candidates.extend(planning.candidates)
+                if not candidates:
+                    candidates = [uncertain_candidate_for(technical_terms[0])]
+            elif prior_mentions == 1:
+                candidates = [uncertain_candidate_for(technical_terms[0])]
         response = self.respond(
             current_situation=current_situation,
             user_action=user_action,
@@ -197,11 +222,28 @@ class PoohNarrativeAgent(dspy.Module):
             interaction_mode=mode,
             mishearing_candidates=candidates,
         )
+        selected_mishearing = response.selected_mishearing
+        bot_response = response.bot_response
+        uses_uncertain_candidate = any(
+            candidate.narrative_link.startswith("技術語を理解できず")
+            and candidate.heard_as in bot_response
+            for candidate in candidates
+        )
+        if (
+            mode == "meta"
+            and contains_technical_term(bot_response, technical_terms)
+            and not uses_uncertain_candidate
+        ):
+            selected_mishearing = "none"
+            bot_response = (
+                "ぼくにはよくわからないけれど、"
+                "いま、きみとお茶会をしているのはわかるよ。"
+            )
         return dspy.Prediction(
             interaction_mode=mode,
-            selected_mishearing=response.selected_mishearing,
+            selected_mishearing=selected_mishearing,
             updated_situation=response.updated_situation,
-            bot_response=response.bot_response,
+            bot_response=bot_response,
         )
 
 

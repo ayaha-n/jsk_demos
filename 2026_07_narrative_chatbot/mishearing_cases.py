@@ -1,6 +1,7 @@
 """Technical expressions and their human-reviewed story-world mishearings."""
 
 from dataclasses import dataclass
+import random
 import unicodedata
 
 from pydantic import BaseModel, Field
@@ -211,6 +212,42 @@ def contains_technical_term(text: str, technical_terms: list[str]) -> bool:
         variant and variant in normalized_text
         for term in technical_terms
         for variant in term_variants(term)
+    )
+
+
+UNCERTAIN_RESPONSE_TEMPLATES = (
+    "{echo}？ それはちょっとよくわからないなあ。",
+    "{echo}？ うーん、ぼくにはむずかしいなあ。",
+    "{echo}？ なんだか、むずかしい言葉だね。",
+    "{echo}？ ぼくの知らないことみたいだ。",
+    "{echo}？ 考えてみても、よくわからないなあ。",
+)
+
+
+def select_uncertain_response(echo: str) -> str:
+    """Choose one approved uncertainty phrase at runtime."""
+    return random.choice(UNCERTAIN_RESPONSE_TEMPLATES).format(echo=echo)
+
+
+def make_uncertain_echo(technical_term: str) -> str:
+    """Make a 1-3 character fragment with at least one deletion or change."""
+    normalized = unicodedata.normalize("NFKC", technical_term).casefold()
+    compact = "".join(character for character in normalized if character.isalnum())
+    compact = compact.replace("ー", "")
+    echo = compact[:3].rstrip("っッゃゅょャュョぁぃぅぇぉァィゥェォ")
+    if normalize_term(echo) == normalize_term(technical_term):
+        echo = echo[:-1]
+    return echo or "え"
+
+
+def uncertain_candidate_for(technical_term: str) -> MishearingCandidate:
+    """Return a deterministic fallback when no natural mishearing is available."""
+    echo = make_uncertain_echo(technical_term)
+    return MishearingCandidate(
+        original_term=technical_term,
+        heard_as=echo,
+        narrative_link="技術語を理解できず、不確かな短い音として聞き返す",
+        possible_response=select_uncertain_response(echo),
     )
 
 
