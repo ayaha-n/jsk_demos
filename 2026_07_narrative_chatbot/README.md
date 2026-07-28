@@ -123,7 +123,12 @@ Compile the program before the first chat session and after changing the example
 python pooh_narrative_dspy.py --mode compile
 ```
 
-`BootstrapFewShot` optimizes the program from the manually prepared examples. A separate DSPy evaluator assesses candidate outputs along five dimensions:
+`BootstrapFewShot` uses the manually reviewed full-turn examples in `TRAINSET`
+to evaluate candidate traces. Each Predictor's teacher receives examples matching
+its own task: interaction classification, mishearing planning, or response
+generation. Accepted traces are then merged with those task-specific examples.
+
+A separate DSPy evaluator assesses candidate outputs along five dimensions:
 
 1. Narrative coherence
 2. Respect for participant intent
@@ -250,6 +255,8 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 .
 ├── CODEX_INSTRUCTIONS_POOH_DSPY.md  # Research and implementation requirements
 ├── README.md                         # Setup and usage
+├── mishearing_cases.py               # Reviewed mishearings and term normalization
+├── pooh_examples.py                  # Full-turn and task-specific DSPy examples
 ├── pooh_narrative_dspy.py            # Main DSPy program
 ├── requirements.txt                  # Python dependencies
 └── test_pooh_narrative_dspy.py       # Regression tests without LLM calls
