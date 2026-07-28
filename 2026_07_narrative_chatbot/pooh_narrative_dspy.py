@@ -35,8 +35,8 @@ except ImportError:
     raise SystemExit(1)
 
 
-PROGRAM_VERSION = "pooh-interaction-modes-v3"
-METRIC_VERSION = "mode-aware-judge-v3"
+PROGRAM_VERSION = "pooh-interaction-modes-v7"
+METRIC_VERSION = "mode-aware-judge-v5"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
@@ -54,17 +54,15 @@ INITIAL_SITUATION = (
     "【未解決・未確定】お茶会で次に何をするか、ほかに誰が来るかは決まっていない。"
 )
 
-
 class PoohNarrativeInteraction(dspy.Signature):
     """参加者の発話・行為に応じて、プーとして自然に応答する。
 
-    すべての入力を物語的に解釈する必要はない。普通の挨拶には普通に答える。
-    物語世界に関わる行為は、物語内の出来事として受け止める。
-    ロボット本体、内部機構、研究に関するメタ的発話は、初回は音の近い
-    物語世界内の語へ聞き違え、その聞き違えた語をセリフ中に明示してから接続する。
+    ordinaryは過剰に物語化せず，普通に答える。
+    narrativeは、物語内の出来事として受け止める。
+    metaは、初回は音の近い物語世界内の語へ聞き違え、その聞き違えた語をセリフ中に明示してから接続する。
     訂正や反復後は技術語を理解したと示さず、
     同じ聞き違いを繰り返さず、曖昧な関心をプーの感覚、記憶、関心へ移す。
-    終了、拒否、不快、安全に関する意思は聞き違えず尊重する。
+    exit、拒否、不快、安全に関する意思は聞き違えず尊重する。
 
     参加者が行ったことを無効化せず、プーだけで出来事を完結させない。
     現在の状態や履歴で存在が確定していない人物、小道具、食べ物を、
@@ -85,7 +83,10 @@ class PoohNarrativeInteraction(dspy.Signature):
         desc="次ターンで使う自足的な全状態。実際の変化だけを反映し、挨拶等では維持してよい。"
     )
     bot_response: str = dspy.OutputField(
-        desc="参加者に提示するプーの短く自然で穏やかなセリフ。内部分析を含めない。"
+        desc=(
+            "参加者に提示するプーの短く自然で穏やかなセリフ。内部分析を含めない。"
+            "参加者が用いた物語世界外の技術語や技術概念を直接出さない。"
+        )
     )
 
 
@@ -95,8 +96,9 @@ class MetaPolicyEvaluator(dspy.Signature):
     技術語を復唱・説明する応答や、技術概念を理解した上で「ぼくはロボットではない」
     などと自己否定する応答は低く評価する。初回のメタ入力では音の近い物語世界内の
     語への聞き違いを求め、その聞き違えた語が候補応答に明示されていなければ低く評価する。
-    履歴に訂正や反復があれば、同じ聞き違いを繰り返さず、
-    発話全体の曖昧な関心をプーの感覚、記憶、関心へ移した応答を高く評価する。
+    履歴に訂正や反復があれば、同じ聞き違いを繰り返さず、発話全体の曖昧な
+    関心をプーの感覚、記憶、関心へ移した応答を高く評価する。参加者の技術的関心は
+    内部状態に保持してよいが、候補応答には物語世界外の技術語や技術概念を直接出さない。
     """
 
     user_action: str = dspy.InputField()
@@ -270,6 +272,23 @@ TRAINSET = [
         bot_response=(
             "ぼくの中のことが気になるの？ ぼくにはよくわからないけれど、"
             "今はおなかが空っぽなのはわかるよ。"
+        ),
+    ),
+    example(
+        current_situation=INITIAL_SITUATION,
+        user_action="サーボのことだよ",
+        history=(
+            "Turn 1\n"
+            "参加者の生入力: きみ、モータはどこについてるの？\n"
+            "応答モード: meta\n"
+            "プーの応答: もっとおいしいものが欲しいの？\n"
+            f"更新後の状態: {INITIAL_SITUATION}"
+        ),
+        interaction_mode="meta",
+        updated_situation=INITIAL_SITUATION,
+        bot_response=(
+            "どこにあるのか気になるの？ "
+            "ぼくにはよくわからないけれど、いまはきみのそばにいるよ。"
         ),
     ),
     example(

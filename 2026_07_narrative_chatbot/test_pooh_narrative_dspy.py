@@ -60,6 +60,10 @@ class RegressionTests(unittest.TestCase):
         for term in ("森の空き地", "青い風船", "テーブル", "蜂蜜壺", "一緒につくる仲間"):
             self.assertIn(term, pooh.INITIAL_SITUATION)
 
+    def test_bot_response_field_forbids_direct_technical_terms(self):
+        description = pooh.PoohNarrativeInteraction.bot_response.kwargs["desc"]
+        self.assertIn("技術語や技術概念を直接出さない", description)
+
     def test_all_examples_include_declared_outputs(self):
         for item in pooh.TRAINSET:
             for field in ("interaction_mode", "updated_situation", "bot_response"):
@@ -70,6 +74,13 @@ class RegressionTests(unittest.TestCase):
             {item.interaction_mode for item in pooh.TRAINSET},
             {"narrative", "ordinary", "meta", "exit"},
         )
+
+    def test_meta_followup_example_keeps_meta_mode(self):
+        matches = [item for item in pooh.TRAINSET if item.user_action == "サーボのことだよ"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].interaction_mode, "meta")
+        self.assertIn("応答モード: meta", matches[0].history)
+        self.assertNotIn("サーボ", matches[0].bot_response)
 
     def test_history_retains_mode_and_updated_state(self):
         turn = pooh.Turn("行為", "ordinary", "応答", "状態")
@@ -86,7 +97,10 @@ class RegressionTests(unittest.TestCase):
             state_quality=5,
         )
         judge = lambda **kwargs: scores
-        violating = lambda **kwargs: SimpleNamespace(policy_compliance=3)
+        captured = {}
+        def violating(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(policy_compliance=3)
         metric = pooh.make_metric(judge, violating, object())
         gold = SimpleNamespace(
             current_situation="状態",
@@ -102,6 +116,20 @@ class RegressionTests(unittest.TestCase):
             bot_response="ぼくはロボットではないよ。",
         )
         self.assertEqual(metric(gold, pred), 0.0)
+        self.assertNotIn("candidate_situation", captured)
+
+    def test_meta_examples_do_not_repeat_technical_term_in_response(self):
+        terms = {
+            "これロボットだよね？": "ロボット",
+            "モータ何使っているの？": "モータ",
+            "アクチュエータは何を使っているの？": "アクチュエータ",
+            "プディングじゃなくて、部品。中に何が入ってるの？": "部品",
+            "サーボのことだよ": "サーボ",
+        }
+        for item in pooh.TRAINSET:
+            term = terms.get(item.user_action)
+            if term:
+                self.assertNotIn(term, item.bot_response)
 
     def test_non_meta_does_not_call_meta_evaluator(self):
         scores = SimpleNamespace(
