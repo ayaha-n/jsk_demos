@@ -37,6 +37,7 @@ except ImportError:
 
 from mishearing_cases import (
     MishearingCandidate,
+    contains_technical_term,
     find_known_technical_terms,
     known_candidates_for,
 )
@@ -44,7 +45,7 @@ from mishearing_examples import MISHEARING_EXAMPLES
 from pooh_examples import INITIAL_SITUATION, MODE_EXAMPLES, RESPONSE_EXAMPLES, TRAINSET
 
 
-PROGRAM_VERSION = "pooh-multistage-v4"
+PROGRAM_VERSION = "pooh-multistage-v5"
 METRIC_VERSION = "mode-aware-judge-v6"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"

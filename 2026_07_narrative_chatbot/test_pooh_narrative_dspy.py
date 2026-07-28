@@ -52,6 +52,7 @@ sys.modules.setdefault("dspy", fake)
 sys.modules.setdefault("dspy.teleprompt", teleprompt)
 
 import pooh_narrative_dspy as pooh
+from mishearing_cases import MISHEARING_CASES
 
 
 class RegressionTests(unittest.TestCase):
@@ -76,6 +77,7 @@ class RegressionTests(unittest.TestCase):
             pooh.find_known_technical_terms("モータが入っているの？"),
             ["モーター"],
         )
+        self.assertEqual(pooh.find_known_technical_terms("ネジも入ってる"), ["ねじ"])
         self.assertEqual(pooh.find_known_technical_terms("こんにちは"), [])
 
     def test_pipeline_datasets_use_separate_schemas(self):
@@ -168,17 +170,16 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("candidate_situation", captured)
 
     def test_meta_examples_do_not_repeat_technical_term_in_response(self):
-        terms = {
-            "これロボットだよね？": "ロボット",
-            "モータ何使っているの？": "モータ",
-            "アクチュエータは何を使っているの？": "アクチュエータ",
-            "プディングじゃなくて、部品。中に何が入ってるの？": "部品",
-            "サーボのことだよ": "サーボ",
-        }
-        for item in pooh.TRAINSET:
-            term = terms.get(item.user_action)
-            if term:
-                self.assertNotIn(term, item.bot_response)
+        for item, mode_example in zip(pooh.TRAINSET, pooh.MODE_EXAMPLES):
+            if item.interaction_mode != "meta":
+                continue
+            self.assertFalse(
+                pooh.contains_technical_term(
+                    item.bot_response,
+                    mode_example.technical_terms,
+                ),
+                msg=f"技術語を含む応答です: {item.user_action}",
+            )
 
     def test_non_meta_does_not_call_meta_evaluator(self):
         scores = SimpleNamespace(
@@ -206,6 +207,24 @@ class RegressionTests(unittest.TestCase):
             bot_response="こんにちは。",
         )
         self.assertEqual(metric(gold, pred), 1.0)
+
+    def test_reviewed_mishearing_dictionary(self):
+        expressions = [case.technical_expression for case in MISHEARING_CASES]
+        self.assertEqual(len(expressions), len(set(expressions)))
+
+        for case in MISHEARING_CASES:
+            self.assertIn(
+                case.technical_expression,
+                pooh.find_known_technical_terms(case.technical_expression),
+            )
+            candidates, unknown = pooh.known_candidates_for(
+                [case.technical_expression]
+            )
+            self.assertEqual(
+                [candidate.heard_as for candidate in candidates],
+                [case.misheard_word],
+            )
+            self.assertEqual(unknown, [])
 
     def test_cache_changes_with_mishearing_examples(self):
         before = pooh.cache_hash("model", "judge")
