@@ -42,11 +42,16 @@ from mishearing_cases import (
     known_candidates_for,
     uncertain_candidate_for,
 )
-from mishearing_examples import MISHEARING_EXAMPLES
-from pooh_examples import INITIAL_SITUATION, MODE_EXAMPLES, RESPONSE_EXAMPLES, TRAINSET
+from pooh_examples import (
+    INITIAL_SITUATION,
+    MISHEARING_EXAMPLES,
+    MODE_EXAMPLES,
+    RESPONSE_EXAMPLES,
+    TRAINSET,
+)
 
 
-PROGRAM_VERSION = "pooh-multistage-v7"
+PROGRAM_VERSION = "pooh-multistage-v8"
 METRIC_VERSION = "mode-aware-judge-v7"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -54,6 +59,7 @@ LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
 CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", ".dspy_cache"))
 BOOTSTRAP_METRIC_THRESHOLD = 0.8
 MAX_BOOTSTRAPPED_DEMOS = 4
+MAX_LABELED_DEMOS = 0
 
 class AnalyzeInteraction(dspy.Signature):
     """参加者の発話・行為に最も自然な応答方針を選ぶ。
@@ -329,7 +335,12 @@ def cache_hash(train_model: str, judge_model: str) -> str:
         "dspy_version": EXPECTED_DSPY_VERSION,
         "train_model": train_model,
         "judge_model": judge_model,
-        "optimizer": [BOOTSTRAP_METRIC_THRESHOLD, MAX_BOOTSTRAPPED_DEMOS, len(TRAINSET)],
+        "optimizer": [
+            BOOTSTRAP_METRIC_THRESHOLD,
+            MAX_BOOTSTRAPPED_DEMOS,
+            MAX_LABELED_DEMOS,
+            "merge_stage_demos_v1",
+        ],
         "full_turn_examples": [item.toDict() for item in TRAINSET],
         "mode_examples": [item.toDict() for item in MODE_EXAMPLES],
         "mishearing_examples": [item.toDict() for item in MISHEARING_EXAMPLES],
@@ -359,6 +370,28 @@ def set_module_demos(module: Any, demos: list[Any]) -> None:
         predictor.demos = demos
 
 
+def set_agent_demos(agent: Any) -> None:
+    """Give each teacher Predictor only its task-specific examples."""
+    set_module_demos(agent.classify, MODE_EXAMPLES)
+    set_module_demos(agent.plan, MISHEARING_EXAMPLES)
+    set_module_demos(agent.respond, RESPONSE_EXAMPLES)
+
+
+def merge_module_demos(module: Any, labeled_demos: list[Any]) -> None:
+    """Keep accepted traces first and fill the old stage-specific demo budget."""
+    for predictor in module.predictors():
+        bootstrapped = list(predictor.demos)
+        remaining = max(0, len(labeled_demos) - len(bootstrapped))
+        predictor.demos = bootstrapped + labeled_demos[:remaining]
+
+
+def merge_agent_demos(agent: Any) -> None:
+    """Merge accepted traces with examples matching each Predictor schema."""
+    merge_module_demos(agent.classify, MODE_EXAMPLES)
+    merge_module_demos(agent.plan, MISHEARING_EXAMPLES)
+    merge_module_demos(agent.respond, RESPONSE_EXAMPLES)
+
+
 def compile_program(train_lm: Any, judge_lm: Any, train_model: str, judge_model: str) -> Path:
     judge = dspy.ChainOfThought(NarrativeQualityJudge)
     meta_evaluator = dspy.ChainOfThought(MetaPolicyEvaluator)
@@ -366,14 +399,18 @@ def compile_program(train_lm: Any, judge_lm: Any, train_model: str, judge_model:
         metric=make_metric(judge, meta_evaluator, judge_lm),
         metric_threshold=BOOTSTRAP_METRIC_THRESHOLD,
         max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
-        max_labeled_demos=len(TRAINSET),
+        max_labeled_demos=MAX_LABELED_DEMOS,
     )
     student = PoohNarrativeAgent()
-    set_module_demos(student.classify, MODE_EXAMPLES)
-    set_module_demos(student.plan, MISHEARING_EXAMPLES)
-    set_module_demos(student.respond, RESPONSE_EXAMPLES)
+    teacher = PoohNarrativeAgent()
+    set_agent_demos(teacher)
     with dspy.context(lm=train_lm):
-        program = optimizer.compile(student=student, trainset=TRAINSET)
+        program = optimizer.compile(
+            student=student,
+            teacher=teacher,
+            trainset=TRAINSET,
+        )
+    merge_agent_demos(program)
     target = cache_path(train_model, judge_model)
     target.parent.mkdir(parents=True, exist_ok=True)
     program.save(str(target))

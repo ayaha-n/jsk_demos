@@ -269,6 +269,18 @@ class RegressionTests(unittest.TestCase):
             )
             self.assertEqual(unknown, [])
 
+    def test_stage_demos_fill_budget_after_bootstrapping(self):
+        augmented = object()
+        labeled = [object(), object(), object()]
+        predictor = SimpleNamespace(demos=[augmented])
+        module = SimpleNamespace(predictors=lambda: [predictor])
+
+        pooh.merge_module_demos(module, labeled)
+
+        self.assertEqual(len(predictor.demos), len(labeled))
+        self.assertIs(predictor.demos[0], augmented)
+        self.assertEqual(predictor.demos[1:], labeled[:2])
+
     def test_cache_changes_with_mishearing_examples(self):
         before = pooh.cache_hash("model", "judge")
         example = pooh.MISHEARING_EXAMPLES.pop()
