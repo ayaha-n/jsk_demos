@@ -36,6 +36,8 @@ class _Module:
 
 fake = types.ModuleType("dspy")
 fake.Signature = object
+fake.Module = _Module
+fake.Prediction = lambda **kwargs: SimpleNamespace(**kwargs)
 fake.InputField = _Field
 fake.OutputField = _Field
 fake.Example = _Example
@@ -61,19 +63,51 @@ class RegressionTests(unittest.TestCase):
             self.assertIn(term, pooh.INITIAL_SITUATION)
 
     def test_bot_response_field_forbids_direct_technical_terms(self):
-        description = pooh.PoohNarrativeInteraction.bot_response.kwargs["desc"]
+        description = pooh.GeneratePoohResponse.bot_response.kwargs["desc"]
         self.assertIn("技術語や技術概念を直接出さない", description)
 
     def test_all_examples_include_declared_outputs(self):
         for item in pooh.TRAINSET:
-            for field in ("interaction_mode", "updated_situation", "bot_response"):
+            for field in ("interaction_mode", "selected_mishearing", "updated_situation", "bot_response"):
                 self.assertTrue(getattr(item, field, "").strip())
+
+    def test_known_technical_terms_handle_long_vowel_variation(self):
+        self.assertEqual(
+            pooh.find_known_technical_terms("モータが入っているの？"),
+            ["モーター"],
+        )
+        self.assertEqual(pooh.find_known_technical_terms("こんにちは"), [])
+
+    def test_pipeline_datasets_use_separate_schemas(self):
+        self.assertEqual(len(pooh.MODE_EXAMPLES), len(pooh.TRAINSET))
+        self.assertEqual(len(pooh.RESPONSE_EXAMPLES), len(pooh.TRAINSET))
+        self.assertEqual(len(pooh.MISHEARING_EXAMPLES), 3)
+        self.assertEqual(
+            pooh.MODE_EXAMPLES[0].inputs,
+            ("current_situation", "user_action", "history"),
+        )
+        self.assertIn("mishearing_candidates", pooh.RESPONSE_EXAMPLES[0].inputs)
+        robot = next(item for item in pooh.MODE_EXAMPLES if "ロボット" in item.user_action)
+        self.assertEqual(robot.technical_terms, ["ロボット"])
+        for item in pooh.MISHEARING_EXAMPLES:
+            self.assertTrue(item.technical_terms)
+            self.assertTrue(item.candidates)
 
     def test_examples_cover_all_interaction_modes(self):
         self.assertEqual(
             {item.interaction_mode for item in pooh.TRAINSET},
             {"narrative", "ordinary", "meta", "exit"},
         )
+
+    def test_compound_technical_question_is_meta(self):
+        matches = [
+            item for item in pooh.TRAINSET
+            if item.user_action == "ロボットなのに食事ができるの？"
+        ]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].interaction_mode, "meta")
+        self.assertEqual(matches[0].selected_mishearing, "ロバ")
+        self.assertNotIn("ロボット", matches[0].bot_response)
 
     def test_meta_followup_example_keeps_meta_mode(self):
         matches = [item for item in pooh.TRAINSET if item.user_action == "サーボのことだよ"]
@@ -87,6 +121,21 @@ class RegressionTests(unittest.TestCase):
         history = pooh.format_history([turn])
         for value in ("行為", "ordinary", "応答", "状態"):
             self.assertIn(value, history)
+
+    def test_mode_mismatch_is_a_hard_gate(self):
+        def unexpected(**kwargs):
+            self.fail("semantic evaluator called after mode mismatch")
+        metric = pooh.make_metric(unexpected, unexpected, object())
+        gold = SimpleNamespace(
+            current_situation="状態", user_action="ロボット？", history="",
+            interaction_mode="meta", selected_mishearing="ロバ",
+            updated_situation="状態", bot_response="ロバ？",
+        )
+        pred = SimpleNamespace(
+            interaction_mode="ordinary", selected_mishearing="none",
+            updated_situation="状態", bot_response="こんにちは。",
+        )
+        self.assertEqual(metric(gold, pred), 0.0)
 
     def test_meta_policy_is_a_hard_gate(self):
         scores = SimpleNamespace(
@@ -157,6 +206,14 @@ class RegressionTests(unittest.TestCase):
             bot_response="こんにちは。",
         )
         self.assertEqual(metric(gold, pred), 1.0)
+
+    def test_cache_changes_with_mishearing_examples(self):
+        before = pooh.cache_hash("model", "judge")
+        example = pooh.MISHEARING_EXAMPLES.pop()
+        try:
+            self.assertNotEqual(before, pooh.cache_hash("model", "judge"))
+        finally:
+            pooh.MISHEARING_EXAMPLES.append(example)
 
     def test_cache_changes_with_model_or_judge(self):
         self.assertNotEqual(pooh.cache_hash("model-a", "judge"), pooh.cache_hash("model-b", "judge"))

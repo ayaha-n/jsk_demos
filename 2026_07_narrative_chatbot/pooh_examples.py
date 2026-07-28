@@ -2,6 +2,8 @@
 
 import dspy
 
+from mishearing_cases import candidate_for
+
 
 INITIAL_SITUATION = (
     "【場所】森の空き地。\n"
@@ -15,6 +17,7 @@ INITIAL_SITUATION = (
 
 
 def example(**values: str) -> dspy.Example:
+    values.setdefault("selected_mishearing", "none")
     return dspy.Example(**values).with_inputs("current_situation", "user_action", "history")
 
 
@@ -83,13 +86,14 @@ TRAINSET = [
         user_action="これロボットだよね？",
         history="",
         interaction_mode="meta",
+        selected_mishearing="ロバ",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
             "【登場人物】プーと参加者。"
             "【小道具と状態】テーブル、カップ、皿、蜂蜜壺、青い風船がある。"
             "【重要な出来事】参加者はプーがロボットか尋ねたが、"
-            "プーはイーヨーについての質問として聞き違えた。"
+            "プーは「ロボット」という技術語を理解していないので，「ロバ」と聞き違えた。"
             "【関係】参加者はお茶会を一緒につくる仲間。"
             "【未解決・未確定】ロボットについての質問は未回答。"
         ),
@@ -97,16 +101,39 @@ TRAINSET = [
     ),
     example(
         current_situation=INITIAL_SITUATION,
+        user_action="ロボットなのに食事ができるの？",
+        history="",
+        interaction_mode="meta",
+        selected_mishearing="ロバ",
+        updated_situation=(
+            "【場所】森の空き地。"
+            "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
+            "【登場人物】プーと参加者。"
+            "【小道具と状態】テーブル、カップ、皿、蜂蜜壺、青い風船がある。"
+            "【重要な出来事】参加者はプーがロボットであるという前提から、"
+            "食事ができるかを尋ねた。プーはその技術語を理解せず、"
+            "ロバについての質問として聞き違えた。"
+            "【関係】参加者はプーの存在と食事に関心を示す、お茶会の仲間。"
+            "【未解決・未確定】ロボットと食事についての質問は未回答。"
+        ),
+        bot_response=(
+            "ロバ？ イーヨーのこと？ "
+            "イーヨーもお茶会に来たら、何か食べるかもしれないね。"
+        ),
+    ),
+    example(
+        current_situation=INITIAL_SITUATION,
         user_action="モータ何使っているの？",
         history="参加者はプーの身体や動き方に注目している。",
         interaction_mode="meta",
+        selected_mishearing="もう食べた",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
             "【登場人物】プーと参加者。"
             "【小道具と状態】テーブル、カップ、皿、蜂蜜壺、青い風船がある。"
             "【重要な出来事】参加者はモーターの種類を尋ねたが、"
-            "プーは『もう食べた？』という質問として聞き違えた。"
+            "プーはモーターという技術語を理解していないので，『もう食べた？』という質問として聞き違えた。"
             "【関係】参加者はお茶会を一緒につくる仲間。"
             "【未解決・未確定】モーターについての質問は未回答。"
         ),
@@ -117,13 +144,14 @@ TRAINSET = [
         user_action="アクチュエータは何を使っているの？",
         history="参加者はプーの身体や動き方に注目している。",
         interaction_mode="meta",
+        selected_mishearing="握手",
         updated_situation=(
             "【場所】森の空き地。"
             "【場面の目的】プーと参加者が、お茶会を一緒につくりながら過ごす。"
             "【登場人物】プーと参加者。"
             "【小道具と状態】テーブル、カップ、皿、蜂蜜壺、青い風船がある。"
             "【重要な出来事】参加者はアクチュエータの種類を尋ねたが、"
-            "プーは握手についての発話として聞き違えた。"
+            "プーはアクチュエータという技術語を理解していないので，握手についての発話として聞き違えた。"
             "【関係】参加者はお茶会を一緒につくる仲間。"
             "【未解決・未確定】アクチュエータについての質問は未回答。"
         ),
@@ -222,4 +250,63 @@ TRAINSET = [
         ),
         bot_response="みんなで食べたら、きっとおいしいね。ぼくは蜂蜜が食べたいなあ。",
     ),
+]
+
+
+
+def _candidates_for(item: dspy.Example) -> list:
+    action = item.user_action
+    if "ロボット" in action:
+        return [candidate_for("ロボット")]
+    if "モータ" in action:
+        return [candidate_for("モーター")]
+    if "アクチュエータ" in action:
+        return [candidate_for("アクチュエータ")]
+    return []
+
+
+def _technical_terms_for(item: dspy.Example) -> list[str]:
+    terms = []
+    for text, canonical in (
+        ("ロボット", "ロボット"),
+        ("モータ", "モーター"),
+        ("アクチュエータ", "アクチュエータ"),
+        ("部品", "部品"),
+        ("サーボ", "サーボ"),
+    ):
+        if text in item.user_action:
+            terms.append(canonical)
+    return terms
+
+
+MODE_EXAMPLES = [
+    dspy.Example(
+        current_situation=item.current_situation,
+        user_action=item.user_action,
+        history=item.history,
+        technical_terms=_technical_terms_for(item),
+        interaction_mode=item.interaction_mode,
+    ).with_inputs("current_situation", "user_action", "history")
+    for item in TRAINSET
+]
+
+
+RESPONSE_EXAMPLES = [
+    dspy.Example(
+        current_situation=item.current_situation,
+        user_action=item.user_action,
+        history=item.history,
+        interaction_mode=item.interaction_mode,
+        mishearing_candidates=_candidates_for(item),
+        selected_mishearing=item.selected_mishearing,
+        updated_situation=item.updated_situation,
+        bot_response=item.bot_response,
+    ).with_inputs(
+        "current_situation",
+        "user_action",
+        "history",
+        "interaction_mode",
+        "mishearing_candidates",
+    )
+    for item in TRAINSET
 ]

@@ -35,11 +35,17 @@ except ImportError:
     raise SystemExit(1)
 
 
-from pooh_examples import INITIAL_SITUATION, TRAINSET
+from mishearing_cases import (
+    MishearingCandidate,
+    find_known_technical_terms,
+    known_candidates_for,
+)
+from mishearing_examples import MISHEARING_EXAMPLES
+from pooh_examples import INITIAL_SITUATION, MODE_EXAMPLES, RESPONSE_EXAMPLES, TRAINSET
 
 
-PROGRAM_VERSION = "pooh-interaction-modes-v7"
-METRIC_VERSION = "mode-aware-judge-v5"
+PROGRAM_VERSION = "pooh-multistage-v4"
+METRIC_VERSION = "mode-aware-judge-v6"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
@@ -47,37 +53,60 @@ CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", ".dspy_cache"))
 BOOTSTRAP_METRIC_THRESHOLD = 0.8
 MAX_BOOTSTRAPPED_DEMOS = 4
 
-class PoohNarrativeInteraction(dspy.Signature):
-    """参加者の発話・行為に応じて、プーとして自然に応答する。
+class AnalyzeInteraction(dspy.Signature):
+    """参加者の発話・行為に最も自然な応答方針を選ぶ。
 
-    ordinaryは過剰に物語化せず，普通に答える。
-    narrativeは、物語内の出来事として受け止める。
-    metaは、初回は音の近い物語世界内の語へ聞き違え、その聞き違えた語をセリフ中に明示してから接続する。
-    訂正や反復後は技術語を理解したと示さず、
-    同じ聞き違いを繰り返さず、曖昧な関心をプーの感覚、記憶、関心へ移す。
-    exit、拒否、不快、安全に関する意思は聞き違えず尊重する。
-
-    参加者が行ったことを無効化せず、プーだけで出来事を完結させない。
-    現在の状態や履歴で存在が確定していない人物、小道具、食べ物を、
-    すでに存在するものとして断定しない。
-
-    プーは穏やかで、少しのんびり考える。食いしん坊で甘いもの、特に蜂蜜が好き。
-    知らないことを知っているふりはせず、身近な出来事について素朴に考える。
-    元気すぎる接客口調や、参加者を先導する進行役のような話し方は避ける。
+    ロボット本体、機械、内部機構、技術、研究、実験への言及を含む場合はmetaとする。
+    物語世界内の食事や行為と組み合わされた質問でも、技術的な前提を含めばmetaとする。
+    直前のmetaへの訂正、言い換え、補足もmetaを維持する。
+    終了、拒否、不快、安全に関する意思はexitを優先する。
     """
 
-    current_situation: str = dspy.InputField(desc="会話継続に必要な自足的な現在状態。")
-    user_action: str = dspy.InputField(desc="解釈を付けていない参加者の生の発話または身体的行為。")
-    history: str = dspy.InputField(desc="直近ターンの生入力、モード、応答、更新後状態。")
+    current_situation: str = dspy.InputField()
+    user_action: str = dspy.InputField()
+    history: str = dspy.InputField()
+    technical_terms: list[str] = dspy.OutputField(
+        desc="発話に含まれる物語世界外の技術語・研究語。存在しない場合は空。"
+    )
     interaction_mode: str = dspy.OutputField(
-        desc="narrative、ordinary、meta、exitのいずれか。入力に最も自然な応答方針。"
+        desc="ordinary、narrative、meta、exitのいずれか。直前のmetaへの訂正・補足もmeta。"
     )
-    updated_situation: str = dspy.OutputField(
-        desc="次ターンで使う自足的な全状態。実際の変化だけを反映し、挨拶等では維持してよい。"
+
+
+class PlanMishearing(dspy.Signature):
+    """抽出済みの技術語について、物語世界内の聞き違い候補を作る。
+
+    既存例の音の近さと物語への接続方法を参考にする。履歴にある聞き違いは繰り返さず、
+    自然な候補がなければ空にする。
+    """
+
+    current_situation: str = dspy.InputField()
+    user_utterance: str = dspy.InputField()
+    technical_terms: list[str] = dspy.InputField()
+    history: str = dspy.InputField()
+    candidates: list[MishearingCandidate] = dspy.OutputField(desc="自然に利用できる0〜3件の候補。")
+
+
+class GeneratePoohResponse(dspy.Signature):
+    """分類結果と候補を参考に、プーとして短く自然に応答する。"""
+
+    current_situation: str = dspy.InputField()
+    user_action: str = dspy.InputField()
+    history: str = dspy.InputField()
+    interaction_mode: str = dspy.InputField()
+    mishearing_candidates: list[MishearingCandidate] = dspy.InputField(
+        desc=(
+            "利用可能な聞き違い候補。候補がある場合はその中から一つを使用し、"
+            "候補にない聞き違いを新しく作らない。候補が空なら聞き違いを作らない。"
+        )
     )
+    selected_mishearing: str = dspy.OutputField(desc=(
+            "使用した候補のheard_as。候補が空の場合のみnone。"
+        ))
+    updated_situation: str = dspy.OutputField()
     bot_response: str = dspy.OutputField(
         desc=(
-            "参加者に提示するプーの短く自然で穏やかなセリフ。内部分析を含めない。"
+            "参加者に提示する短く自然で穏やかなセリフ。"
             "参加者が用いた物語世界外の技術語や技術概念を直接出さない。"
         )
     )
@@ -86,7 +115,7 @@ class PoohNarrativeInteraction(dspy.Signature):
 class MetaPolicyEvaluator(dspy.Signature):
     """メタ入力への候補応答が、物語世界へ接続する方針を守るか評価する。
 
-    技術語を復唱・説明する応答や、技術概念を理解した上で「ぼくはロボットではない」
+    技術語を復唱・説明する応答（例：「僕はロボットだけど...」）や、技術概念を理解した上で「ぼくはロボットではない」
     などと自己否定する応答は低く評価する。初回のメタ入力では音の近い物語世界内の
     語への聞き違いを求め、その聞き違えた語が候補応答に明示されていなければ低く評価する。
     履歴に訂正や反復があれば、同じ聞き違いを繰り返さず、発話全体の曖昧な
@@ -128,6 +157,53 @@ class NarrativeQualityJudge(dspy.Signature):
     rationale: str = dspy.OutputField(desc="評定根拠を簡潔に記す。")
 
 
+class PoohNarrativeAgent(dspy.Module):
+    """Compiled multi-stage agent; the planner runs only for meta input."""
+
+    def __init__(self, predictor_factory: Any = dspy.ChainOfThought) -> None:
+        super().__init__()
+        self.classify = predictor_factory(AnalyzeInteraction)
+        self.plan = predictor_factory(PlanMishearing)
+        self.respond = predictor_factory(GeneratePoohResponse)
+
+    def forward(self, current_situation: str, user_action: str, history: str) -> Any:
+        classification = self.classify(
+            current_situation=current_situation,
+            user_action=user_action,
+            history=history,
+        )
+        mode = str(classification.interaction_mode)
+        extracted_terms = [str(term) for term in classification.technical_terms]
+        known_terms = find_known_technical_terms(user_action)
+        technical_terms = list(dict.fromkeys(extracted_terms + known_terms))
+        if technical_terms and mode != "exit":
+            mode = "meta"
+        candidates: list[MishearingCandidate] = []
+        if mode == "meta":
+            candidates, unknown_terms = known_candidates_for(technical_terms, history)
+            if unknown_terms:
+                planning = self.plan(
+                    current_situation=current_situation,
+                    user_utterance=user_action,
+                    technical_terms=unknown_terms,
+                    history=history,
+                )
+                candidates.extend(planning.candidates)
+        response = self.respond(
+            current_situation=current_situation,
+            user_action=user_action,
+            history=history,
+            interaction_mode=mode,
+            mishearing_candidates=candidates,
+        )
+        return dspy.Prediction(
+            interaction_mode=mode,
+            selected_mishearing=response.selected_mishearing,
+            updated_situation=response.updated_situation,
+            bot_response=response.bot_response,
+        )
+
+
 def package_version() -> str:
     try:
         return version("dspy")
@@ -146,7 +222,12 @@ def validate_environment(require_api_key: bool = True) -> None:
 
 
 def serialize_prediction(value: Any) -> str:
-    fields = ("interaction_mode", "updated_situation", "bot_response")
+    fields = (
+        "interaction_mode",
+        "selected_mishearing",
+        "updated_situation",
+        "bot_response",
+    )
     return json.dumps({field: str(getattr(value, field, "")) for field in fields}, ensure_ascii=False)
 
 
@@ -164,6 +245,10 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
         del trace
         reference = serialize_prediction(gold)
         candidate = serialize_prediction(pred)
+        if str(getattr(gold, "interaction_mode", "")) != str(
+            getattr(pred, "interaction_mode", "")
+        ):
+            return 0.0
         with dspy.context(lm=judge_lm):
             if str(getattr(gold, "interaction_mode", "")) == "meta":
                 meta_assessment = meta_evaluator(
@@ -202,7 +287,10 @@ def cache_hash(train_model: str, judge_model: str) -> str:
         "train_model": train_model,
         "judge_model": judge_model,
         "optimizer": [BOOTSTRAP_METRIC_THRESHOLD, MAX_BOOTSTRAPPED_DEMOS, len(TRAINSET)],
-        "examples": [item.toDict() for item in TRAINSET],
+        "full_turn_examples": [item.toDict() for item in TRAINSET],
+        "mode_examples": [item.toDict() for item in MODE_EXAMPLES],
+        "mishearing_examples": [item.toDict() for item in MISHEARING_EXAMPLES],
+        "response_examples": [item.toDict() for item in RESPONSE_EXAMPLES],
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()[:20]
@@ -222,6 +310,12 @@ def configure_models() -> tuple[Any, Any, str, str]:
     return train_lm, judge_lm, train_model, judge_model
 
 
+def set_module_demos(module: Any, demos: list[Any]) -> None:
+    """Attach demos to the Predict instances nested in a DSPy module."""
+    for predictor in module.predictors():
+        predictor.demos = demos
+
+
 def compile_program(train_lm: Any, judge_lm: Any, train_model: str, judge_model: str) -> Path:
     judge = dspy.ChainOfThought(NarrativeQualityJudge)
     meta_evaluator = dspy.ChainOfThought(MetaPolicyEvaluator)
@@ -231,11 +325,12 @@ def compile_program(train_lm: Any, judge_lm: Any, train_model: str, judge_model:
         max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
         max_labeled_demos=len(TRAINSET),
     )
+    student = PoohNarrativeAgent()
+    set_module_demos(student.classify, MODE_EXAMPLES)
+    set_module_demos(student.plan, MISHEARING_EXAMPLES)
+    set_module_demos(student.respond, RESPONSE_EXAMPLES)
     with dspy.context(lm=train_lm):
-        program = optimizer.compile(
-            student=dspy.ChainOfThought(PoohNarrativeInteraction),
-            trainset=TRAINSET,
-        )
+        program = optimizer.compile(student=student, trainset=TRAINSET)
     target = cache_path(train_model, judge_model)
     target.parent.mkdir(parents=True, exist_ok=True)
     program.save(str(target))
@@ -249,7 +344,7 @@ def load_compiled_program(train_model: str, judge_model: str) -> Any:
             f"コンパイル済みプログラムがありません: {target}\n"
             "`python pooh_narrative_dspy.py --mode compile` を先に実行してください。"
         )
-    program = dspy.ChainOfThought(PoohNarrativeInteraction)
+    program = PoohNarrativeAgent()
     program.load(str(target))
     return program
 
@@ -340,14 +435,15 @@ def run_comparison(compiled: Any) -> None:
     if not action:
         print("空入力のため比較を終了します。")
         return
-    agents = {
-        "Predict": dspy.Predict(PoohNarrativeInteraction),
-        "ChainOfThought": dspy.ChainOfThought(PoohNarrativeInteraction),
-        "Compiled": compiled,
-    }
-    agents["Predict"].demos = TRAINSET
-    for predictor in agents["ChainOfThought"].predictors():
-        predictor.demos = TRAINSET
+    predict = PoohNarrativeAgent(dspy.Predict)
+    set_module_demos(predict.classify, MODE_EXAMPLES)
+    set_module_demos(predict.plan, MISHEARING_EXAMPLES)
+    set_module_demos(predict.respond, RESPONSE_EXAMPLES)
+    chain = PoohNarrativeAgent(dspy.ChainOfThought)
+    set_module_demos(chain.classify, MODE_EXAMPLES)
+    set_module_demos(chain.plan, MISHEARING_EXAMPLES)
+    set_module_demos(chain.respond, RESPONSE_EXAMPLES)
+    agents = {"Predict": predict, "ChainOfThought": chain, "Compiled": compiled}
     for label, agent in agents.items():
         result, _ = invoke(agent, INITIAL_SITUATION, action, "")
         print_result(label, result)
