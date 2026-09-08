@@ -1,0 +1,10 @@
+{
+  "name": "2026-07-narrative-chatbot",
+  "version": "1.0.0",
+  "description": "This research prototype uses DSPy to interpret a participant's open-ended speech and physical actions in relation to a shared tea-party scene.",
+  "scripts": {},
+  "private": true,
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.16.0"
+  }
+}
