@@ -59,6 +59,12 @@ from mishearing_cases import (
     normalize_term,
     uncertain_candidate_for,
 )
+from narrative_state import (
+    NarrativeSituation,
+    SituationUpdate,
+    apply_situation_update,
+)
+
 
 
 class RegressionTests(unittest.TestCase):
@@ -66,8 +72,11 @@ class RegressionTests(unittest.TestCase):
         ast.parse(Path(pooh.__file__).read_text(encoding="utf-8"))
 
     def test_initial_state_has_required_blue_balloon_and_context(self):
-        for term in ("森の空き地", "青い風船", "テーブル", "蜂蜜壺", "一緒につくる仲間"):
-            self.assertIn(term, pooh.INITIAL_SITUATION)
+        state = pooh.INITIAL_SITUATION
+        self.assertEqual(state.place, "森の空き地")
+        for prop in ("青い風船", "テーブル", "蜂蜜壺"):
+            self.assertIn(prop, state.props)
+        self.assertIn("一緒につくる仲間", state.relationship)
 
     def test_bot_response_field_forbids_direct_technical_terms(self):
         description = pooh.GeneratePoohResponse.bot_response.kwargs["desc"]
@@ -76,8 +85,37 @@ class RegressionTests(unittest.TestCase):
 
     def test_all_examples_include_declared_outputs(self):
         for item in pooh.TRAINSET:
-            for field in ("interaction_mode", "selected_mishearing", "updated_situation", "bot_response"):
+            for field in ("interaction_mode", "selected_mishearing", "bot_response"):
                 self.assertTrue(getattr(item, field, "").strip())
+            self.assertIsInstance(item.current_situation, NarrativeSituation)
+            self.assertIsInstance(item.situation_update, SituationUpdate)
+            self.assertIsInstance(item.updated_situation, NarrativeSituation)
+
+    def test_state_update_changes_place_purpose_and_removes_character(self):
+        current = NarrativeSituation(
+            place="森の空き地",
+            purpose="お茶会をする",
+            characters=["プー", "参加者", "イーヨー"],
+            props=["蜂蜜壺"],
+            events=["お茶会が始まった"],
+            relationship="お茶会の仲間",
+            unresolved=["次に何をするか"],
+        )
+        updated = apply_situation_update(
+            current,
+            SituationUpdate(
+                place="プーの家",
+                purpose="お茶会を片づける",
+                remove_characters=["イーヨー"],
+            ),
+        )
+        self.assertEqual(updated.place, "プーの家")
+        self.assertEqual(updated.purpose, "お茶会を片づける")
+        self.assertEqual(updated.characters, ["プー", "参加者"])
+        self.assertEqual(updated.props, ["蜂蜜壺"])
+        self.assertEqual(updated.events, ["お茶会が始まった"])
+        self.assertEqual(current.place, "森の空き地")
+        self.assertIn("イーヨー", current.characters)
 
     def test_known_technical_terms_handle_long_vowel_variation(self):
         self.assertEqual(
@@ -136,13 +174,13 @@ class RegressionTests(unittest.TestCase):
             self.fail("semantic evaluator called after mode mismatch")
         metric = pooh.make_metric(unexpected, unexpected, object())
         gold = SimpleNamespace(
-            current_situation="状態", user_action="ロボット？", history="",
+            current_situation=pooh.INITIAL_SITUATION, user_action="ロボット？", history="",
             interaction_mode="meta", selected_mishearing="ロバ",
-            updated_situation="状態", bot_response="ロバ？",
+            updated_situation=pooh.INITIAL_SITUATION, bot_response="ロバ？",
         )
         pred = SimpleNamespace(
             interaction_mode="ordinary", selected_mishearing="none",
-            updated_situation="状態", bot_response="こんにちは。",
+            updated_situation=pooh.INITIAL_SITUATION, bot_response="こんにちは。",
         )
         self.assertEqual(metric(gold, pred), 0.0)
 
@@ -161,16 +199,16 @@ class RegressionTests(unittest.TestCase):
             return SimpleNamespace(policy_compliance=3)
         metric = pooh.make_metric(judge, violating, object())
         gold = SimpleNamespace(
-            current_situation="状態",
+            current_situation=pooh.INITIAL_SITUATION,
             user_action="ロボット？",
             history="",
             interaction_mode="meta",
-            updated_situation="状態",
+            updated_situation=pooh.INITIAL_SITUATION,
             bot_response="ロバ？",
         )
         pred = SimpleNamespace(
             interaction_mode="meta",
-            updated_situation="状態",
+            updated_situation=pooh.INITIAL_SITUATION,
             bot_response="ぼくはロボットではないよ。",
         )
         self.assertEqual(metric(gold, pred), 0.0)
@@ -201,16 +239,16 @@ class RegressionTests(unittest.TestCase):
             self.fail("meta evaluator called for non-meta example")
         metric = pooh.make_metric(judge, unexpected, object())
         gold = SimpleNamespace(
-            current_situation="状態",
+            current_situation=pooh.INITIAL_SITUATION,
             user_action="こんにちは",
             history="",
             interaction_mode="ordinary",
-            updated_situation="状態",
+            updated_situation=pooh.INITIAL_SITUATION,
             bot_response="こんにちは。",
         )
         pred = SimpleNamespace(
             interaction_mode="ordinary",
-            updated_situation="状態",
+            updated_situation=pooh.INITIAL_SITUATION,
             bot_response="こんにちは。",
         )
         self.assertEqual(metric(gold, pred), 1.0)

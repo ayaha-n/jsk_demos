@@ -42,6 +42,12 @@ from mishearing_cases import (
     known_candidates_for,
     uncertain_candidate_for,
 )
+from narrative_state import (
+    NarrativeSituation,
+    SituationUpdate,
+    apply_situation_update,
+    coerce_situation,
+)
 from pooh_examples import (
     INITIAL_SITUATION,
     MISHEARING_EXAMPLES,
@@ -51,8 +57,8 @@ from pooh_examples import (
 )
 
 
-PROGRAM_VERSION = "pooh-multistage-v8"
-METRIC_VERSION = "mode-aware-judge-v7"
+PROGRAM_VERSION = "pooh-structured-state-v1"
+METRIC_VERSION = "structured-state-judge-v1"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
@@ -70,7 +76,7 @@ class AnalyzeInteraction(dspy.Signature):
     終了、拒否、不快、安全に関する意思はexitを優先する。
     """
 
-    current_situation: str = dspy.InputField()
+    current_situation: NarrativeSituation = dspy.InputField()
     user_action: str = dspy.InputField()
     history: str = dspy.InputField()
     technical_terms: list[str] = dspy.OutputField(
@@ -88,7 +94,7 @@ class PlanMishearing(dspy.Signature):
     自然な候補がなければ空にする。
     """
 
-    current_situation: str = dspy.InputField()
+    current_situation: NarrativeSituation = dspy.InputField()
     user_utterance: str = dspy.InputField()
     technical_terms: list[str] = dspy.InputField()
     history: str = dspy.InputField()
@@ -98,7 +104,7 @@ class PlanMishearing(dspy.Signature):
 class GeneratePoohResponse(dspy.Signature):
     """分類結果と候補を参考に、プーとして短く自然に応答する。"""
 
-    current_situation: str = dspy.InputField()
+    current_situation: NarrativeSituation = dspy.InputField()
     user_action: str = dspy.InputField()
     history: str = dspy.InputField()
     interaction_mode: str = dspy.InputField()
@@ -111,7 +117,12 @@ class GeneratePoohResponse(dspy.Signature):
     selected_mishearing: str = dspy.OutputField(desc=(
             "使用した候補のheard_as。候補が空の場合のみnone。"
         ))
-    updated_situation: str = dspy.OutputField()
+    situation_update: SituationUpdate = dspy.OutputField(
+        desc=(
+            "このターンで実際に生じた差分だけ。変更しない項目はnullまたは空リスト。"
+            "現在状態の保持と差分の適用はPythonが行う。"
+        )
+    )
     bot_response: str = dspy.OutputField(
         desc=(
             "参加者に提示する短く自然で穏やかなセリフ。"
@@ -156,7 +167,7 @@ class MetaPolicyEvaluator(dspy.Signature):
 class NarrativeQualityJudge(dspy.Signature):
     """候補が分類とモード別の設計原則を満たす度合いを1〜5で評価する。"""
 
-    current_situation: str = dspy.InputField()
+    current_situation: NarrativeSituation = dspy.InputField()
     user_action: str = dspy.InputField()
     history: str = dspy.InputField()
     reference_output: str = dspy.InputField()
@@ -190,7 +201,13 @@ class PoohNarrativeAgent(dspy.Module):
         self.plan = predictor_factory(PlanMishearing)
         self.respond = predictor_factory(GeneratePoohResponse)
 
-    def forward(self, current_situation: str, user_action: str, history: str) -> Any:
+    def forward(
+        self,
+        current_situation: NarrativeSituation | dict[str, Any],
+        user_action: str,
+        history: str,
+    ) -> Any:
+        current_situation = coerce_situation(current_situation)
         classification = self.classify(
             current_situation=current_situation,
             user_action=user_action,
@@ -228,6 +245,8 @@ class PoohNarrativeAgent(dspy.Module):
             interaction_mode=mode,
             mishearing_candidates=candidates,
         )
+        situation_update = SituationUpdate.model_validate(response.situation_update)
+        updated_situation = apply_situation_update(current_situation, situation_update)
         selected_mishearing = response.selected_mishearing
         bot_response = response.bot_response
         uses_uncertain_candidate = any(
@@ -248,7 +267,8 @@ class PoohNarrativeAgent(dspy.Module):
         return dspy.Prediction(
             interaction_mode=mode,
             selected_mishearing=selected_mishearing,
-            updated_situation=response.updated_situation,
+            situation_update=situation_update,
+            updated_situation=updated_situation,
             bot_response=bot_response,
         )
 
@@ -274,10 +294,17 @@ def serialize_prediction(value: Any) -> str:
     fields = (
         "interaction_mode",
         "selected_mishearing",
-        "updated_situation",
+        "situation_update",
         "bot_response",
     )
-    return json.dumps({field: str(getattr(value, field, "")) for field in fields}, ensure_ascii=False)
+    payload = {}
+    for field in fields:
+        item = getattr(value, field, "")
+        payload[field] = item.model_dump() if hasattr(item, "model_dump") else item
+    updated = getattr(value, "updated_situation", None)
+    if updated is not None:
+        payload["updated_situation"] = coerce_situation(updated).model_dump()
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 def clamp_score(value: Any) -> int:
@@ -310,7 +337,7 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
                 if clamp_score(meta_assessment.policy_compliance) < 4:
                     return 0.0
             assessment = judge(
-                current_situation=str(getattr(gold, "current_situation", "")),
+                current_situation=coerce_situation(getattr(gold, "current_situation")),
                 user_action=str(getattr(gold, "user_action", "")),
                 history=str(getattr(gold, "history", "")),
                 reference_output=reference,
@@ -434,7 +461,7 @@ class Turn:
     user_action: str
     interaction_mode: str
     bot_response: str
-    updated_situation: str
+    updated_situation: NarrativeSituation
 
 
 def format_history(turns: list[Turn], max_turns: int = 6) -> str:
@@ -453,11 +480,12 @@ def format_history(turns: list[Turn], max_turns: int = 6) -> str:
 def append_log(path: Path, turn: Turn, metadata: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {**metadata, "timestamp": datetime.now(timezone.utc).isoformat(), **asdict(turn)}
+    record["updated_situation"] = turn.updated_situation.model_dump()
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def invoke(agent: Any, situation: str, action: str, history: str) -> tuple[Any, float]:
+def invoke(agent: Any, situation: NarrativeSituation, action: str, history: str) -> tuple[Any, float]:
     started = time.perf_counter()
     result = agent(current_situation=situation, user_action=action, history=history)
     return result, (time.perf_counter() - started) * 1000

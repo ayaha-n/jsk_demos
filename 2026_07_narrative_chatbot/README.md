@@ -200,7 +200,8 @@ The current regression tests verify that:
 
 - The initial state includes the required location, props, and participant role.
 - Every example contains all declared output fields.
-- History retains the raw action, inferred intent, interpretation, response, and updated state.
+- History retains the raw action, interaction mode, response, and updated structured state.
+- State deltas can update place and purpose, add or remove characters, and preserve untouched fields.
 - Changing either model changes the compiled-program identifier.
 - Judge scores are bounded between 1 and 5.
 
@@ -208,17 +209,16 @@ Testing actual model-output quality, state retention across generated turns, and
 
 ## State and History
 
-After each turn, the generated `updated_situation` becomes the next turn's `current_situation`.
+After each turn, the LLM generates a structured `situation_update`. Python applies that delta to a deep copy of `current_situation`, producing the complete `updated_situation` used by the next turn.
 
 The recent-turn history retains:
 
 - Raw participant speech or action
-- Inferred participant intent
-- Narrative interpretation
+- Selected interaction mode
 - Pooh's response
 - Updated situation
 
-The updated situation is designed to be self-contained rather than a short description of only what changed.
+The application stores a complete structured situation. The LLM outputs only the fields that changed; Python preserves every untouched field when applying the update.
 
 ## Logs and Caches
 
