@@ -115,6 +115,27 @@ Activate the virtual environment before running any command:
 source .venv/bin/activate
 ```
 
+### Scenarios
+
+The agent, mishearing gimmick, and evaluators are shared across scenarios; only
+the initial `NarrativeSituation` and full-turn examples change per scenario.
+Available scenarios are registered in `scenarios.py`:
+
+| `--scenario` | Content |
+|---|---|
+| `tea_party` (default) | Open-ended tea party with Pooh (`pooh_examples.py`) |
+| `eeyore_birthday` | Eeyore-birthday-gift arc, with lines from the original story (`pooh_eeyore_examples.py`) |
+
+Each scenario is compiled and cached separately, so compile the scenario you
+intend to chat with before starting a session:
+
+```bash
+python pooh_narrative_dspy.py --mode compile --scenario eeyore_birthday
+python pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday
+```
+
+Omitting `--scenario` uses `tea_party`.
+
 ### Compile the DSPy program
 
 Compile the program before the first chat session and after changing the examples, metric, or model configuration:
@@ -256,7 +277,9 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 ├── CODEX_INSTRUCTIONS_POOH_DSPY.md  # Research and implementation requirements
 ├── README.md                         # Setup and usage
 ├── mishearing_cases.py               # Reviewed mishearings and term normalization
-├── pooh_examples.py                  # Full-turn and task-specific DSPy examples
+├── pooh_examples.py                  # Tea-party scenario: full-turn and task-specific examples
+├── pooh_eeyore_examples.py           # Eeyore-birthday scenario: full-turn examples
+├── scenarios.py                      # Scenario registry used by --scenario
 ├── pooh_narrative_dspy.py            # Main DSPy program
 ├── requirements.txt                  # Python dependencies
 └── test_pooh_narrative_dspy.py       # Regression tests without LLM calls

@@ -279,34 +279,44 @@ MISHEARING_EXAMPLES = [
 ]
 
 
-MODE_EXAMPLES = [
-    dspy.Example(
-        current_situation=item.current_situation,
-        user_action=item.user_action,
-        history=item.history,
-        technical_terms=_technical_terms_for(item),
-        interaction_mode=item.interaction_mode,
-    ).with_inputs("current_situation", "user_action", "history")
-    for item in TRAINSET
-]
+def build_mode_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
+    """Derive AnalyzeInteraction examples from any scenario's full-turn trainset."""
+    return [
+        dspy.Example(
+            current_situation=item.current_situation,
+            user_action=item.user_action,
+            history=item.history,
+            technical_terms=_technical_terms_for(item),
+            interaction_mode=item.interaction_mode,
+        ).with_inputs("current_situation", "user_action", "history")
+        for item in trainset
+    ]
 
 
-RESPONSE_EXAMPLES = [
-    dspy.Example(
-        current_situation=item.current_situation,
-        user_action=item.user_action,
-        history=item.history,
-        interaction_mode=item.interaction_mode,
-        mishearing_candidates=_candidates_for(item),
-        selected_mishearing=item.selected_mishearing,
-        situation_update=item.situation_update,
-        bot_response=item.bot_response,
-    ).with_inputs(
-        "current_situation",
-        "user_action",
-        "history",
-        "interaction_mode",
-        "mishearing_candidates",
-    )
-    for item in TRAINSET
-]
+def build_response_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
+    """Derive GeneratePoohResponse examples from any scenario's full-turn trainset."""
+    return [
+        dspy.Example(
+            current_situation=item.current_situation,
+            user_action=item.user_action,
+            history=item.history,
+            interaction_mode=item.interaction_mode,
+            mishearing_candidates=_candidates_for(item),
+            selected_mishearing=item.selected_mishearing,
+            situation_update=item.situation_update,
+            bot_response=item.bot_response,
+        ).with_inputs(
+            "current_situation",
+            "user_action",
+            "history",
+            "interaction_mode",
+            "mishearing_candidates",
+        )
+        for item in trainset
+    ]
+
+
+MODE_EXAMPLES = build_mode_examples(TRAINSET)
+
+
+RESPONSE_EXAMPLES = build_response_examples(TRAINSET)

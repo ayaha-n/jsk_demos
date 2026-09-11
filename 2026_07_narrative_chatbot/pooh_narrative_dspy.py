@@ -55,6 +55,7 @@ from pooh_examples import (
     RESPONSE_EXAMPLES,
     TRAINSET,
 )
+from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
 PROGRAM_VERSION = "pooh-structured-state-v1"
@@ -355,30 +356,32 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
     return metric
 
 
-def cache_hash(train_model: str, judge_model: str) -> str:
+def cache_hash(train_model: str, judge_model: str, scenario: Scenario | None = None) -> str:
+    scenario = scenario or get_scenario(DEFAULT_SCENARIO)
     payload = {
         "program_version": PROGRAM_VERSION,
         "metric_version": METRIC_VERSION,
         "dspy_version": EXPECTED_DSPY_VERSION,
         "train_model": train_model,
         "judge_model": judge_model,
+        "scenario": scenario.key,
         "optimizer": [
             BOOTSTRAP_METRIC_THRESHOLD,
             MAX_BOOTSTRAPPED_DEMOS,
             MAX_LABELED_DEMOS,
             "merge_stage_demos_v1",
         ],
-        "full_turn_examples": [item.toDict() for item in TRAINSET],
-        "mode_examples": [item.toDict() for item in MODE_EXAMPLES],
-        "mishearing_examples": [item.toDict() for item in MISHEARING_EXAMPLES],
-        "response_examples": [item.toDict() for item in RESPONSE_EXAMPLES],
+        "full_turn_examples": [item.toDict() for item in scenario.trainset],
+        "mode_examples": [item.toDict() for item in scenario.mode_examples],
+        "mishearing_examples": [item.toDict() for item in scenario.mishearing_examples],
+        "response_examples": [item.toDict() for item in scenario.response_examples],
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()[:20]
 
 
-def cache_path(train_model: str, judge_model: str) -> Path:
-    return CACHE_DIR / f"pooh_{cache_hash(train_model, judge_model)}.json"
+def cache_path(train_model: str, judge_model: str, scenario: Scenario | None = None) -> Path:
+    return CACHE_DIR / f"pooh_{cache_hash(train_model, judge_model, scenario)}.json"
 
 
 def configure_models() -> tuple[Any, Any, str, str]:
@@ -397,11 +400,11 @@ def set_module_demos(module: Any, demos: list[Any]) -> None:
         predictor.demos = demos
 
 
-def set_agent_demos(agent: Any) -> None:
+def set_agent_demos(agent: Any, scenario: Scenario) -> None:
     """Give each teacher Predictor only its task-specific examples."""
-    set_module_demos(agent.classify, MODE_EXAMPLES)
-    set_module_demos(agent.plan, MISHEARING_EXAMPLES)
-    set_module_demos(agent.respond, RESPONSE_EXAMPLES)
+    set_module_demos(agent.classify, scenario.mode_examples)
+    set_module_demos(agent.plan, scenario.mishearing_examples)
+    set_module_demos(agent.respond, scenario.response_examples)
 
 
 def merge_module_demos(module: Any, labeled_demos: list[Any]) -> None:
@@ -412,14 +415,16 @@ def merge_module_demos(module: Any, labeled_demos: list[Any]) -> None:
         predictor.demos = bootstrapped + labeled_demos[:remaining]
 
 
-def merge_agent_demos(agent: Any) -> None:
+def merge_agent_demos(agent: Any, scenario: Scenario) -> None:
     """Merge accepted traces with examples matching each Predictor schema."""
-    merge_module_demos(agent.classify, MODE_EXAMPLES)
-    merge_module_demos(agent.plan, MISHEARING_EXAMPLES)
-    merge_module_demos(agent.respond, RESPONSE_EXAMPLES)
+    merge_module_demos(agent.classify, scenario.mode_examples)
+    merge_module_demos(agent.plan, scenario.mishearing_examples)
+    merge_module_demos(agent.respond, scenario.response_examples)
 
 
-def compile_program(train_lm: Any, judge_lm: Any, train_model: str, judge_model: str) -> Path:
+def compile_program(
+    train_lm: Any, judge_lm: Any, train_model: str, judge_model: str, scenario: Scenario
+) -> Path:
     judge = dspy.ChainOfThought(NarrativeQualityJudge)
     meta_evaluator = dspy.ChainOfThought(MetaPolicyEvaluator)
     optimizer = BootstrapFewShot(
@@ -430,26 +435,27 @@ def compile_program(train_lm: Any, judge_lm: Any, train_model: str, judge_model:
     )
     student = PoohNarrativeAgent()
     teacher = PoohNarrativeAgent()
-    set_agent_demos(teacher)
+    set_agent_demos(teacher, scenario)
     with dspy.context(lm=train_lm):
         program = optimizer.compile(
             student=student,
             teacher=teacher,
-            trainset=TRAINSET,
+            trainset=scenario.trainset,
         )
-    merge_agent_demos(program)
-    target = cache_path(train_model, judge_model)
+    merge_agent_demos(program, scenario)
+    target = cache_path(train_model, judge_model, scenario)
     target.parent.mkdir(parents=True, exist_ok=True)
     program.save(str(target))
     return target
 
 
-def load_compiled_program(train_model: str, judge_model: str) -> Any:
-    target = cache_path(train_model, judge_model)
+def load_compiled_program(train_model: str, judge_model: str, scenario: Scenario) -> Any:
+    target = cache_path(train_model, judge_model, scenario)
     if not target.exists():
         raise FileNotFoundError(
             f"コンパイル済みプログラムがありません: {target}\n"
-            "`python pooh_narrative_dspy.py --mode compile` を先に実行してください。"
+            "`python pooh_narrative_dspy.py --mode compile"
+            f" --scenario {scenario.key}` を先に実行してください。"
         )
     program = PoohNarrativeAgent()
     program.load(str(target))
@@ -498,12 +504,12 @@ def print_result(label: str, result: Any) -> None:
     print(f"プー: {result.bot_response}")
 
 
-def run_chat(agent: Any, model_name: str, program_id: str) -> None:
-    current_situation = INITIAL_SITUATION
+def run_chat(agent: Any, model_name: str, program_id: str, scenario: Scenario) -> None:
+    current_situation = scenario.initial_situation
     turns: list[Turn] = []
     session = datetime.now().strftime("%Y%m%dT%H%M%S")
     log_path = LOG_DIR / f"session_{session}.jsonl"
-    print("プーとのお茶会")
+    print(f"シナリオ: {scenario.label}")
     print(current_situation)
     print("\nプー: 今日は来てくれて、ありがとう。今からお茶会をするところなんだ。")
     print("終了するには exit と入力してください。")
@@ -531,35 +537,42 @@ def run_chat(agent: Any, model_name: str, program_id: str) -> None:
         append_log(
             log_path,
             turn,
-            {"model": model_name, "program_id": program_id, "latency_ms": round(latency_ms, 1)},
+            {
+                "model": model_name,
+                "program_id": program_id,
+                "scenario": scenario.key,
+                "latency_ms": round(latency_ms, 1),
+            },
         )
         if result.interaction_mode == "exit":
             return
     print("プー: またね。いっしょに過ごせて、うれしかったよ。")
 
 
-def run_comparison(compiled: Any) -> None:
+def run_comparison(compiled: Any, scenario: Scenario) -> None:
     action = input("比較する発話・行為: ").strip()
     if not action:
         print("空入力のため比較を終了します。")
         return
     predict = PoohNarrativeAgent(dspy.Predict)
-    set_module_demos(predict.classify, MODE_EXAMPLES)
-    set_module_demos(predict.plan, MISHEARING_EXAMPLES)
-    set_module_demos(predict.respond, RESPONSE_EXAMPLES)
+    set_agent_demos(predict, scenario)
     chain = PoohNarrativeAgent(dspy.ChainOfThought)
-    set_module_demos(chain.classify, MODE_EXAMPLES)
-    set_module_demos(chain.plan, MISHEARING_EXAMPLES)
-    set_module_demos(chain.respond, RESPONSE_EXAMPLES)
+    set_agent_demos(chain, scenario)
     agents = {"Predict": predict, "ChainOfThought": chain, "Compiled": compiled}
     for label, agent in agents.items():
-        result, _ = invoke(agent, INITIAL_SITUATION, action, "")
+        result, _ = invoke(agent, scenario.initial_situation, action, "")
         print_result(label, result)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("chat", "compile", "compare"), default="chat")
+    parser.add_argument(
+        "--scenario",
+        choices=sorted(SCENARIOS),
+        default=DEFAULT_SCENARIO,
+        help="使用する物語シナリオ。",
+    )
     return parser.parse_args()
 
 
@@ -567,16 +580,17 @@ def main() -> int:
     args = parse_args()
     try:
         validate_environment()
+        scenario = get_scenario(args.scenario)
         train_lm, judge_lm, train_model, judge_model = configure_models()
         if args.mode == "compile":
-            target = compile_program(train_lm, judge_lm, train_model, judge_model)
+            target = compile_program(train_lm, judge_lm, train_model, judge_model, scenario)
             print(f"コンパイル済みプログラムを保存しました: {target}")
             return 0
-        compiled = load_compiled_program(train_model, judge_model)
+        compiled = load_compiled_program(train_model, judge_model, scenario)
         if args.mode == "compare":
-            run_comparison(compiled)
+            run_comparison(compiled, scenario)
         else:
-            run_chat(compiled, train_model, cache_hash(train_model, judge_model))
+            run_chat(compiled, train_model, cache_hash(train_model, judge_model, scenario), scenario)
         return 0
     except Exception as exc:
         # APIキーやLMリクエスト本文を含む可能性のある詳細tracebackは表示しない。
