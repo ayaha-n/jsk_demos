@@ -530,11 +530,21 @@ def invoke(agent: Any, situation: NarrativeSituation, action: str, history: str)
     return result, (time.perf_counter() - started) * 1000
 
 
+_COLOR_ENABLED = sys.stdout.isatty()
+_ANSI_RESET = "\033[0m" if _COLOR_ENABLED else ""
+_ANSI_POOH = "\033[33m" if _COLOR_ENABLED else ""  # yellow
+_ANSI_PARTICIPANT = "\033[36m" if _COLOR_ENABLED else ""  # cyan
+
+
+def pooh_line(text: str) -> str:
+    return f"{_ANSI_POOH}プー: {text}{_ANSI_RESET}"
+
+
 def print_result(label: str, result: Any) -> None:
     print(f"\n--- {label} ---")
     print(f"[応答モード] {result.interaction_mode}")
     print(f"[場面の更新] {result.updated_situation}")
-    print(f"プー: {result.bot_response}")
+    print(pooh_line(result.bot_response))
 
 
 def run_chat(agent: Any, model_name: str, program_id: str, scenario: Scenario) -> None:
@@ -544,13 +554,14 @@ def run_chat(agent: Any, model_name: str, program_id: str, scenario: Scenario) -
     log_path = LOG_DIR / f"session_{session}.jsonl"
     print(f"シナリオ: {scenario.label}")
     print(current_situation)
-    print(f"\nプー: {scenario.opening_line}")
+    print(f"\n{pooh_line(scenario.opening_line)}")
     print("終了するには exit と入力してください。")
     while True:
         try:
-            user_input = input("\nあなたの発話・行為: ").strip()
+            user_input = input(f"\n{_ANSI_PARTICIPANT}あなたの発話・行為: ").strip()
+            print(_ANSI_RESET, end="")
         except (EOFError, KeyboardInterrupt):
-            print()
+            print(_ANSI_RESET)
             break
         if user_input.lower() == "exit":
             break
@@ -579,7 +590,7 @@ def run_chat(agent: Any, model_name: str, program_id: str, scenario: Scenario) -
         )
         if result.interaction_mode == "exit":
             return
-    print("プー: またね。いっしょに過ごせて、うれしかったよ。")
+    print(pooh_line("またね。いっしょに過ごせて、うれしかったよ。"))
 
 
 def run_comparison(compiled: Any, scenario: Scenario) -> None:
