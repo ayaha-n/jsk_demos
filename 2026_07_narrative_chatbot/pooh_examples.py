@@ -33,6 +33,13 @@ def example(*, situation_update: SituationUpdate | None = None, **values: Any) -
     return dspy.Example(**values).with_inputs("current_situation", "user_action", "history")
 
 
+def example_variants(*, user_action: list[str], **values: Any) -> list[dspy.Example]:
+    """Build one full-turn example per user_action phrasing, sharing the same
+    situation/history/response. Use this when several wordings should trigger
+    the same intended answer, instead of duplicating a whole example() call."""
+    return [example(user_action=variant, **values) for variant in user_action]
+
+
 TRAINSET = [
     example(
         current_situation=INITIAL_SITUATION,

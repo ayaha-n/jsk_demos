@@ -8,7 +8,12 @@ multiple named participants).
 """
 
 from narrative_state import NarrativeSituation, SituationUpdate
-from pooh_examples import build_mode_examples, build_response_examples, example
+from pooh_examples import (
+    build_mode_examples,
+    build_response_examples,
+    example,
+    example_variants,
+)
 
 
 _TURN1_BOT_RESPONSE = (
@@ -24,7 +29,7 @@ EEYORE_BIRTHDAY_SITUATION = NarrativeSituation(
     place="100エーカーの森の空き地",
     purpose="プーと参加者が、イーヨーの誕生日プレゼントを一緒に考える",
     characters=["プー", "参加者", "イーヨー"],
-    props=["テーブル", "カップ", "皿", "蜂蜜壺"],
+    props=["テーブル", "カップ", "皿", "蜂蜜壺", "いろいろな色の風船"],
     events=[
         "今日はイーヨーの誕生日で、プーはまだ何も用意していない",
         "プーがイーヨーに会ってきたことを話した",
@@ -83,7 +88,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         situation_update=SituationUpdate(
-            add_props=["参加者の風船"],
+            add_props=["参加者が選んだ風船"],
             add_events=["参加者が風船をイーヨーに贈ることにした"],
             relationship="参加者はプーと一緒に贈り物を用意する仲間",
             remove_unresolved=["参加者が何をあげるか"],
@@ -92,12 +97,13 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response=_TURN3_BOT_RESPONSE,
     ),
     # 場面2の代替：ハチミツ・つぼの話が出る前に、参加者の提案だけで贈り物が決まった場合
-    # （場面の順序は可変。この場合もプー自身の意見を求められたら聞き返さず自分の考えで答える）
-    example(
+    # （場面の順序は可変。この場合もプー自身の意見を求められたら聞き返さず自分の考えで答える。
+    # 言い回し違いの複数user_actionから同じ想定応答のexampleをまとめて生成する）
+    *example_variants(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーと参加者がイーヨーに風船を贈ることに決めた",
-                "props": [*EEYORE_BIRTHDAY_SITUATION.props, "参加者の風船"],
+                "props": [*EEYORE_BIRTHDAY_SITUATION.props, "参加者が選んだ風船"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     "参加者が風船を贈り物として提案し、プーがそれに決めた",
@@ -107,7 +113,10 @@ EEYORE_BIRTHDAY_TRAINSET = [
             },
             deep=True,
         ),
-        user_action="そうだね。他に案はある？",
+        user_action=[
+            "そうだね。他に案はある？",
+            "プーからは何をプレゼントするの？",
+        ],
         history=(
             "Turn 2\n参加者の生入力: 風船はどうかな\n応答モード: narrative\n"
             f"プーの応答: {_TURN3_BOT_RESPONSE}"
@@ -121,7 +130,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーがハチミツの入った壺をイーヨーに贈ることに決め、参加者も贈り物を考えている",
-                "props": ["テーブル", "カップ", "皿", "蜂蜜壺", "参加者の風船"],
+                "props": ["テーブル", "カップ", "皿", "蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     "プーがハチミツの入った壺をイーヨーに贈ることに決めた",
@@ -145,12 +154,12 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         bot_response=_TURN4_BOT_RESPONSE,
     ),
-    # 場面4：ハチミツを食べてしまった（参加者の風船をエコーバック）
+    # 場面4：ハチミツを食べてしまった（参加者が選んだ風船をエコーバック）
     example(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーがハチミツの入った壺をイーヨーに贈ることに決め、参加者も贈り物を考えている",
-                "props": ["テーブル", "カップ", "皿", "蜂蜜壺", "参加者の風船"],
+                "props": ["テーブル", "カップ", "皿", "蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     "プーがハチミツの入った壺をイーヨーに贈ることに決めた",
@@ -173,7 +182,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             add_props=["空になった蜂蜜壺"],
             add_events=[
                 "プーが用意していたハチミツを食べてしまった",
-                "プーが参加者の風船の準備を思い出した",
+                "プーが、この壺をイーヨーに贈ると決めていたことを思い出した",
             ],
             remove_unresolved=["ハチミツの準備をどう進めるか"],
             add_unresolved=["イーヨーへの新しいプレゼントをどうするか"],
@@ -185,13 +194,13 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーはハチミツを食べてしまい、新しい贈り物を探している",
-                "props": ["テーブル", "カップ", "皿", "参加者の風船", "空になった蜂蜜壺"],
+                "props": ["テーブル", "カップ", "皿", "いろいろな色の風船", "参加者が選んだ風船", "空になった蜂蜜壺"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     "プーがハチミツの入った壺をイーヨーに贈ることに決めた",
                     "参加者が風船をイーヨーに贈ることにした",
                     "プーが用意していたハチミツを食べてしまった",
-                    "プーが参加者の風船の準備を思い出した",
+                    "プーが、この壺をイーヨーに贈ると決めていたことを思い出した",
                 ],
                 "relationship": "参加者はプーと一緒に贈り物を用意する仲間",
                 "unresolved": ["イーヨーへの新しいプレゼントをどうするか"],
@@ -221,13 +230,13 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーが空になった蜂蜜壺をイーヨーへの贈り物にすることに決めた",
-                "props": ["テーブル", "カップ", "皿", "参加者の風船", "空になった蜂蜜壺"],
+                "props": ["テーブル", "カップ", "皿", "いろいろな色の風船", "参加者が選んだ風船", "空になった蜂蜜壺"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     "プーがハチミツの入った壺をイーヨーに贈ることに決めた",
                     "参加者が風船をイーヨーに贈ることにした",
                     "プーが用意していたハチミツを食べてしまった",
-                    "プーが参加者の風船の準備を思い出した",
+                    "プーが、この壺をイーヨーに贈ると決めていたことを思い出した",
                     "参加者が空の壺を贈り物にする案を出した",
                     "プーは壺を贈ることに決めた",
                 ],
