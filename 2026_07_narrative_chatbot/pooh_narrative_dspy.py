@@ -75,6 +75,12 @@ class AnalyzeInteraction(dspy.Signature):
     物語世界内の食事や行為と組み合わされた質問でも、技術的な前提を含めばmetaとする。
     直前のmetaへの訂正、言い換え、補足もmetaを維持する。
     終了、拒否、不快、安全に関する意思はexitを優先する。
+    場面の場所・小道具・登場人物・目的、これまでのやり取りで積み重なった出来事、
+    または原作（他のクマのプーさんの話）にあるプーの過去のエピソードに関わる発話や
+    身体的行為はnarrativeとする。
+    挨拶、相槌、間投詞、「これでいい？」「続けてもいい？」のような進行確認など、
+    物語世界の出来事を伴わない発話だけをordinaryとする。
+    判断に迷う場合はordinaryではなくnarrativeを優先する。
     """
 
     current_situation: NarrativeSituation = dspy.InputField()
@@ -103,7 +109,16 @@ class PlanMishearing(dspy.Signature):
 
 
 class GeneratePoohResponse(dspy.Signature):
-    """分類結果と候補を参考に、プーとして短く自然に応答する。"""
+    """分類結果と候補を参考に、プーとして短く自然に応答する。
+
+    プー自身の好み・考え・次にしたいことは、プー自身が決める。参加者自身の考えや行動を
+    尋ねるのは良い（例:「きみは何をあげる？」）が、
+    プー自身が決めるべきことについて参加者に委ねてはいけない（例:「きみはどう思う？」）。
+    参加者が尋ねたことを、答えずにそのまま聞き返してもいけない
+    （例：「どんなお菓子があるの？」→「どんなお菓子が良いかな」）。
+    毎回、応答の最後を問いかけで締めくくる必要はない。自分の考えや感想だけで
+    終えてよい。直前や直近の応答と同じ、または似た問いかけを繰り返さない。
+    """
 
     current_situation: NarrativeSituation = dspy.InputField()
     user_action: str = dspy.InputField()
@@ -130,6 +145,9 @@ class GeneratePoohResponse(dspy.Signature):
             "物語世界外の技術語全体を直接出さない。"
             "不確かな短い音の候補があれば、その音を使って不理解を示す。"
             "理解したような肯定、説明、自己同定をしない。"
+            "プー自身の好み・考え・次にしたいことを参加者に決めさせない。"
+            "参加者の質問を答えずにそのまま聞き返さない。"
+            "毎回問いかけで終える必要はない。直近の応答と同じ・似た問いかけを繰り返さない。"
         )
     )
 
@@ -177,8 +195,20 @@ class NarrativeQualityJudge(dspy.Signature):
     response_fit: int = dspy.OutputField(
         desc="ordinaryを過剰に物語化せず、metaの聞き違い方針とexitを守るなど、モードへの適合度。1〜5。"
     )
-    narrative_coherence: int = dspy.OutputField(desc="必要な場合の物語的一貫性。1〜5。")
+    narrative_coherence: int = dspy.OutputField(
+        desc=(
+            "必要な場合の物語的一貫性。場面の進む順序が会話例と異なっても構わないが、"
+            "まだ成立していない前提を成立したことにしていないかを含めて評価する。1〜5。"
+        )
+    )
     participant_agency: int = dspy.OutputField(desc="参加者の行為主体性。1〜5。")
+    pooh_agency: int = dspy.OutputField(
+        desc=(
+            "プー自身が自分の好み・考え・次にしたいことを持ち、決定の主体を参加者へ"
+            "委ねていないか。参加者の質問を答えずにそのまま聞き返していないか。"
+            "参加者自身の考えや行動を尋ねることは減点しない。1〜5。"
+        )
+    )
     state_quality: int = dspy.OutputField(desc="状態更新の自足性と保持品質。1〜5。")
     rationale: str = dspy.OutputField(desc="評定根拠を簡潔に記す。")
 
@@ -344,11 +374,14 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
                 reference_output=reference,
                 candidate_output=candidate,
             )
+        if clamp_score(assessment.pooh_agency) < 4:
+            return 0.0
         scores = [
             clamp_score(assessment.mode_accuracy),
             clamp_score(assessment.response_fit),
             clamp_score(assessment.narrative_coherence),
             clamp_score(assessment.participant_agency),
+            clamp_score(assessment.pooh_agency),
             clamp_score(assessment.state_quality),
         ]
         return sum(scores) / (5 * len(scores))

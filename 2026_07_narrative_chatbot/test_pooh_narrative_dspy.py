@@ -190,6 +190,7 @@ class RegressionTests(unittest.TestCase):
             response_fit=5,
             narrative_coherence=5,
             participant_agency=5,
+            pooh_agency=5,
             state_quality=5,
         )
         judge = lambda **kwargs: scores
@@ -232,6 +233,7 @@ class RegressionTests(unittest.TestCase):
             response_fit=5,
             narrative_coherence=5,
             participant_agency=5,
+            pooh_agency=5,
             state_quality=5,
         )
         judge = lambda **kwargs: scores
