@@ -8,6 +8,9 @@ from mishearing_cases import candidate_for
 from narrative_state import NarrativeSituation, SituationUpdate, apply_situation_update
 
 
+TEA_PARTY_OPENING_LINE = "今日は来てくれて、ありがとう。今からお茶会をするところなんだ。"
+
+
 INITIAL_SITUATION = NarrativeSituation(
     place="森の空き地",
     purpose="プーと参加者が、お茶会を一緒につくりながら過ごす",

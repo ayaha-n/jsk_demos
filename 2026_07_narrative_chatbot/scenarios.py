@@ -21,6 +21,7 @@ class Scenario:
     key: str
     label: str
     initial_situation: NarrativeSituation
+    opening_line: str
     trainset: list[dspy.Example]
     mode_examples: list[dspy.Example]
     mishearing_examples: list[dspy.Example]
@@ -33,6 +34,7 @@ def _tea_party() -> Scenario:
         MISHEARING_EXAMPLES,
         MODE_EXAMPLES,
         RESPONSE_EXAMPLES,
+        TEA_PARTY_OPENING_LINE,
         TRAINSET,
     )
 
@@ -40,6 +42,7 @@ def _tea_party() -> Scenario:
         key="tea_party",
         label="森のお茶会",
         initial_situation=INITIAL_SITUATION,
+        opening_line=TEA_PARTY_OPENING_LINE,
         trainset=TRAINSET,
         mode_examples=MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,
@@ -50,6 +53,7 @@ def _tea_party() -> Scenario:
 def _eeyore_birthday() -> Scenario:
     from pooh_eeyore_examples import (
         EEYORE_BIRTHDAY_MODE_EXAMPLES,
+        EEYORE_BIRTHDAY_OPENING_LINE,
         EEYORE_BIRTHDAY_RESPONSE_EXAMPLES,
         EEYORE_BIRTHDAY_SITUATION,
         EEYORE_BIRTHDAY_TRAINSET,
@@ -60,6 +64,7 @@ def _eeyore_birthday() -> Scenario:
         key="eeyore_birthday",
         label="イーヨーの誕生日プレゼント",
         initial_situation=EEYORE_BIRTHDAY_SITUATION,
+        opening_line=EEYORE_BIRTHDAY_OPENING_LINE,
         trainset=EEYORE_BIRTHDAY_TRAINSET,
         mode_examples=EEYORE_BIRTHDAY_MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,

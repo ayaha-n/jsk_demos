@@ -511,7 +511,7 @@ def run_chat(agent: Any, model_name: str, program_id: str, scenario: Scenario) -
     log_path = LOG_DIR / f"session_{session}.jsonl"
     print(f"シナリオ: {scenario.label}")
     print(current_situation)
-    print("\nプー: 今日は来てくれて、ありがとう。今からお茶会をするところなんだ。")
+    print(f"\nプー: {scenario.opening_line}")
     print("終了するには exit と入力してください。")
     while True:
         try:
