@@ -92,6 +92,13 @@ class AnalyzeInteraction(dspy.Signature):
     interaction_mode: str = dspy.OutputField(
         desc="ordinary、narrative、meta、exitのいずれか。直前のmetaへの訂正・補足もmeta。"
     )
+    current_scene: str = dspy.OutputField(
+        desc=(
+            "デバッグ用。会話例に場面ラベル（例:「場面1」「場面2の代替」）が付いている"
+            "シナリオでは、今回の展開が最も近い場面のラベルを返す。実際の応答生成や"
+            "状態更新には使わない。参考にできる場面ラベルがない場合は空文字列。"
+        )
+    )
 
 
 class PlanMishearing(dspy.Signature):
@@ -237,6 +244,7 @@ class PoohNarrativeAgent(dspy.Module):
         current_situation: NarrativeSituation | dict[str, Any],
         user_action: str,
         history: str,
+        previous_scene: str = "",
     ) -> Any:
         current_situation = coerce_situation(current_situation)
         classification = self.classify(
@@ -245,6 +253,7 @@ class PoohNarrativeAgent(dspy.Module):
             history=history,
         )
         mode = str(classification.interaction_mode)
+        current_scene = str(classification.current_scene)
         extracted_terms = [str(term) for term in classification.technical_terms]
         known_terms = find_known_technical_terms(user_action)
         technical_terms = list(dict.fromkeys(extracted_terms + known_terms))
