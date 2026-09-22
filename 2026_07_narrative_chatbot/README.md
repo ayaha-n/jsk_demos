@@ -132,14 +132,19 @@ expires, the honey-eating event occurs even while the program is waiting for
 participant input. The chat output shows the DSPy-inferred scene as
 `[参考場面]`; this label is for observation and logging only.
 
-The delay is configured in one place near the top of `scenarios.py`:
+The delays are configured in one place near the top of `scenarios.py`:
 
 ```python
 EEYORE_EVENT_INACTIVITY_DELAY_SECONDS = 30.0
+EEYORE_HONEY_TASTING_DELAY_SECONDS = 30.0
+EEYORE_HONEY_EATING_DELAY_SECONDS = 10.0
 ```
 
-Changing only this runtime value requires restarting chat mode but does not
-require DSPy recompilation.
+The first value controls how long Pooh waits for participant input before
+deciding on the honey jar himself. The second controls how long he waits before
+taking out the jar, and the third controls how long he waits before eating its
+honey. Changing only these runtime values requires restarting chat mode but
+does not require DSPy recompilation.
 
 Each scenario is compiled and cached separately, so compile the scenario you
 intend to chat with before starting a session:

@@ -16,8 +16,12 @@ import dspy
 from narrative_state import NarrativeSituation
 
 
-# 蜂蜜壺を贈ると決めてから、プーが蜂蜜を食べてしまうまでの秒数。
+# 無入力時に、プーが蜂蜜壺を贈ると決めるまでの秒数。
 EEYORE_EVENT_INACTIVITY_DELAY_SECONDS = 30.0
+# 贈ると決めてから、蜂蜜壺を持ち出すまでの秒数。
+EEYORE_HONEY_TASTING_DELAY_SECONDS = 30.0
+# 蜂蜜壺を持ち出してから、蜂蜜を食べてしまうまでの秒数。
+EEYORE_HONEY_EATING_DELAY_SECONDS = 10.0
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,8 @@ class Scenario:
     response_examples: list[dspy.Example]
     scenes: tuple[SceneDefinition, ...] = ()
     event_inactivity_delay_seconds: float | None = None
+    honey_tasting_delay_seconds: float | None = None
+    honey_eating_delay_seconds: float | None = None
     # Keyed by the unresolved-item label the preference answers (e.g. the
     # balloon-color unresolved text); only entries matching the CURRENT
     # unresolved list are ever surfaced to the model (see
@@ -107,6 +113,8 @@ def _eeyore_birthday() -> Scenario:
             SceneDefinition("6", "場面6：贈り物の準備を詰める（色などの詳細を相談する）"),
         ),
         event_inactivity_delay_seconds=EEYORE_EVENT_INACTIVITY_DELAY_SECONDS,
+        honey_tasting_delay_seconds=EEYORE_HONEY_TASTING_DELAY_SECONDS,
+        honey_eating_delay_seconds=EEYORE_HONEY_EATING_DELAY_SECONDS,
         pooh_preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
     )
 

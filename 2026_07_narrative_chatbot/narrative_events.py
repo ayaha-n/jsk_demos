@@ -104,36 +104,48 @@ class HoneyGiftEventController:
 
     def __init__(
         self,
-        delay_seconds: float,
+        inactivity_delay_seconds: float,
+        tasting_delay_seconds: float,
+        eating_delay_seconds: float,
         clock: Callable[[], float] = time.monotonic,
         required_events: tuple[RequiredNarrativeEvent, ...] | None = None,
     ) -> None:
-        if delay_seconds < 0:
-            raise ValueError("delay_seconds must be non-negative")
-        self.delay_seconds = delay_seconds
+        if inactivity_delay_seconds < 0:
+            raise ValueError("inactivity_delay_seconds must be non-negative")
+        if tasting_delay_seconds < 0:
+            raise ValueError("tasting_delay_seconds must be non-negative")
+        if eating_delay_seconds < 0:
+            raise ValueError("eating_delay_seconds must be non-negative")
+        self.inactivity_delay_seconds = inactivity_delay_seconds
+        self.tasting_delay_seconds = tasting_delay_seconds
+        self.eating_delay_seconds = eating_delay_seconds
         self.clock = clock
         self.state = HoneyGiftState()
-        self.required_events = required_events or self._default_required_events(delay_seconds)
+        self.required_events = required_events or self._default_required_events(
+            inactivity_delay_seconds,
+            tasting_delay_seconds,
+            eating_delay_seconds,
+        )
         self._deadlines: dict[str, float] = {}
         self._arm_required_events()
 
     @staticmethod
-    def _default_required_events(delay_seconds: float) -> tuple[RequiredNarrativeEvent, ...]:
-        # The commit-to-eating span stays delay_seconds in total; it is split
-        # in half so the tasting foreshadowing lands partway through instead
-        # of extending the overall wait.
-        half_delay = delay_seconds / 2
+    def _default_required_events(
+        inactivity_delay_seconds: float,
+        tasting_delay_seconds: float,
+        eating_delay_seconds: float,
+    ) -> tuple[RequiredNarrativeEvent, ...]:
         return (
             RequiredNarrativeEvent(
                 event_id="honey_gift_committed",
-                delay_seconds=delay_seconds,
+                delay_seconds=inactivity_delay_seconds,
                 resets_on_input=True,
                 prerequisite=lambda state: state.gift_status == "undecided",
                 fire=HoneyGiftEventController._fire_honey_gift_commitment,
             ),
             RequiredNarrativeEvent(
                 event_id="pooh_tastes_honey",
-                delay_seconds=half_delay,
+                delay_seconds=tasting_delay_seconds,
                 resets_on_input=False,
                 prerequisite=lambda state: (
                     state.gift_status == "committed"
@@ -145,7 +157,7 @@ class HoneyGiftEventController:
             ),
             RequiredNarrativeEvent(
                 event_id="pooh_ate_honey",
-                delay_seconds=half_delay,
+                delay_seconds=eating_delay_seconds,
                 resets_on_input=False,
                 prerequisite=lambda state: (
                     state.gift_status == "committed"

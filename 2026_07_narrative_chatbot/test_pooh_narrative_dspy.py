@@ -751,6 +751,8 @@ class RegressionTests(unittest.TestCase):
         changed_delay = replace(
             scenario,
             event_inactivity_delay_seconds=scenario.event_inactivity_delay_seconds + 10,
+            honey_tasting_delay_seconds=scenario.honey_tasting_delay_seconds + 5,
+            honey_eating_delay_seconds=scenario.honey_eating_delay_seconds + 5,
         )
         self.assertEqual(
             pooh.cache_hash("model", "judge", scenario),
@@ -767,25 +769,23 @@ class RegressionTests(unittest.TestCase):
 
     def test_honey_event_fires_once_without_resetting_on_same_decision(self):
         now = [100.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         controller.observe_actions(["commit_honey_jar_gift"])
-        # The commit-to-eating span (30s) is split in half around the
-        # tasting foreshadowing, so the first pending stage is due in 15s.
-        self.assertEqual(controller.seconds_until_due(), 15.0)
+        self.assertEqual(controller.seconds_until_due(), 30.0)
 
-        now[0] = 110.0
+        now[0] = 105.0
         controller.observe_actions(["commit_honey_jar_gift"])
-        self.assertEqual(controller.seconds_until_due(), 5.0)
+        self.assertEqual(controller.seconds_until_due(), 25.0)
         self.assertIsNone(controller.pop_due_event())
 
-        now[0] = 115.0
+        now[0] = 130.0
         taste_event = controller.pop_due_event()
         self.assertIsNotNone(taste_event)
         self.assertEqual(taste_event.event_id, "pooh_tastes_honey")
         self.assertEqual(controller.state.honey_status, "full")
-        self.assertEqual(controller.seconds_until_due(), 15.0)
+        self.assertEqual(controller.seconds_until_due(), 10.0)
 
-        now[0] = 130.0
+        now[0] = 140.0
         event = controller.pop_due_event()
         self.assertIsNotNone(event)
         self.assertEqual(event.event_id, "pooh_ate_honey")
@@ -800,7 +800,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_required_events_commit_then_taste_then_eat_after_inactivity(self):
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         now[0] = 30.0
         commit_event = controller.pop_due_event()
         self.assertIsNotNone(commit_event)
@@ -808,17 +808,17 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(commit_event.scene_id, "1c")
         self.assertEqual(controller.state.gift_status, "committed")
 
-        now[0] = 44.9
+        now[0] = 59.9
         self.assertIsNone(controller.pop_due_event())
-        now[0] = 45.0
+        now[0] = 60.0
         taste_event = controller.pop_due_event()
         self.assertIsNotNone(taste_event)
         self.assertEqual(taste_event.event_id, "pooh_tastes_honey")
         self.assertEqual(taste_event.scene_id, "2")
 
-        now[0] = 59.9
+        now[0] = 69.9
         self.assertIsNone(controller.pop_due_event())
-        now[0] = 60.0
+        now[0] = 70.0
         eat_event = controller.pop_due_event()
         self.assertIsNotNone(eat_event)
         self.assertEqual(eat_event.event_id, "pooh_ate_honey")
@@ -826,11 +826,11 @@ class RegressionTests(unittest.TestCase):
 
     def test_participant_input_does_not_reset_eating_timer(self):
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         controller.observe_actions(["commit_honey_jar_gift"])
         seen_event_ids = []
         for _ in range(5):
-            now[0] += 20.0
+            now[0] += 10.0
             controller.observe_user_input()
             event = controller.pop_due_event()
             if event is not None:
@@ -845,7 +845,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_honey_event_is_cancelled_when_jar_leaves_pooh(self):
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         controller.observe_actions(["commit_honey_jar_gift"])
         controller.observe_actions(["give_honey_jar_to_participant"])
         now[0] = 60.0
@@ -855,7 +855,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_synchronize_situation_clears_gift_unresolved_without_example_support(self):
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         controller.observe_actions(["commit_honey_jar_gift"])
         situation = pooh.get_scenario("eeyore_birthday").initial_situation
         for item in GIFT_DECISION_UNRESOLVED:
@@ -870,7 +870,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_synchronize_situation_does_not_claim_a_decision_that_never_happened(self):
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         # Cancelling without ever committing must not fabricate a decision.
         controller.observe_actions(["cancel_honey_jar_gift"])
         situation = pooh.get_scenario("eeyore_birthday").initial_situation
@@ -880,7 +880,7 @@ class RegressionTests(unittest.TestCase):
             self.assertIn(item, updated.unresolved)
 
     def test_synchronize_situation_clears_empty_jar_unresolved_without_example_support(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["commit_honey_jar_gift"])
         controller.state.honey_status = "empty"
         controller.observe_actions(["resolve_empty_jar_gift"])
@@ -895,7 +895,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
 
     def test_synchronize_situation_clears_balloon_color_unresolved_without_example_support(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["resolve_balloon_color"])
         self.assertIn("balloon_color_resolved", controller.state.completed_event_ids)
 
@@ -909,7 +909,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn(BALLOON_COLOR_UNRESOLVED, updated.unresolved)
 
     def test_synchronize_situation_clears_ribbon_color_unresolved_without_example_support(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["resolve_ribbon_color"])
         self.assertIn("ribbon_color_resolved", controller.state.completed_event_ids)
 
@@ -920,19 +920,19 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn(RIBBON_COLOR_UNRESOLVED, updated.unresolved)
 
     def test_resolve_empty_jar_gift_is_ignored_before_honey_is_actually_empty(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         # Fired prematurely, before the honey is even gone: must not silently
         # pre-clear the unresolved item that does not exist yet.
         controller.observe_actions(["resolve_empty_jar_gift"])
         self.assertNotIn("empty_jar_gift_resolved", controller.state.completed_event_ids)
 
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         controller.observe_actions(["commit_honey_jar_gift"])
         controller.observe_actions(["resolve_empty_jar_gift"])
-        now[0] = 15.0
-        controller.pop_due_event()  # the tasting foreshadowing, not the eating itself
         now[0] = 30.0
+        controller.pop_due_event()  # the tasting foreshadowing, not the eating itself
+        now[0] = 40.0
         event = controller.pop_due_event()
         self.assertEqual(event.event_id, "pooh_ate_honey")
         situation = apply_situation_update(
@@ -944,7 +944,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
 
     def test_synchronize_situation_records_jar_with_participant_without_example_support(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["give_honey_jar_to_participant"])
         situation = pooh.get_scenario("eeyore_birthday").initial_situation
 
@@ -952,7 +952,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(JAR_WITH_PARTICIPANT_EVENT, updated.events)
 
     def test_synchronize_situation_records_blocked_access_without_example_support(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["block_pooh_honey_access"])
         situation = pooh.get_scenario("eeyore_birthday").initial_situation
 
@@ -960,7 +960,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(BLOCKED_ACCESS_EVENT, updated.events)
 
     def test_synchronize_situation_reopens_gift_unresolved_after_cancel(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["commit_honey_jar_gift"])
         controller.observe_actions(["cancel_honey_jar_gift"])
         situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
@@ -978,7 +978,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn(HONEY_PREPARATION_UNRESOLVED, updated.unresolved)
 
     def test_synchronize_situation_records_delivery_and_clears_preparation_unresolved(self):
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["commit_honey_jar_gift"])
         controller.observe_actions(["deliver_honey_jar_to_eeyore"])
         situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
@@ -991,7 +991,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_synchronize_situation_clears_gift_unresolved_after_auto_fire_commit(self):
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         now[0] = 30.0
         event = controller.pop_due_event()
         self.assertEqual(event.event_id, "honey_gift_committed")
@@ -1003,7 +1003,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_chat_does_not_reintroduce_resolved_gift_after_commit(self):
         scenario = pooh.get_scenario("eeyore_birthday")
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["commit_honey_jar_gift"])
 
         agent = Mock(return_value=SimpleNamespace(
@@ -1029,7 +1029,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_chat_clears_gift_unresolved_on_the_same_turn_as_commit(self):
         scenario = pooh.get_scenario("eeyore_birthday")
-        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
 
         def agent(**kwargs):
             # The model's own situation_update leaves unresolved untouched;
@@ -1079,7 +1079,7 @@ class RegressionTests(unittest.TestCase):
             fire=fire_custom_event,
         )
         controller = HoneyGiftEventController(
-            30.0, clock=lambda: 0.0, required_events=(custom_event,),
+            30.0, 30.0, 10.0, clock=lambda: 0.0, required_events=(custom_event,),
         )
 
         def agent(**kwargs):
@@ -1110,7 +1110,7 @@ class RegressionTests(unittest.TestCase):
     def test_chat_delivers_timed_event_without_participant_input(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
 
         def agent(**kwargs):
             if kwargs["world_event"]:
@@ -1137,10 +1137,10 @@ class RegressionTests(unittest.TestCase):
             if input_count[0] == 1:
                 return "プーは何をあげるの？"
             if input_count[0] == 2:
-                now[0] = 16.0  # past the tasting foreshadowing's deadline (15s)
+                now[0] = 31.0  # past the tasting foreshadowing's deadline (30s)
                 return ""
             if input_count[0] == 3:
-                now[0] = 32.0  # past the eating deadline (16 + 15s)
+                now[0] = 42.0  # past the eating deadline (31 + 10s)
                 return ""
             return "exit"
 
@@ -1170,7 +1170,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_fixed_timed_event_skips_generation_and_keeps_original_line(self):
         scenario = pooh.get_scenario("eeyore_birthday")
-        controller = HoneyGiftEventController(0.0, clock=lambda: 1.0)
+        controller = HoneyGiftEventController(0.0, 0.0, 0.0, clock=lambda: 1.0)
         controller.observe_actions(["commit_honey_jar_gift"])
         controller.pop_due_event()  # tasting foreshadowing fires first (delay is 0)
         event = controller.pop_due_event()

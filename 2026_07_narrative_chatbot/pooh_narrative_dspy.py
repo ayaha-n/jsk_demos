@@ -824,9 +824,18 @@ def create_event_controller(
     scenario: Scenario,
     clock: Callable[[], float] = time.monotonic,
 ) -> HoneyGiftEventController | None:
-    if scenario.event_inactivity_delay_seconds is None:
+    if (
+        scenario.event_inactivity_delay_seconds is None
+        or scenario.honey_tasting_delay_seconds is None
+        or scenario.honey_eating_delay_seconds is None
+    ):
         return None
-    return HoneyGiftEventController(scenario.event_inactivity_delay_seconds, clock=clock)
+    return HoneyGiftEventController(
+        scenario.event_inactivity_delay_seconds,
+        scenario.honey_tasting_delay_seconds,
+        scenario.honey_eating_delay_seconds,
+        clock=clock,
+    )
 
 
 def _event_result(
