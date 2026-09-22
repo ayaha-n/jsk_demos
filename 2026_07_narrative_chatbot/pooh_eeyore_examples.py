@@ -19,7 +19,7 @@ from narrative_events import (
     HONEY_GIFT_COMMITTED_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
 )
-from narrative_state import NarrativeSituation, SituationUpdate
+from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
 from pooh_examples import (
     build_mode_examples,
     build_response_examples,
@@ -656,10 +656,23 @@ EEYORE_BIRTHDAY_TRAINSET = [
 EEYORE_BIRTHDAY_OPENING_LINE = _TURN1_BOT_RESPONSE
 
 
+# プー自身が持つ既定の好み。参加者が既に具体的な答えを示していればそれを
+# 尊重し、参加者が迷ったり答えなかったりした場合にだけ自分の意見として
+# 提示してよい(GeneratePoohResponseのpooh_preferences入力として渡す)。
+# キーは、その好みが答える未解決項目のラベル。現在のunresolvedに実際に
+# 含まれる項目の好みだけが毎ターンフィルタされて渡される
+# (narrative_state.relevant_preferences参照)。
+EEYORE_BIRTHDAY_POOH_PREFERENCES = {
+    BALLOON_COLOR_UNRESOLVED: "風船の色を選ぶなら青が好き。晴れた空のような色だから。",
+}
+
+
 EEYORE_BIRTHDAY_MODE_EXAMPLES = build_mode_examples(EEYORE_BIRTHDAY_TRAINSET)
 
 
-EEYORE_BIRTHDAY_RESPONSE_EXAMPLES = build_response_examples(EEYORE_BIRTHDAY_TRAINSET)
+EEYORE_BIRTHDAY_RESPONSE_EXAMPLES = build_response_examples(
+    EEYORE_BIRTHDAY_TRAINSET, preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
+)
 
 
 _HONEY_EATEN_SITUATION = EEYORE_BIRTHDAY_SITUATION.model_copy(
@@ -683,6 +696,7 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         history="プーは蜂蜜入りの壺をイーヨーに贈ると決めた。",
         world_event=HONEY_EATEN_DESCRIPTION,
         previous_bot_response="",
+        pooh_preferences=relevant_preferences(_HONEY_EATEN_SITUATION, EEYORE_BIRTHDAY_POOH_PREFERENCES),
         interaction_mode="narrative",
         mishearing_candidates=[],
         selected_mishearing="none",
@@ -695,6 +709,7 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         "history",
         "world_event",
         "previous_bot_response",
+        "pooh_preferences",
         "interaction_mode",
         "mishearing_candidates",
     )
@@ -718,6 +733,9 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         history=f"会話の冒頭\nプーの応答: {_TURN1_BOT_RESPONSE}\n\n",
         world_event=HONEY_GIFT_COMMITTED_DESCRIPTION,
         previous_bot_response=_TURN1_BOT_RESPONSE,
+        pooh_preferences=relevant_preferences(
+            _HONEY_GIFT_COMMITTED_SITUATION, EEYORE_BIRTHDAY_POOH_PREFERENCES
+        ),
         interaction_mode="narrative",
         mishearing_candidates=[],
         selected_mishearing="none",
@@ -730,6 +748,7 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         "history",
         "world_event",
         "previous_bot_response",
+        "pooh_preferences",
         "interaction_mode",
         "mishearing_candidates",
     )

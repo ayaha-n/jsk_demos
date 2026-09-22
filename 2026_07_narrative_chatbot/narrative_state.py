@@ -71,6 +71,18 @@ def format_situation(situation: NarrativeSituation) -> str:
     )
 
 
+def relevant_preferences(
+    situation: NarrativeSituation | dict[str, Any],
+    preferences: dict[str, str],
+) -> str:
+    """Surface only the standing preferences whose topic is currently
+    unresolved, so the prompt does not grow with facts that have nothing
+    to do with this turn."""
+    situation = coerce_situation(situation)
+    matched = [preferences[label] for label in situation.unresolved if label in preferences]
+    return "".join(matched)
+
+
 def apply_situation_update(
     current: NarrativeSituation | dict[str, Any],
     update: SituationUpdate | dict[str, Any],

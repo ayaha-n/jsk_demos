@@ -5,7 +5,12 @@ from typing import Any
 import dspy
 
 from mishearing_cases import candidate_for
-from narrative_state import NarrativeSituation, SituationUpdate, apply_situation_update
+from narrative_state import (
+    NarrativeSituation,
+    SituationUpdate,
+    apply_situation_update,
+    relevant_preferences,
+)
 
 
 TEA_PARTY_OPENING_LINE = "今日は来てくれて、ありがとう。今からお茶会をするところなんだ。"
@@ -315,8 +320,16 @@ def build_mode_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
     ]
 
 
-def build_response_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
-    """Derive GeneratePoohResponse examples from any scenario's full-turn trainset."""
+def build_response_examples(
+    trainset: list[dspy.Example], *, preferences: dict[str, str] | None = None
+) -> list[dspy.Example]:
+    """Derive GeneratePoohResponse examples from any scenario's full-turn trainset.
+
+    preferences is scenario-constant standing data, keyed by the unresolved
+    label each entry answers; each example's own pooh_preferences is filtered
+    down to only what is relevant to ITS current_situation.unresolved, so the
+    training data demonstrates the same filtering behavior used at runtime."""
+    preferences = preferences or {}
     return [
         dspy.Example(
             current_situation=item.current_situation,
@@ -324,6 +337,7 @@ def build_response_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
             history=item.history,
             world_event=item.world_event,
             previous_bot_response=item.previous_bot_response,
+            pooh_preferences=relevant_preferences(item.current_situation, preferences),
             interaction_mode=item.interaction_mode,
             mishearing_candidates=_candidates_for(item),
             selected_mishearing=item.selected_mishearing,
@@ -336,6 +350,7 @@ def build_response_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
             "history",
             "world_event",
             "previous_bot_response",
+            "pooh_preferences",
             "interaction_mode",
             "mishearing_candidates",
         )

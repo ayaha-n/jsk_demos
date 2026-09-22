@@ -48,6 +48,7 @@ from narrative_state import (
     SituationUpdate,
     apply_situation_update,
     coerce_situation,
+    relevant_preferences,
 )
 from narrative_events import HoneyGiftEventController, NarrativeAction, WorldEvent
 from pooh_examples import (
@@ -60,7 +61,7 @@ from pooh_examples import (
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v19"
+PROGRAM_VERSION = "pooh-structured-state-v20"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -153,6 +154,14 @@ class GeneratePoohResponse(dspy.Signature):
             "直前のプー自身の応答。これと同じ、または意味的に同じ内容("
             "同じ質問・同じ説明・同じ安心させるセリフ等)を繰り返さない。"
             "最初のターンでは空文字列。"
+        )
+    )
+    pooh_preferences: str = dspy.InputField(
+        desc=(
+            "プー自身が持つ既定の好み(参考情報)。参加者が既に具体的な答えを"
+            "示している場合はそれを尊重し、この好みで上書きしない。参加者が"
+            "迷ったり答えなかったりした場合にだけ、自分の意見としてここから"
+            "提示してよい。空文字列なら特に無い。"
         )
     )
     interaction_mode: str = dspy.InputField()
@@ -341,6 +350,7 @@ class PoohNarrativeAgent(dspy.Module):
         world_event: str = "",
         event_scene: str = "none",
         previous_bot_response: str = "",
+        pooh_preferences: str = "",
     ) -> Any:
         current_situation = coerce_situation(current_situation)
         technical_terms: list[str] = []
@@ -385,6 +395,7 @@ class PoohNarrativeAgent(dspy.Module):
             history=history,
             world_event=world_event,
             previous_bot_response=previous_bot_response,
+            pooh_preferences=pooh_preferences,
             interaction_mode=mode,
             mishearing_candidates=candidates,
         )
@@ -707,6 +718,7 @@ def invoke(
     world_event: str = "",
     event_scene: str = "none",
     previous_bot_response: str = "",
+    pooh_preferences: str = "",
 ) -> tuple[Any, float]:
     started = time.perf_counter()
     result = agent(
@@ -716,6 +728,7 @@ def invoke(
         world_event=world_event,
         event_scene=event_scene,
         previous_bot_response=previous_bot_response,
+        pooh_preferences=pooh_preferences,
     )
     return result, (time.perf_counter() - started) * 1000
 
@@ -819,6 +832,7 @@ def _event_result(
     event: WorldEvent,
     history: str,
     previous_bot_response: str = "",
+    pooh_preferences: str = "",
 ) -> tuple[Any, float, bool]:
     if event.fixed_response:
         return dspy.Prediction(
@@ -839,6 +853,7 @@ def _event_result(
             world_event=event.description,
             event_scene=event.scene_id,
             previous_bot_response=previous_bot_response,
+            pooh_preferences=pooh_preferences,
         )
         return result, latency_ms, False
     except Exception:
@@ -888,6 +903,7 @@ def run_chat(
                 event,
                 history,
                 previous_bot_response=turns[-1].bot_response if turns else "",
+                pooh_preferences=relevant_preferences(current_situation, scenario.pooh_preferences),
             )
             event_narrative_actions = list(getattr(result, "narrative_actions", []))
             controller.observe_actions(event_narrative_actions)
@@ -947,6 +963,7 @@ def run_chat(
             user_input,
             history,
             previous_bot_response=turns[-1].bot_response if turns else "",
+            pooh_preferences=relevant_preferences(current_situation, scenario.pooh_preferences),
         )
         result.bot_response = enforce_response_invariants(
             user_action=user_input,
@@ -1006,7 +1023,12 @@ def run_comparison(compiled: Any, scenario: Scenario) -> None:
     set_agent_demos(chain, scenario)
     agents = {"Predict": predict, "ChainOfThought": chain, "Compiled": compiled}
     for label, agent in agents.items():
-        result, _ = invoke(agent, scenario.initial_situation, action, "")
+        result, _ = invoke(
+            agent, scenario.initial_situation, action, "",
+            pooh_preferences=relevant_preferences(
+                scenario.initial_situation, scenario.pooh_preferences
+            ),
+        )
         print_result(label, result, scenario)
 
 

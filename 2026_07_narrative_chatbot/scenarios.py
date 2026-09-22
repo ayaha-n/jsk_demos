@@ -9,7 +9,7 @@ examples) changes per scenario.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import dspy
 
@@ -40,6 +40,11 @@ class Scenario:
     response_examples: list[dspy.Example]
     scenes: tuple[SceneDefinition, ...] = ()
     event_inactivity_delay_seconds: float | None = None
+    # Keyed by the unresolved-item label the preference answers (e.g. the
+    # balloon-color unresolved text); only entries matching the CURRENT
+    # unresolved list are ever surfaced to the model (see
+    # narrative_state.relevant_preferences).
+    pooh_preferences: dict[str, str] = field(default_factory=dict)
 
     def scene_label(self, scene_id: str) -> str | None:
         return next(
@@ -74,6 +79,7 @@ def _eeyore_birthday() -> Scenario:
     from pooh_eeyore_examples import (
         EEYORE_BIRTHDAY_MODE_EXAMPLES,
         EEYORE_BIRTHDAY_OPENING_LINE,
+        EEYORE_BIRTHDAY_POOH_PREFERENCES,
         EEYORE_BIRTHDAY_RESPONSE_EXAMPLES,
         EEYORE_BIRTHDAY_SITUATION,
         EEYORE_BIRTHDAY_TRAINSET,
@@ -101,6 +107,7 @@ def _eeyore_birthday() -> Scenario:
             SceneDefinition("6", "場面6：贈り物の準備を詰める（色などの詳細を相談する）"),
         ),
         event_inactivity_delay_seconds=EEYORE_EVENT_INACTIVITY_DELAY_SECONDS,
+        pooh_preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
     )
 
 

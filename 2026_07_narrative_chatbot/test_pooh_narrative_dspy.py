@@ -65,6 +65,7 @@ from narrative_state import (
     NarrativeSituation,
     SituationUpdate,
     apply_situation_update,
+    relevant_preferences,
 )
 from narrative_events import (
     BALLOON_COLOR_UNRESOLVED,
@@ -115,6 +116,35 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(agent.call_args_list[0].kwargs["previous_bot_response"], "")
         self.assertEqual(agent.call_args_list[1].kwargs["previous_bot_response"], reply)
         self.assertIn(reply, second)
+        # The opening situation has no balloon-color topic pending yet, so
+        # nothing is surfaced on this first call.
+        self.assertEqual(agent.call_args_list[0].kwargs["pooh_preferences"], "")
+
+    def test_pooh_preferences_is_filtered_by_current_unresolved_items(self):
+        eeyore = pooh.get_scenario("eeyore_birthday")
+        tea_party = pooh.get_scenario("tea_party")
+        self.assertEqual(tea_party.pooh_preferences, {})
+        self.assertIn(BALLOON_COLOR_UNRESOLVED, eeyore.pooh_preferences)
+
+        # Not surfaced when the topic isn't currently unresolved.
+        self.assertEqual(
+            relevant_preferences(eeyore.initial_situation, eeyore.pooh_preferences),
+            "",
+        )
+        # Surfaced once the topic is actually pending.
+        situation_with_color_pending = eeyore.initial_situation.model_copy(
+            update={"unresolved": [BALLOON_COLOR_UNRESOLVED]},
+        )
+        self.assertIn(
+            "青",
+            relevant_preferences(situation_with_color_pending, eeyore.pooh_preferences),
+        )
+        # Every derived response example demonstrates the same filtering.
+        for example in eeyore.response_examples:
+            self.assertEqual(
+                example.pooh_preferences,
+                relevant_preferences(example.current_situation, eeyore.pooh_preferences),
+            )
 
     def test_source_is_valid_python(self):
         ast.parse(Path(pooh.__file__).read_text(encoding="utf-8"))
