@@ -126,6 +126,21 @@ Available scenarios are registered in `scenarios.py`:
 | `tea_party` (default) | Open-ended tea party with Pooh (`pooh_examples.py`) |
 | `eeyore_birthday` | Eeyore-birthday-gift arc, with lines from the original story (`pooh_eeyore_examples.py`) |
 
+In `eeyore_birthday`, once Pooh commits to giving Eeyore the honey jar, a
+runtime timer starts. If Pooh still has access to the full jar when the timer
+expires, the honey-eating event occurs even while the program is waiting for
+participant input. The chat output shows the DSPy-inferred scene as
+`[参考場面]`; this label is for observation and logging only.
+
+The delay is configured in one place near the top of `scenarios.py`:
+
+```python
+EEYORE_EVENT_INACTIVITY_DELAY_SECONDS = 30.0
+```
+
+Changing only this runtime value requires restarting chat mode but does not
+require DSPy recompilation.
+
 Each scenario is compiled and cached separately, so compile the scenario you
 intend to chat with before starting a session:
 
@@ -250,7 +265,8 @@ Conversation logs are written to `logs/session_*.jsonl` by default. Each line co
 Recorded fields include:
 
 - Timestamp
-- Raw participant input
+- Record source (`participant` or `world_event`) and raw input/event
+- Observation-only scene ID and validated narrative actions
 - Inferred participant intent
 - Narrative interpretation
 - Pooh's response
@@ -277,6 +293,7 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 ├── CODEX_INSTRUCTIONS_POOH_DSPY.md  # Research and implementation requirements
 ├── README.md                         # Setup and usage
 ├── mishearing_cases.py               # Reviewed mishearings and term normalization
+├── narrative_events.py               # Deterministic timed-event state and scheduler
 ├── pooh_examples.py                  # Tea-party scenario: full-turn and task-specific examples
 ├── pooh_eeyore_examples.py           # Eeyore-birthday scenario: full-turn examples
 ├── scenarios.py                      # Scenario registry used by --scenario
