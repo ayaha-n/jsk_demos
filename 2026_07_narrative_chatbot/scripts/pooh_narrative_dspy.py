@@ -22,10 +22,12 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 # DSPyのリクエストキャッシュもホームではなく、このプロジェクト内へ隔離する。
 os.environ.setdefault(
     "DSPY_CACHEDIR",
-    str(Path(__file__).resolve().parent / ".dspy_cache" / "requests"),
+    str(PROJECT_ROOT / ".dspy_cache" / "requests"),
 )
 
 try:
@@ -66,8 +68,8 @@ PROGRAM_VERSION = "pooh-structured-state-v21"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
-LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
-CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", ".dspy_cache"))
+LOG_DIR = Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
+CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", str(PROJECT_ROOT / ".dspy_cache")))
 BOOTSTRAP_METRIC_THRESHOLD = 0.8
 MAX_BOOTSTRAPPED_DEMOS = 4
 MAX_LABELED_DEMOS = 0
@@ -664,7 +666,7 @@ def load_compiled_program(train_model: str, judge_model: str, scenario: Scenario
     if not target.exists():
         raise FileNotFoundError(
             f"コンパイル済みプログラムがありません: {target}\n"
-            "`python pooh_narrative_dspy.py --mode compile"
+            "`python scripts/pooh_narrative_dspy.py --mode compile"
             f" --scenario {scenario.key}` を先に実行してください。"
         )
     program = PoohNarrativeAgent()

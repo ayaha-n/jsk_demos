@@ -10,6 +10,9 @@ from unittest.mock import Mock, patch
 from types import SimpleNamespace
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+
 
 # DSPy未導入の開発環境でも純粋関数と状態定義を検査できる最小stub。
 class _Field:

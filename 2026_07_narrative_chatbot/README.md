@@ -119,12 +119,12 @@ source .venv/bin/activate
 
 The agent, mishearing gimmick, and evaluators are shared across scenarios; only
 the initial `NarrativeSituation` and full-turn examples change per scenario.
-Available scenarios are registered in `scenarios.py`:
+Available scenarios are registered in `scripts/scenarios.py`:
 
 | `--scenario` | Content |
 |---|---|
-| `tea_party` (default) | Open-ended tea party with Pooh (`pooh_examples.py`) |
-| `eeyore_birthday` | Eeyore-birthday-gift arc, with lines from the original story (`pooh_eeyore_examples.py`) |
+| `tea_party` (default) | Open-ended tea party with Pooh (`scripts/pooh_examples.py`) |
+| `eeyore_birthday` | Eeyore-birthday-gift arc, with lines from the original story (`scripts/pooh_eeyore_examples.py`) |
 
 In `eeyore_birthday`, once Pooh commits to giving Eeyore the honey jar, a
 runtime timer starts. If Pooh still has access to the full jar when the timer
@@ -132,7 +132,7 @@ expires, the honey-eating event occurs even while the program is waiting for
 participant input. The chat output shows the DSPy-inferred scene as
 `[参考場面]`; this label is for observation and logging only.
 
-The delays are configured in one place near the top of `scenarios.py`:
+The delays are configured in one place near the top of `scripts/scenarios.py`:
 
 ```python
 EEYORE_EVENT_INACTIVITY_DELAY_SECONDS = 30.0
@@ -150,8 +150,8 @@ Each scenario is compiled and cached separately, so compile the scenario you
 intend to chat with before starting a session:
 
 ```bash
-python pooh_narrative_dspy.py --mode compile --scenario eeyore_birthday
-python pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday
+python scripts/pooh_narrative_dspy.py --mode compile --scenario eeyore_birthday
+python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday
 ```
 
 Omitting `--scenario` uses `tea_party`.
@@ -161,7 +161,7 @@ Omitting `--scenario` uses `tea_party`.
 Compile the program before the first chat session and after changing the examples, metric, or model configuration:
 
 ```bash
-python pooh_narrative_dspy.py --mode compile
+python scripts/pooh_narrative_dspy.py --mode compile
 ```
 
 `BootstrapFewShot` uses the manually reviewed full-turn examples in `TRAINSET`
@@ -182,7 +182,7 @@ Compilation makes multiple API requests and may take time and incur API charges.
 ### Start a chat session
 
 ```bash
-python pooh_narrative_dspy.py --mode chat
+python scripts/pooh_narrative_dspy.py --mode chat
 ```
 
 Chat mode uses only the compiled program matching the current configuration. It does not compile automatically.
@@ -228,7 +228,7 @@ Then start the chatbot in the project `.venv`:
 
 ```bash
 source .venv/bin/activate
-python pooh_narrative_dspy.py \
+python scripts/pooh_narrative_dspy.py \
   --mode chat \
   --scenario eeyore_birthday \
   --ros-relay
@@ -247,7 +247,7 @@ for the robot-side setup and motion configuration.
 ### Compare implementation variants
 
 ```bash
-python pooh_narrative_dspy.py --mode compare
+python scripts/pooh_narrative_dspy.py --mode compare
 ```
 
 Comparison mode displays outputs from the following three variants for the same input:
@@ -263,15 +263,15 @@ Use `--mode chat` for ordinary interaction sessions.
 Run the regression tests without calling an LLM or external API:
 
 ```bash
-python -m unittest -v test_pooh_narrative_dspy.py
+python -m unittest discover -s tests -v
 ```
 
 Run a syntax check:
 
 ```bash
 python -m py_compile \
-  pooh_narrative_dspy.py \
-  test_pooh_narrative_dspy.py
+  scripts/pooh_narrative_dspy.py \
+  tests/test_pooh_narrative_dspy.py
 ```
 
 The current regression tests verify that:
@@ -334,12 +334,13 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 .
 ├── CODEX_INSTRUCTIONS_POOH_DSPY.md  # Research and implementation requirements
 ├── README.md                         # Setup and usage
-├── mishearing_cases.py               # Reviewed mishearings and term normalization
-├── narrative_events.py               # Deterministic timed-event state and scheduler
-├── pooh_examples.py                  # Tea-party scenario: full-turn and task-specific examples
-├── pooh_eeyore_examples.py           # Eeyore-birthday scenario: full-turn examples
-├── scenarios.py                      # Scenario registry used by --scenario
-├── pooh_narrative_dspy.py            # Main DSPy program
 ├── requirements.txt                  # Python dependencies
-└── test_pooh_narrative_dspy.py       # Regression tests without LLM calls
+├── scripts/                           # DSPy implementation and command-line entry point
+│   ├── pooh_narrative_dspy.py
+│   ├── narrative_events.py
+│   ├── narrative_state.py
+│   ├── scenarios.py
+│   └── ...
+└── tests/
+    └── test_pooh_narrative_dspy.py   # Regression tests without LLM calls
 ```

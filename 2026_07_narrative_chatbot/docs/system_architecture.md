@@ -18,7 +18,7 @@
 |---|---|---|
 | `TRAINSET` | 人が確認した対話全体の正解例 | Agent全体のコンパイル評価 |
 | `MODE_EXAMPLES` | `TRAINSET`から分類項目を抽出 | `AnalyzeInteraction` |
-| `MISHEARING_EXAMPLES` | `mishearing_cases.py`の代表例から構成 | `PlanMishearing` |
+| `MISHEARING_EXAMPLES` | `scripts/mishearing_cases.py`の代表例から構成 | `PlanMishearing` |
 | `RESPONSE_EXAMPLES` | `TRAINSET`から返答・状態差分を抽出 | `GeneratePoohResponse` |
 
 モードが正解と一致しない結果はPythonのhard gateで不採用になる。`meta`の場合はさらに`MetaPolicyEvaluator`が、技術語を直接発話せず物語世界へ接続できているかを評価する。合格後、`NarrativeQualityJudge`が応答方針、物語の一貫性、参加者の主体性、状態更新などを評価する。
@@ -41,7 +41,7 @@
 
 ### 物語状態
 
-物語状態は`narrative_state.py`のPydanticモデルで管理する。
+物語状態は`scripts/narrative_state.py`のPydanticモデルで管理する。
 
 | モデル | 主な内容 |
 |---|---|
@@ -55,8 +55,8 @@ LLMは状態全体を再生成せず、そのターンで変化した差分だ�
 | 種別 | 使用箇所 | 役割 |
 |---|---|---|
 | Python 3.12 | システム全体 | CLI、規則処理、状態・履歴・ファイル管理 |
-| DSPy 3.2.1 | `pooh_narrative_dspy.py`ほか | Signature、Module、Predictor、コンパイル |
-| Pydantic 2 | `narrative_state.py`、`mishearing_cases.py` | 物語状態、状態差分、聞き間違い候補の構造化 |
+| DSPy 3.2.1 | `scripts/pooh_narrative_dspy.py`ほか | Signature、Module、Predictor、コンパイル |
+| Pydantic 2 | `scripts/narrative_state.py`、`scripts/mishearing_cases.py` | 物語状態、状態差分、聞き間違い候補の構造化 |
 | OpenAI API | `dspy.LM` | 実行時の分類・生成、コンパイル時の生成・評価 |
 | ローカルファイル | `.dspy_cache/`、`logs/` | Compiled Agent、キャッシュ、会話ログの保存 |
 
@@ -64,16 +64,16 @@ LLMは状態全体を再生成せず、そのターンで変化した差分だ�
 
 | ファイル | 図との対応 | 確認結果 |
 |---|---|---|
-| `pooh_narrative_dspy.py` | CLI、3つのPredictor、候補選択、技術語漏出防止、コンパイル、評価、ログ | 一致 |
-| `narrative_state.py` | `NarrativeSituation`、`SituationUpdate`、状態差分の適用 | 一致 |
-| `pooh_examples.py` | 初期状態、`TRAINSET`、3種類の段階別教師例 | 一致 |
-| `mishearing_cases.py` | 固定候補、表記正規化、既知語検索、不確かな短縮音、不理解表現 | 一致 |
-| `test_pooh_narrative_dspy.py` | 分類、候補、表記揺れ、評価hard gate、構造化状態更新の回帰テスト | 一致 |
+| `scripts/pooh_narrative_dspy.py` | CLI、3つのPredictor、候補選択、技術語漏出防止、コンパイル、評価、ログ | 一致 |
+| `scripts/narrative_state.py` | `NarrativeSituation`、`SituationUpdate`、状態差分の適用 | 一致 |
+| `scripts/pooh_examples.py` | 初期状態、`TRAINSET`、3種類の段階別教師例 | 一致 |
+| `scripts/mishearing_cases.py` | 固定候補、表記正規化、既知語検索、不確かな短縮音、不理解表現 | 一致 |
+| `tests/test_pooh_narrative_dspy.py` | 分類、候補、表記揺れ、評価hard gate、構造化状態更新の回帰テスト | 一致 |
 | `README.md` | 環境設定、compile/chat/compare/testの操作方法 | 一致 |
 
 検証には次を使用する。
 
 ```bash
-python -m unittest test_pooh_narrative_dspy.py
+python -m unittest discover -s tests
 git diff --check
 ```

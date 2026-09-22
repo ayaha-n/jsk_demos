@@ -1,6 +1,6 @@
 """Draft full-turn examples for the Eeyore-birthday tea-party scenario.
 
-These examples are not yet wired into ``pooh_narrative_dspy.py`` as the
+These examples are wired into ``scripts/pooh_narrative_dspy.py`` through the
 default scenario; select them with ``--scenario eeyore_birthday``.
 
 Written for a single ``参加者`` (the current schema does not yet distinguish
@@ -65,7 +65,7 @@ _TURN3_BOT_RESPONSE = (
 
 # 以下、current_scene の場面順(1a → 1b → 2 → 3 → 4a → 5 → 6)に並べている。
 # 1c(無入力でのプー自発決定)と3(食べてしまう瞬間そのもの)は
-# narrative_events.py の必須auto-fireイベントがそのまま対応するため、
+# scripts/narrative_events.py の必須auto-fireイベントがそのまま対応するため、
 # ここに手書きexampleは無い(場面3の直後の会話は残っている)。
 EEYORE_BIRTHDAY_TRAINSET = [
     # --- 場面1a：プーがハチミツを贈ると提案する ---------------------------

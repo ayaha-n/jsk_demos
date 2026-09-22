@@ -300,7 +300,7 @@ current_situation = result.updated_situation
 
 ## 12. Codexに最初に依頼する作業
 
-添付された`pooh_narrative_dspy.py`を読み、まず次を行ってください。
+`scripts/pooh_narrative_dspy.py`を読み、まず次を行ってください。
 
 1. 実行環境（Python, DSPy, API key）が整っているか確認する
 2. 実行時エラーになり得る箇所を、理由とともに列挙する

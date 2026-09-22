@@ -1,11 +1,11 @@
 # eeyore_birthday trainset 一覧
 
-`pooh_eeyore_examples.py`の`EEYORE_BIRTHDAY_TRAINSET`に含まれるexampleの一覧。
+`scripts/pooh_eeyore_examples.py`の`EEYORE_BIRTHDAY_TRAINSET`に含まれるexampleの一覧。
 `current_scene`は表示専用でDSPyの出力フィールド値であり、制御フローには使わない
-(詳細は`scenarios.py`の`SceneDefinition`と`AGENTS.md`を参照)。
+(詳細は`scripts/scenarios.py`の`SceneDefinition`と`AGENTS.md`を参照)。
 このファイル自体もリストの並び順(1a→1b→2→3→4a→5→6)に合わせている。
 
-## 場面ID一覧(`scenarios.py`)
+## 場面ID一覧(`scripts/scenarios.py`)
 
 | 場面ID | 内容 |
 |---|---|
@@ -19,7 +19,7 @@
 | 5 | 決めた贈り物を振り返る |
 | 6 | 贈り物の準備を詰める(色などの詳細を相談する) |
 
-`1c`・`3`は`narrative_events.py`の必須auto-fireイベント
+`1c`・`3`は`scripts/narrative_events.py`の必須auto-fireイベント
 (`honey_gift_committed`→`pooh_tastes_honey`→`pooh_ate_honey`)がそのまま対応するため、
 手書きexampleは存在しない(場面3の直後の会話exampleは残っている)。
 
