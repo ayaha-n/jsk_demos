@@ -25,6 +25,10 @@ INITIAL_SITUATION = NarrativeSituation(
 def example(*, situation_update: SituationUpdate | None = None, **values: Any) -> dspy.Example:
     """Build a full-turn example from an explicit structured state delta."""
     values.setdefault("selected_mishearing", "none")
+    values.setdefault("current_scene", "none")
+    values.setdefault("world_event", "")
+    values.setdefault("previous_bot_response", "")
+    values.setdefault("narrative_actions", [])
     update = situation_update or SituationUpdate()
     values["situation_update"] = update
     values["updated_situation"] = apply_situation_update(
@@ -305,6 +309,7 @@ def build_mode_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
             history=item.history,
             technical_terms=_technical_terms_for(item),
             interaction_mode=item.interaction_mode,
+            current_scene=item.current_scene,
         ).with_inputs("current_situation", "user_action", "history")
         for item in trainset
     ]
@@ -317,15 +322,20 @@ def build_response_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
             current_situation=item.current_situation,
             user_action=item.user_action,
             history=item.history,
+            world_event=item.world_event,
+            previous_bot_response=item.previous_bot_response,
             interaction_mode=item.interaction_mode,
             mishearing_candidates=_candidates_for(item),
             selected_mishearing=item.selected_mishearing,
             situation_update=item.situation_update,
+            narrative_actions=item.narrative_actions,
             bot_response=item.bot_response,
         ).with_inputs(
             "current_situation",
             "user_action",
             "history",
+            "world_event",
+            "previous_bot_response",
             "interaction_mode",
             "mishearing_candidates",
         )

@@ -13,13 +13,14 @@ import hashlib
 import json
 import os
 import platform
+import select
 import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # DSPyのリクエストキャッシュもホームではなく、このプロジェクト内へ隔離する。
 os.environ.setdefault(
@@ -48,6 +49,7 @@ from narrative_state import (
     apply_situation_update,
     coerce_situation,
 )
+from narrative_events import HoneyGiftEventController, NarrativeAction, WorldEvent
 from pooh_examples import (
     INITIAL_SITUATION,
     MISHEARING_EXAMPLES,
@@ -58,8 +60,8 @@ from pooh_examples import (
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v1"
-METRIC_VERSION = "structured-state-judge-v1"
+PROGRAM_VERSION = "pooh-structured-state-v18"
+METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", "logs"))
@@ -67,6 +69,7 @@ CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", ".dspy_cache"))
 BOOTSTRAP_METRIC_THRESHOLD = 0.8
 MAX_BOOTSTRAPPED_DEMOS = 4
 MAX_LABELED_DEMOS = 0
+MAX_TOTAL_DEMOS_PER_STAGE = 12
 
 class AnalyzeInteraction(dspy.Signature):
     """参加者の発話・行為に最も自然な応答方針を選ぶ。
@@ -80,6 +83,7 @@ class AnalyzeInteraction(dspy.Signature):
     身体的行為はnarrativeとする。
     挨拶、相槌、間投詞、「これでいい？」「続けてもいい？」のような進行確認など、
     物語世界の出来事を伴わない発話だけをordinaryとする。
+    場面についての問いかけへの「迷う」「わからない」も、履歴を踏まえてnarrativeとする。
     判断に迷う場合はordinaryではなくnarrativeを優先する。
     """
 
@@ -94,9 +98,8 @@ class AnalyzeInteraction(dspy.Signature):
     )
     current_scene: str = dspy.OutputField(
         desc=(
-            "デバッグ用。会話例に場面ラベル（例:「場面1」「場面2の代替」）が付いている"
-            "シナリオでは、今回の展開が最も近い場面のラベルを返す。実際の応答生成や"
-            "状態更新には使わない。参考にできる場面ラベルがない場合は空文字列。"
+            "観察用の場面ID。会話例に定義された場面のうち、現在の展開に最も近い"
+            "安定したIDを返す。順序や状態遷移の制御には使わない。該当しなければnone。"
         )
     )
 
@@ -124,12 +127,34 @@ class GeneratePoohResponse(dspy.Signature):
     参加者が尋ねたことを、答えずにそのまま聞き返してもいけない
     （例：「どんなお菓子があるの？」→「どんなお菓子が良いかな」）。
     毎回、応答の最後を問いかけで締めくくる必要はない。自分の考えや感想だけで
-    終えてよい。直前や直近の応答と同じ、または似た問いかけを繰り返さない。
+    終えてよい。previous_bot_responseと同じ、または意味的に同じ内容を繰り返さない。
+    参加者が迷ったり思いつかなかったりしたら、場面に沿った具体案を一つ、
+    プー自身の考えとして理由とともに示す。参加者の同意や行動は決めつけない。
+    質問にはまず答える。知らない事実は知らないと伝え、プー自身の提案を添える
+    （例：相手の好みの色を知らなくても、「青が好きそうだと思うよ」のように
+    自分の考えを示す）。「きみは知ってる？」「何か思いついた？」などで
+    同じ問いを参加者へ戻さない。
+    質問だけでなく、説明や安心させるセリフも履歴から繰り返さない。言い換えだけも避ける。
+    「いいね」などの相づちには短く受け止めるだけでもよい。進めるならプー自身の
+    小さな次の行動や考えを一つ示し、参加者の行動や場面の結末を勝手に決めない。
+    聞き直しや確認には必要な内容を再提示してよい。新しい内容のために、未確認の
+    好みや物資の補充を捏造しない。心配にはその内容に即した具体的な工夫で応じる。
+    world_event は既に確定した事実として扱う。
     """
 
     current_situation: NarrativeSituation = dspy.InputField()
     user_action: str = dspy.InputField()
     history: str = dspy.InputField()
+    world_event: str = dspy.InputField(
+        desc="参加者の入力とは別に、既に確定・適用された世界の出来事。通常ターンは空文字列。"
+    )
+    previous_bot_response: str = dspy.InputField(
+        desc=(
+            "直前のプー自身の応答。これと同じ、または意味的に同じ内容("
+            "同じ質問・同じ説明・同じ安心させるセリフ等)を繰り返さない。"
+            "最初のターンでは空文字列。"
+        )
+    )
     interaction_mode: str = dspy.InputField()
     mishearing_candidates: list[MishearingCandidate] = dspy.InputField(
         desc=(
@@ -146,15 +171,25 @@ class GeneratePoohResponse(dspy.Signature):
             "現在状態の保持と差分の適用はPythonが行う。"
         )
     )
+    narrative_actions: list[NarrativeAction] = dspy.OutputField(
+        desc=(
+            "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
+            "commit_honey_jar_gift、cancel_honey_jar_gift、"
+            "give_honey_jar_to_participant、deliver_honey_jar_to_eeyore、"
+            "block_pooh_honey_access、resolve_empty_jar_gift(空になった壺を"
+            "どう贈るか、具体的な内容によらず決着した場合)。該当しなければ空リスト。"
+        )
+    )
     bot_response: str = dspy.OutputField(
         desc=(
             "参加者に提示する短く自然で穏やかなセリフ。"
-            "物語世界外の技術語全体を直接出さない。"
-            "不確かな短い音の候補があれば、その音を使って不理解を示す。"
+            "物語世界外の技術語全体を直接出さず、技術語を直接説明せず、"
+            "利用可能な聞き違い候補があれば、その音を使って不理解を示す。"
             "理解したような肯定、説明、自己同定をしない。"
             "プー自身の好み・考え・次にしたいことを参加者に決めさせない。"
             "参加者の質問を答えずにそのまま聞き返さない。"
-            "毎回問いかけで終える必要はない。直近の応答と同じ・似た問いかけを繰り返さない。"
+            "毎回問いかけで終える必要はない。previous_bot_responseと同じ・"
+            "意味的に同じ内容を繰り返さない。"
         )
     )
 
@@ -196,6 +231,9 @@ class NarrativeQualityJudge(dspy.Signature):
     current_situation: NarrativeSituation = dspy.InputField()
     user_action: str = dspy.InputField()
     history: str = dspy.InputField()
+    previous_bot_response: str = dspy.InputField(
+        desc="直前のプー自身の応答。candidate_outputがこれと同じ、または意味的に同じ内容なら低く評価する。"
+    )
     reference_output: str = dspy.InputField()
     candidate_output: str = dspy.InputField()
     mode_accuracy: int = dspy.OutputField(desc="interaction_modeの分類精度。1〜5。")
@@ -213,7 +251,19 @@ class NarrativeQualityJudge(dspy.Signature):
         desc=(
             "プー自身が自分の好み・考え・次にしたいことを持ち、決定の主体を参加者へ"
             "委ねていないか。参加者の質問を答えずにそのまま聞き返していないか。"
-            "参加者自身の考えや行動を尋ねることは減点しない。1〜5。"
+            "迷いや不明への返答で、具体案を出さず同じ問いを言い換えて戻した場合は3以下。"
+            "知らない事実を捏造せず、プー自身の案を理由とともに示す応答を高く評価する。"
+            "参加者自身の考えや行動を初めて尋ねることは減点しない。1〜5。"
+        )
+    )
+    conversational_progress: int = dspy.OutputField(
+        desc=(
+            "previous_bot_responseと今回の入力の関係。相づちには短い受け止め、"
+            "またはプー自身の小さな次の行動で自然につなげれば高評価。場面を無理に"
+            "進める必要はない。聞き直し・確認への必要な再提示は許容するが、"
+            "要求されていない同じ説明・安心させるセリフの反復や、意味を変えない"
+            "言い換えは3以下。previous_bot_responseと同じ・意味的に同じ内容の"
+            "繰り返しは1。1〜5。"
         )
     )
     state_quality: int = dspy.OutputField(desc="状態更新の自足性と保持品質。1〜5。")
@@ -230,6 +280,48 @@ def count_prior_technical_mentions(history: str, technical_terms: list[str]) -> 
     )
 
 
+def enforce_response_invariants(
+    user_action: str,
+    history: str,
+    bot_response: str,
+    gift_status: str = "undecided",
+) -> str:
+    """Apply small deterministic guards for requirements LM output may violate."""
+    hesitation = any(
+        marker in user_action for marker in ("うーん", "迷", "まよう", "どうしよう", "わからない")
+    )
+    asks_back = any(
+        marker in bot_response for marker in ("？", "?", "どう思う", "何かいいアイデア", "何か思いつ")
+    )
+    # This fallback proposes the honey jar as a still-open idea. Once the gift
+    # has moved past that stage (committed, eaten, cancelled, delivered), the
+    # same word ("どうしよう" etc.) can appear for unrelated reasons (e.g.
+    # sympathizing that the honey is gone), and re-injecting this text would
+    # contradict what has already happened in the story.
+    if gift_status == "undecided" and hesitation and asks_back:
+        return "ぼくは、ハチミツの入った壺を贈るのがいいと思うな。甘いものがあると、イーヨーもきっと喜ぶもの。"
+
+    # Do not let the model introduce a prop the participant has not mentioned.
+    if user_action.strip() == "いいね" and "風船" not in history and "風船" in bot_response:
+        return "うん、そうしよう。イーヨーが喜んでくれるといいなあ。"
+
+    return bot_response
+
+
+def warn_if_response_repeated(bot_response: str, previous_bot_response: str | None) -> None:
+    """Flag an exact repeat of the immediately preceding Pooh line.
+
+    Detection only. A good non-repetitive line is context-dependent, so
+    fixing it belongs to DSPy's examples/metric, not a deterministic
+    Python substitution.
+    """
+    if previous_bot_response is not None and bot_response == previous_bot_response:
+        print(
+            f"警告: 直前の応答と完全に一致しています: {bot_response!r}",
+            file=sys.stderr,
+        )
+
+
 class PoohNarrativeAgent(dspy.Module):
     """Compiled multi-stage agent; the planner runs only for meta input."""
 
@@ -244,21 +336,28 @@ class PoohNarrativeAgent(dspy.Module):
         current_situation: NarrativeSituation | dict[str, Any],
         user_action: str,
         history: str,
-        previous_scene: str = "",
+        world_event: str = "",
+        event_scene: str = "none",
+        previous_bot_response: str = "",
     ) -> Any:
         current_situation = coerce_situation(current_situation)
-        classification = self.classify(
-            current_situation=current_situation,
-            user_action=user_action,
-            history=history,
-        )
-        mode = str(classification.interaction_mode)
-        current_scene = str(classification.current_scene)
-        extracted_terms = [str(term) for term in classification.technical_terms]
-        known_terms = find_known_technical_terms(user_action)
-        technical_terms = list(dict.fromkeys(extracted_terms + known_terms))
-        if technical_terms and mode != "exit":
-            mode = "meta"
+        technical_terms: list[str] = []
+        if world_event:
+            mode = "narrative"
+            current_scene = event_scene
+        else:
+            classification = self.classify(
+                current_situation=current_situation,
+                user_action=user_action,
+                history=history,
+            )
+            mode = str(classification.interaction_mode)
+            current_scene = str(classification.current_scene)
+            extracted_terms = [str(term) for term in classification.technical_terms]
+            known_terms = find_known_technical_terms(user_action)
+            technical_terms = list(dict.fromkeys(extracted_terms + known_terms))
+            if technical_terms and mode != "exit":
+                mode = "meta"
         candidates: list[MishearingCandidate] = []
         if mode == "meta" and technical_terms:
             prior_mentions = count_prior_technical_mentions(history, technical_terms)
@@ -282,13 +381,19 @@ class PoohNarrativeAgent(dspy.Module):
             current_situation=current_situation,
             user_action=user_action,
             history=history,
+            world_event=world_event,
+            previous_bot_response=previous_bot_response,
             interaction_mode=mode,
             mishearing_candidates=candidates,
         )
         situation_update = SituationUpdate.model_validate(response.situation_update)
         updated_situation = apply_situation_update(current_situation, situation_update)
         selected_mishearing = response.selected_mishearing
-        bot_response = response.bot_response
+        # Keep the raw LM response here.  Compile-time metrics must see model
+        # failures so BootstrapFewShot can learn from them; the optional
+        # runtime guard is applied only by the interactive chat loop.
+        bot_response = str(response.bot_response)
+        narrative_actions = [str(action) for action in response.narrative_actions]
         uses_uncertain_candidate = any(
             candidate.narrative_link.startswith("技術語を理解できず")
             and candidate.heard_as in bot_response
@@ -306,9 +411,11 @@ class PoohNarrativeAgent(dspy.Module):
             )
         return dspy.Prediction(
             interaction_mode=mode,
+            current_scene=current_scene,
             selected_mishearing=selected_mishearing,
             situation_update=situation_update,
             updated_situation=updated_situation,
+            narrative_actions=narrative_actions,
             bot_response=bot_response,
         )
 
@@ -333,8 +440,10 @@ def validate_environment(require_api_key: bool = True) -> None:
 def serialize_prediction(value: Any) -> str:
     fields = (
         "interaction_mode",
+        "current_scene",
         "selected_mishearing",
         "situation_update",
+        "narrative_actions",
         "bot_response",
     )
     payload = {}
@@ -365,6 +474,18 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
             getattr(pred, "interaction_mode", "")
         ):
             return 0.0
+        # current_scene is an observation shown to the user, not a control or
+        # semantic target.  A plausible scene estimate must not disqualify an
+        # otherwise good response during BootstrapFewShot.
+        if sorted(getattr(gold, "narrative_actions", [])) != sorted(
+            getattr(pred, "narrative_actions", [])
+        ):
+            return 0.0
+        previous_bot_response = str(getattr(gold, "previous_bot_response", ""))
+        # An exact repeat of the prior turn is unambiguous and cheap to check
+        # deterministically; no need to spend a judge call on it.
+        if previous_bot_response and str(getattr(pred, "bot_response", "")) == previous_bot_response:
+            return 0.0
         with dspy.context(lm=judge_lm):
             if str(getattr(gold, "interaction_mode", "")) == "meta":
                 meta_assessment = meta_evaluator(
@@ -380,9 +501,12 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
                 current_situation=coerce_situation(getattr(gold, "current_situation")),
                 user_action=str(getattr(gold, "user_action", "")),
                 history=str(getattr(gold, "history", "")),
+                previous_bot_response=previous_bot_response,
                 reference_output=reference,
                 candidate_output=candidate,
             )
+        if clamp_score(assessment.conversational_progress) < 4:
+            return 0.0
         if clamp_score(assessment.pooh_agency) < 4:
             return 0.0
         scores = [
@@ -392,6 +516,7 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
             clamp_score(assessment.participant_agency),
             clamp_score(assessment.pooh_agency),
             clamp_score(assessment.state_quality),
+            clamp_score(assessment.conversational_progress),
         ]
         return sum(scores) / (5 * len(scores))
 
@@ -411,7 +536,8 @@ def cache_hash(train_model: str, judge_model: str, scenario: Scenario | None = N
             BOOTSTRAP_METRIC_THRESHOLD,
             MAX_BOOTSTRAPPED_DEMOS,
             MAX_LABELED_DEMOS,
-            "merge_stage_demos_v1",
+            MAX_TOTAL_DEMOS_PER_STAGE,
+            "merge_stage_demos_v2",
         ],
         "full_turn_examples": [item.toDict() for item in scenario.trainset],
         "mode_examples": [item.toDict() for item in scenario.mode_examples],
@@ -449,12 +575,38 @@ def set_agent_demos(agent: Any, scenario: Scenario) -> None:
     set_module_demos(agent.respond, scenario.response_examples)
 
 
+def select_labeled_demos(labeled_demos: list[Any], count: int) -> list[Any]:
+    """Pick up to `count` labeled demos evenly spaced across the full list,
+    so demo diversity never depends on how the curated set happens to be
+    ordered in the source file (e.g. grouped by scene for readability).
+    A head/tail split silently starves whichever region of the list shares
+    a trait (like current_scene) once the file is sorted by that trait;
+    even spacing keeps coverage broad regardless of ordering. The first and
+    last items are always included when count >= 2."""
+    if count <= 0:
+        return []
+    total = len(labeled_demos)
+    if count >= total:
+        return list(labeled_demos)
+    if count == 1:
+        return [labeled_demos[0]]
+    selected: list[Any] = []
+    seen_indices: set[int] = set()
+    for step in range(count):
+        index = round(step * (total - 1) / (count - 1))
+        if index not in seen_indices:
+            seen_indices.add(index)
+            selected.append(labeled_demos[index])
+    return selected
+
+
 def merge_module_demos(module: Any, labeled_demos: list[Any]) -> None:
-    """Keep accepted traces first and fill the old stage-specific demo budget."""
+    """Keep accepted traces first and fill the rest up to a fixed total
+    demo budget per stage, regardless of how large the curated set grows."""
     for predictor in module.predictors():
         bootstrapped = list(predictor.demos)
-        remaining = max(0, len(labeled_demos) - len(bootstrapped))
-        predictor.demos = bootstrapped + labeled_demos[:remaining]
+        remaining = max(0, MAX_TOTAL_DEMOS_PER_STAGE - len(bootstrapped))
+        predictor.demos = bootstrapped + select_labeled_demos(labeled_demos, remaining)
 
 
 def merge_agent_demos(agent: Any, scenario: Scenario) -> None:
@@ -510,6 +662,10 @@ class Turn:
     interaction_mode: str
     bot_response: str
     updated_situation: NarrativeSituation
+    scene_id: str = "none"
+    source: str = "participant"
+    world_event: str = ""
+    narrative_actions: list[str] | None = None
 
 
 def format_history(turns: list[Turn], max_turns: int = 6) -> str:
@@ -517,9 +673,16 @@ def format_history(turns: list[Turn], max_turns: int = 6) -> str:
     recent = turns[-max_turns:]
     start = len(turns) - len(recent) + 1
     for index, turn in enumerate(recent, start=start):
+        input_line = (
+            f"参加者の生入力: {turn.user_action}"
+            if turn.source == "participant"
+            else f"世界イベント: {turn.world_event}"
+        )
         chunks.append(
-            f"Turn {index}\n参加者の生入力: {turn.user_action}\n"
+            f"Turn {index}\n{input_line}\n"
             f"応答モード: {turn.interaction_mode}\n"
+            f"参考場面ID: {turn.scene_id}\n"
+            f"物語アクション: {turn.narrative_actions or []}\n"
             f"プーの応答: {turn.bot_response}\n更新後の状態: {turn.updated_situation}"
         )
     return "\n\n".join(chunks)
@@ -533,9 +696,25 @@ def append_log(path: Path, turn: Turn, metadata: dict[str, Any]) -> None:
         stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def invoke(agent: Any, situation: NarrativeSituation, action: str, history: str) -> tuple[Any, float]:
+def invoke(
+    agent: Any,
+    situation: NarrativeSituation,
+    action: str,
+    history: str,
+    *,
+    world_event: str = "",
+    event_scene: str = "none",
+    previous_bot_response: str = "",
+) -> tuple[Any, float]:
     started = time.perf_counter()
-    result = agent(current_situation=situation, user_action=action, history=history)
+    result = agent(
+        current_situation=situation,
+        user_action=action,
+        history=history,
+        world_event=world_event,
+        event_scene=event_scene,
+        previous_bot_response=previous_bot_response,
+    )
     return result, (time.perf_counter() - started) * 1000
 
 
@@ -549,16 +728,143 @@ def pooh_line(text: str) -> str:
     return f"{_ANSI_POOH}プー: {text}{_ANSI_RESET}"
 
 
-def print_result(label: str, result: Any) -> None:
+def normalize_scene_id(scene_id: str, scenario: Scenario) -> str:
+    return scene_id if scenario.scene_label(scene_id) is not None else "none"
+
+
+_SITUATION_SCALAR_FIELDS = (("place", "場所"), ("purpose", "場面の目的"), ("relationship", "関係"))
+_SITUATION_LIST_FIELDS = (
+    ("characters", "登場人物"),
+    ("props", "小道具と状態"),
+    ("events", "重要な出来事"),
+    ("unresolved", "未解決・未確定"),
+)
+
+
+def format_situation_diff(
+    previous: NarrativeSituation | None,
+    current: NarrativeSituation,
+) -> str:
+    """Render only what changed this turn.
+
+    Debugging a missed narrative_action (e.g. a decision that should have
+    been recorded but wasn't) means noticing that a field did NOT change;
+    that is easy to miss by eye in two full situation blocks printed one
+    after another, but obvious when the diff has nothing to show for it.
+    """
+    if previous is None:
+        return str(current)
+    lines: list[str] = []
+    for field, label in _SITUATION_SCALAR_FIELDS:
+        old_value = getattr(previous, field)
+        new_value = getattr(current, field)
+        if old_value != new_value:
+            lines.append(f"【{label}】{old_value} → {new_value}")
+    for field, label in _SITUATION_LIST_FIELDS:
+        old_values = list(getattr(previous, field))
+        new_values = list(getattr(current, field))
+        added = [value for value in new_values if value not in old_values]
+        removed = [value for value in old_values if value not in new_values]
+        if added:
+            lines.append(f"【{label}: 追加】" + "、".join(added))
+        if removed:
+            lines.append(f"【{label}: 削除】" + "、".join(removed))
+    return "\n".join(lines) if lines else "(変化なし)"
+
+
+def print_result(
+    label: str,
+    result: Any,
+    scenario: Scenario,
+    previous_situation: NarrativeSituation | None = None,
+) -> None:
     print(f"\n--- {label} ---")
     print(f"[応答モード] {result.interaction_mode}")
-    print(f"[場面の更新] {result.updated_situation}")
+    scene_id = normalize_scene_id(str(getattr(result, "current_scene", "none")), scenario)
+    scene_label = scenario.scene_label(scene_id)
+    print(f"[参考場面] {scene_label or '該当なし'}")
+    print(f"[物語アクション] {list(getattr(result, 'narrative_actions', []))}")
+    print(f"[場面の変化]\n{format_situation_diff(previous_situation, result.updated_situation)}")
     print(pooh_line(result.bot_response))
 
 
-def run_chat(agent: Any, model_name: str, program_id: str, scenario: Scenario) -> None:
+def read_console_input(prompt: str, timeout: float | None) -> str | None:
+    """Read one line while allowing a pending timed event to wake the loop."""
+    print(prompt, end="", flush=True)
+    readable, _, _ = select.select([sys.stdin], [], [], timeout)
+    if not readable:
+        print(_ANSI_RESET)
+        return None
+    line = sys.stdin.readline()
+    if line == "":
+        raise EOFError
+    print(_ANSI_RESET, end="")
+    return line.strip()
+
+
+def create_event_controller(
+    scenario: Scenario,
+    clock: Callable[[], float] = time.monotonic,
+) -> HoneyGiftEventController | None:
+    if scenario.event_inactivity_delay_seconds is None:
+        return None
+    return HoneyGiftEventController(scenario.event_inactivity_delay_seconds, clock=clock)
+
+
+def _event_result(
+    agent: Any,
+    current_situation: NarrativeSituation,
+    event: WorldEvent,
+    history: str,
+    previous_bot_response: str = "",
+) -> tuple[Any, float, bool]:
+    if event.fixed_response:
+        return dspy.Prediction(
+            interaction_mode="narrative",
+            current_scene=event.scene_id,
+            selected_mishearing="none",
+            situation_update=SituationUpdate(),
+            updated_situation=current_situation,
+            narrative_actions=[],
+            bot_response=event.fallback_response,
+        ), 0.0, False
+    try:
+        result, latency_ms = invoke(
+            agent,
+            current_situation,
+            "",
+            history,
+            world_event=event.description,
+            event_scene=event.scene_id,
+            previous_bot_response=previous_bot_response,
+        )
+        return result, latency_ms, False
+    except Exception:
+        # The event is already committed. Language generation may fall back,
+        # but it must not roll the world state back or fire the event twice.
+        return dspy.Prediction(
+            interaction_mode="narrative",
+            current_scene=event.scene_id,
+            selected_mishearing="none",
+            situation_update=SituationUpdate(),
+            updated_situation=current_situation,
+            narrative_actions=[],
+            bot_response=event.fallback_response,
+        ), 0.0, True
+
+
+def run_chat(
+    agent: Any,
+    model_name: str,
+    program_id: str,
+    scenario: Scenario,
+    *,
+    input_fn: Callable[[str], str] | None = None,
+    event_controller: HoneyGiftEventController | None = None,
+) -> None:
     current_situation = scenario.initial_situation
     turns: list[Turn] = []
+    controller = event_controller or create_event_controller(scenario)
     session = datetime.now().strftime("%Y%m%dT%H%M%S")
     log_path = LOG_DIR / f"session_{session}.jsonl"
     print(f"シナリオ: {scenario.label}")
@@ -566,24 +872,109 @@ def run_chat(agent: Any, model_name: str, program_id: str, scenario: Scenario) -
     print(f"\n{pooh_line(scenario.opening_line)}")
     print("終了するには exit と入力してください。")
     while True:
+        event = controller.pop_due_event() if controller is not None else None
+        if event is not None:
+            situation_before_event = current_situation
+            current_situation = apply_situation_update(
+                current_situation,
+                event.situation_update,
+            )
+            history = f"会話の冒頭\nプーの応答: {scenario.opening_line}\n\n{format_history(turns)}"
+            result, latency_ms, used_fallback = _event_result(
+                agent,
+                current_situation,
+                event,
+                history,
+                previous_bot_response=turns[-1].bot_response if turns else "",
+            )
+            event_narrative_actions = list(getattr(result, "narrative_actions", []))
+            controller.observe_actions(event_narrative_actions)
+            result.updated_situation = controller.synchronize_situation(
+                result.updated_situation
+            )
+            result.current_scene = event.scene_id
+            print_result("Timed Event", result, scenario, situation_before_event)
+            turn = Turn(
+                user_action="",
+                interaction_mode=result.interaction_mode,
+                bot_response=result.bot_response,
+                updated_situation=result.updated_situation,
+                scene_id=event.scene_id,
+                source="world_event",
+                world_event=event.description,
+                narrative_actions=event_narrative_actions,
+            )
+            turns.append(turn)
+            current_situation = result.updated_situation
+            append_log(
+                log_path,
+                turn,
+                {
+                    "model": model_name,
+                    "program_id": program_id,
+                    "scenario": scenario.key,
+                    "world_event_id": event.event_id,
+                    "generation_fallback": used_fallback,
+                    "latency_ms": round(latency_ms, 1),
+                },
+            )
+            continue
         try:
-            user_input = input(f"\n{_ANSI_PARTICIPANT}あなたの発話・行為: ").strip()
-            print(_ANSI_RESET, end="")
+            prompt = f"\n{_ANSI_PARTICIPANT}あなたの発話・行為: "
+            if input_fn is None:
+                timeout = controller.seconds_until_due() if controller is not None else None
+                user_input = read_console_input(prompt, timeout)
+            else:
+                user_input = input_fn(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             print(_ANSI_RESET)
             break
+        if user_input is None:
+            continue
         if user_input.lower() == "exit":
             break
         if not user_input:
             print("発話か行為を入力してください。")
             continue
-        result, latency_ms = invoke(agent, current_situation, user_input, format_history(turns))
-        print_result("Compiled", result)
+        if controller is not None:
+            controller.observe_user_input()
+        history = f"会話の冒頭\nプーの応答: {scenario.opening_line}\n\n{format_history(turns)}"
+        result, latency_ms = invoke(
+            agent,
+            current_situation,
+            user_input,
+            history,
+            previous_bot_response=turns[-1].bot_response if turns else "",
+        )
+        result.bot_response = enforce_response_invariants(
+            user_action=user_input,
+            history=history,
+            bot_response=str(result.bot_response),
+            gift_status=controller.state.gift_status if controller is not None else "undecided",
+        )
+        if controller is not None:
+            controller.observe_actions(
+                list(getattr(result, "narrative_actions", []))
+            )
+            result.updated_situation = controller.synchronize_situation(
+                result.updated_situation
+            )
+        result.current_scene = normalize_scene_id(
+            str(getattr(result, "current_scene", "none")),
+            scenario,
+        )
+        warn_if_response_repeated(
+            result.bot_response,
+            turns[-1].bot_response if turns else None,
+        )
+        print_result("Compiled", result, scenario, current_situation)
         turn = Turn(
             user_action=user_input,
             interaction_mode=result.interaction_mode,
             bot_response=result.bot_response,
             updated_situation=result.updated_situation,
+            scene_id=result.current_scene,
+            narrative_actions=list(getattr(result, "narrative_actions", [])),
         )
         turns.append(turn)
         current_situation = result.updated_situation
@@ -614,7 +1005,7 @@ def run_comparison(compiled: Any, scenario: Scenario) -> None:
     agents = {"Predict": predict, "ChainOfThought": chain, "Compiled": compiled}
     for label, agent in agents.items():
         result, _ = invoke(agent, scenario.initial_situation, action, "")
-        print_result(label, result)
+        print_result(label, result, scenario)
 
 
 def parse_args() -> argparse.Namespace:
