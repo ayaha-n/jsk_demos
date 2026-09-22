@@ -67,9 +67,8 @@ DSPy の再コンパイルを不要にする。どちらも実験条件に応じ
 
 自然言語の場面説明に加え、安定した ID を持つシナリオ固有の状態を管理する。
 
-- `gift_status`: `undecided / committed / delivered / cancelled`
+- `gift_status`: `undecided / committed`
 - `honey_status`: `full / empty`
-- `jar_holder`: `pooh / participant / eeyore`
 - `access_restriction`: `none / blocked`
 - イベントIDごとの期限: 内部スケジューラがイベント定義ごとに保持する
 

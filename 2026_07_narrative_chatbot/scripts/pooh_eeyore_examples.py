@@ -290,9 +290,8 @@ EEYORE_BIRTHDAY_TRAINSET = [
         history="プーは蜂蜜の入った壺をイーヨーに贈ると決めた。",
         interaction_mode="narrative",
         current_scene="2",
-        # プーが壺を手放すとjar_holderが"pooh"でなくなり、必須の
-        # 味見/実食イベントが二度と発火しなくなる。ここは断って自分で
-        # 持ち続けることで、その必須イベントの前提を壊さないようにする。
+        # 必須の味見/実食イベントへ進めるよう、ここでは壺を渡さず
+        # プーが自分で持ち続ける応答にする。
         situation_update=SituationUpdate(
             add_events=["プーは壺を渡さず、自分で持っておくことにした"],
         ),

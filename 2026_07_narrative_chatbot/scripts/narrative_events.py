@@ -11,9 +11,6 @@ from narrative_state import NarrativeSituation, SituationUpdate, apply_situation
 
 NarrativeAction = Literal[
     "commit_honey_jar_gift",
-    "cancel_honey_jar_gift",
-    "give_honey_jar_to_participant",
-    "deliver_honey_jar_to_eeyore",
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
     "resolve_balloon_color",
@@ -22,9 +19,6 @@ NarrativeAction = Literal[
 
 KNOWN_NARRATIVE_ACTIONS = {
     "commit_honey_jar_gift",
-    "cancel_honey_jar_gift",
-    "give_honey_jar_to_participant",
-    "deliver_honey_jar_to_eeyore",
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
     "resolve_balloon_color",
@@ -63,10 +57,7 @@ HONEY_PREPARATION_UNRESOLVED = "ハチミツの準備をどう進めるか"
 EMPTY_JAR_UNRESOLVED = "空になった壺をどうするか"
 BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
 RIBBON_COLOR_UNRESOLVED = "リボンの色"
-JAR_WITH_PARTICIPANT_EVENT = "参加者が蜂蜜壺を預かった"
 BLOCKED_ACCESS_EVENT = "参加者が贈り物の蜂蜜を食べないよう明確に制止した"
-GIFT_CANCELLED_EVENT = "プーが蜂蜜を贈る計画を取りやめた"
-GIFT_DELIVERED_EVENT = "プーがイーヨーに蜂蜜の入った壺を届けた"
 
 
 @dataclass(frozen=True)
@@ -94,7 +85,6 @@ class RequiredNarrativeEvent:
 class HoneyGiftState:
     gift_status: str = "undecided"
     honey_status: str = "full"
-    jar_holder: str = "pooh"
     access_restriction: str = "none"
     completed_event_ids: set[str] = field(default_factory=set)
 
@@ -150,7 +140,6 @@ class HoneyGiftEventController:
                 prerequisite=lambda state: (
                     state.gift_status == "committed"
                     and state.honey_status == "full"
-                    and state.jar_holder == "pooh"
                     and state.access_restriction != "blocked"
                 ),
                 fire=HoneyGiftEventController._fire_honey_tasting,
@@ -162,7 +151,6 @@ class HoneyGiftEventController:
                 prerequisite=lambda state: (
                     state.gift_status == "committed"
                     and state.honey_status == "full"
-                    and state.jar_holder == "pooh"
                     and state.access_restriction != "blocked"
                     and "pooh_tastes_honey" in state.completed_event_ids
                 ),
@@ -198,14 +186,6 @@ class HoneyGiftEventController:
                 continue
             if action == "commit_honey_jar_gift":
                 self._commit_gift()
-            elif action == "cancel_honey_jar_gift":
-                self._invalidate_decision("cancelled")
-            elif action == "give_honey_jar_to_participant":
-                self.state.jar_holder = "participant"
-                self._cancel_schedule()
-            elif action == "deliver_honey_jar_to_eeyore":
-                self.state.jar_holder = "eeyore"
-                self._invalidate_decision("delivered")
             elif action == "block_pooh_honey_access":
                 self.state.access_restriction = "blocked"
                 self._cancel_schedule()
@@ -244,7 +224,6 @@ class HoneyGiftEventController:
             return
         if (
             state.honey_status != "full"
-            or state.jar_holder != "pooh"
             or state.access_restriction == "blocked"
         ):
             return
@@ -305,10 +284,6 @@ class HoneyGiftEventController:
             ),
             fixed_response=True,
         )
-
-    def _invalidate_decision(self, status: str) -> None:
-        self._cancel_schedule()
-        self.state.gift_status = status
 
     def _cancel_schedule(self) -> None:
         state = self.state
@@ -378,31 +353,9 @@ class HoneyGiftEventController:
                 situation,
                 SituationUpdate(remove_unresolved=[RIBBON_COLOR_UNRESOLVED]),
             )
-        if self.state.jar_holder == "participant":
-            situation = apply_situation_update(
-                situation,
-                SituationUpdate(add_events=[JAR_WITH_PARTICIPANT_EVENT]),
-            )
         if self.state.access_restriction == "blocked":
             situation = apply_situation_update(
                 situation,
                 SituationUpdate(add_events=[BLOCKED_ACCESS_EVENT]),
-            )
-        if self.state.gift_status == "cancelled":
-            situation = apply_situation_update(
-                situation,
-                SituationUpdate(
-                    add_events=[GIFT_CANCELLED_EVENT],
-                    remove_unresolved=[HONEY_PREPARATION_UNRESOLVED],
-                    add_unresolved=list(GIFT_DECISION_UNRESOLVED),
-                ),
-            )
-        if self.state.gift_status == "delivered":
-            situation = apply_situation_update(
-                situation,
-                SituationUpdate(
-                    add_events=[GIFT_DELIVERED_EVENT],
-                    remove_unresolved=[HONEY_PREPARATION_UNRESOLVED],
-                ),
             )
         return situation

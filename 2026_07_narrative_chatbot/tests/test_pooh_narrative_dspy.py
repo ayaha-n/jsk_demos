@@ -75,14 +75,11 @@ from narrative_events import (
     BALLOON_COLOR_UNRESOLVED,
     BLOCKED_ACCESS_EVENT,
     EMPTY_JAR_UNRESOLVED,
-    GIFT_CANCELLED_EVENT,
     GIFT_DECISION_UNRESOLVED,
-    GIFT_DELIVERED_EVENT,
     HONEY_EATEN_RESPONSE,
     HONEY_GIFT_COMMITTED_EVENT,
     HONEY_PREPARATION_UNRESOLVED,
     HONEY_TASTED_EVENT,
-    JAR_WITH_PARTICIPANT_EVENT,
     RIBBON_COLOR_UNRESOLVED,
     HoneyGiftEventController,
     RequiredNarrativeEvent,
@@ -846,16 +843,6 @@ class RegressionTests(unittest.TestCase):
             "eating event was indefinitely postponed by unrelated input",
         )
 
-    def test_honey_event_is_cancelled_when_jar_leaves_pooh(self):
-        now = [0.0]
-        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
-        controller.observe_actions(["commit_honey_jar_gift"])
-        controller.observe_actions(["give_honey_jar_to_participant"])
-        now[0] = 60.0
-        self.assertIsNone(controller.pop_due_event())
-        self.assertEqual(controller.state.jar_holder, "participant")
-        self.assertEqual(controller.state.honey_status, "full")
-
     def test_synchronize_situation_clears_gift_unresolved_without_example_support(self):
         now = [0.0]
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
@@ -870,17 +857,6 @@ class RegressionTests(unittest.TestCase):
         for item in GIFT_DECISION_UNRESOLVED:
             self.assertNotIn(item, updated.unresolved)
         self.assertIn(HONEY_GIFT_COMMITTED_EVENT, updated.events)
-
-    def test_synchronize_situation_does_not_claim_a_decision_that_never_happened(self):
-        now = [0.0]
-        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
-        # Cancelling without ever committing must not fabricate a decision.
-        controller.observe_actions(["cancel_honey_jar_gift"])
-        situation = pooh.get_scenario("eeyore_birthday").initial_situation
-        updated = controller.synchronize_situation(situation)
-        self.assertNotIn(HONEY_GIFT_COMMITTED_EVENT, updated.events)
-        for item in GIFT_DECISION_UNRESOLVED:
-            self.assertIn(item, updated.unresolved)
 
     def test_synchronize_situation_clears_empty_jar_unresolved_without_example_support(self):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
@@ -946,14 +922,6 @@ class RegressionTests(unittest.TestCase):
         # The premature signal must not have hidden the real, later thread.
         self.assertIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
 
-    def test_synchronize_situation_records_jar_with_participant_without_example_support(self):
-        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
-        controller.observe_actions(["give_honey_jar_to_participant"])
-        situation = pooh.get_scenario("eeyore_birthday").initial_situation
-
-        updated = controller.synchronize_situation(situation)
-        self.assertIn(JAR_WITH_PARTICIPANT_EVENT, updated.events)
-
     def test_synchronize_situation_records_blocked_access_without_example_support(self):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["block_pooh_honey_access"])
@@ -961,36 +929,6 @@ class RegressionTests(unittest.TestCase):
 
         updated = controller.synchronize_situation(situation)
         self.assertIn(BLOCKED_ACCESS_EVENT, updated.events)
-
-    def test_synchronize_situation_reopens_gift_unresolved_after_cancel(self):
-        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
-        controller.observe_actions(["commit_honey_jar_gift"])
-        controller.observe_actions(["cancel_honey_jar_gift"])
-        situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
-            update={"unresolved": [], "events": [HONEY_GIFT_COMMITTED_EVENT]},
-        )
-
-        updated = controller.synchronize_situation(situation)
-        # The earlier decision stays on record, but cancelling it reopens
-        # what to give (and that prep isn't done) rather than leaving both
-        # silently marked as resolved.
-        self.assertIn(HONEY_GIFT_COMMITTED_EVENT, updated.events)
-        self.assertIn(GIFT_CANCELLED_EVENT, updated.events)
-        for item in GIFT_DECISION_UNRESOLVED:
-            self.assertIn(item, updated.unresolved)
-        self.assertNotIn(HONEY_PREPARATION_UNRESOLVED, updated.unresolved)
-
-    def test_synchronize_situation_records_delivery_and_clears_preparation_unresolved(self):
-        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
-        controller.observe_actions(["commit_honey_jar_gift"])
-        controller.observe_actions(["deliver_honey_jar_to_eeyore"])
-        situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
-            update={"unresolved": [HONEY_PREPARATION_UNRESOLVED]},
-        )
-
-        updated = controller.synchronize_situation(situation)
-        self.assertIn(GIFT_DELIVERED_EVENT, updated.events)
-        self.assertNotIn(HONEY_PREPARATION_UNRESOLVED, updated.unresolved)
 
     def test_synchronize_situation_clears_gift_unresolved_after_auto_fire_commit(self):
         now = [0.0]

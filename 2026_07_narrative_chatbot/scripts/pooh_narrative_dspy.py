@@ -64,7 +64,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v21"
+PROGRAM_VERSION = "pooh-structured-state-v22"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -186,9 +186,8 @@ class GeneratePoohResponse(dspy.Signature):
     narrative_actions: list[NarrativeAction] = dspy.OutputField(
         desc=(
             "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
-            "commit_honey_jar_gift、cancel_honey_jar_gift、"
-            "give_honey_jar_to_participant、deliver_honey_jar_to_eeyore、"
-            "block_pooh_honey_access、resolve_empty_jar_gift(空になった壺を"
+            "commit_honey_jar_gift、block_pooh_honey_access、"
+            "resolve_empty_jar_gift(空になった壺を"
             "どう贈るか、具体的な内容によらず決着した場合)、"
             "resolve_balloon_color(贈り物にする風船の色が、誰の案によるかに"
             "関わらず決着した場合)、"
