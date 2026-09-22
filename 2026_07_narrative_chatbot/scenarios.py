@@ -16,6 +16,18 @@ import dspy
 from narrative_state import NarrativeSituation
 
 
+# 蜂蜜壺を贈ると決めてから、プーが蜂蜜を食べてしまうまでの秒数。
+EEYORE_EVENT_INACTIVITY_DELAY_SECONDS = 30.0
+
+
+@dataclass(frozen=True)
+class SceneDefinition:
+    """A display-only scene inferred by DSPy; never used for control flow."""
+
+    scene_id: str
+    label: str
+
+
 @dataclass(frozen=True)
 class Scenario:
     key: str
@@ -26,6 +38,14 @@ class Scenario:
     mode_examples: list[dspy.Example]
     mishearing_examples: list[dspy.Example]
     response_examples: list[dspy.Example]
+    scenes: tuple[SceneDefinition, ...] = ()
+    event_inactivity_delay_seconds: float | None = None
+
+    def scene_label(self, scene_id: str) -> str | None:
+        return next(
+            (scene.label for scene in self.scenes if scene.scene_id == scene_id),
+            None,
+        )
 
 
 def _tea_party() -> Scenario:
@@ -69,6 +89,18 @@ def _eeyore_birthday() -> Scenario:
         mode_examples=EEYORE_BIRTHDAY_MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,
         response_examples=EEYORE_BIRTHDAY_RESPONSE_EXAMPLES,
+        scenes=(
+            SceneDefinition("1a", "場面1a：プーがハチミツを贈ると提案する"),
+            SceneDefinition("1b", "場面1b：参加者が別の贈り物を提案する"),
+            SceneDefinition("1c", "場面1c：プーが自発的にハチミツを贈ると決める（無入力での自動発生）"),
+            SceneDefinition("2", "場面2：一口だけのつもりで持ち出す（伏線・自動発生）"),
+            SceneDefinition("3", "場面3：プーが蜂蜜を食べてしまう（自動発生）"),
+            SceneDefinition("4a", "場面4a：空になった壺をそのまま贈ることにする"),
+            SceneDefinition("4b", "場面4b：蜂蜜以外の贈り物に切り替える"),
+            SceneDefinition("5", "場面5：決めた贈り物を振り返る"),
+            SceneDefinition("6", "場面6：贈り物の準備を詰める（色などの詳細を相談する）"),
+        ),
+        event_inactivity_delay_seconds=EEYORE_EVENT_INACTIVITY_DELAY_SECONDS,
     )
 
 
