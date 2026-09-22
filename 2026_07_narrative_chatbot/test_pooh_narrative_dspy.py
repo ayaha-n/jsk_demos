@@ -79,6 +79,7 @@ from narrative_events import (
     HONEY_PREPARATION_UNRESOLVED,
     HONEY_TASTED_EVENT,
     JAR_WITH_PARTICIPANT_EVENT,
+    RIBBON_COLOR_UNRESOLVED,
     HoneyGiftEventController,
     RequiredNarrativeEvent,
     WorldEvent,
@@ -125,6 +126,7 @@ class RegressionTests(unittest.TestCase):
         tea_party = pooh.get_scenario("tea_party")
         self.assertEqual(tea_party.pooh_preferences, {})
         self.assertIn(BALLOON_COLOR_UNRESOLVED, eeyore.pooh_preferences)
+        self.assertIn(RIBBON_COLOR_UNRESOLVED, eeyore.pooh_preferences)
 
         # Not surfaced when the topic isn't currently unresolved.
         self.assertEqual(
@@ -837,6 +839,17 @@ class RegressionTests(unittest.TestCase):
         # clear this deterministically.
         updated = controller.synchronize_situation(situation)
         self.assertNotIn(BALLOON_COLOR_UNRESOLVED, updated.unresolved)
+
+    def test_synchronize_situation_clears_ribbon_color_unresolved_without_example_support(self):
+        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller.observe_actions(["resolve_ribbon_color"])
+        self.assertIn("ribbon_color_resolved", controller.state.completed_event_ids)
+
+        situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
+            update={"unresolved": [RIBBON_COLOR_UNRESOLVED]},
+        )
+        updated = controller.synchronize_situation(situation)
+        self.assertNotIn(RIBBON_COLOR_UNRESOLVED, updated.unresolved)
 
     def test_resolve_empty_jar_gift_is_ignored_before_honey_is_actually_empty(self):
         controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)

@@ -17,6 +17,7 @@ NarrativeAction = Literal[
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
     "resolve_balloon_color",
+    "resolve_ribbon_color",
 ]
 
 KNOWN_NARRATIVE_ACTIONS = {
@@ -27,6 +28,7 @@ KNOWN_NARRATIVE_ACTIONS = {
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
     "resolve_balloon_color",
+    "resolve_ribbon_color",
 }
 
 HONEY_EATEN_RESPONSE = (
@@ -60,6 +62,7 @@ GIFT_DECISION_UNRESOLVED = (
 HONEY_PREPARATION_UNRESOLVED = "ハチミツの準備をどう進めるか"
 EMPTY_JAR_UNRESOLVED = "空になった壺をどうするか"
 BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
+RIBBON_COLOR_UNRESOLVED = "リボンの色"
 JAR_WITH_PARTICIPANT_EVENT = "参加者が蜂蜜壺を預かった"
 BLOCKED_ACCESS_EVENT = "参加者が贈り物の蜂蜜を食べないよう明確に制止した"
 GIFT_CANCELLED_EVENT = "プーが蜂蜜を贈る計画を取りやめた"
@@ -198,6 +201,8 @@ class HoneyGiftEventController:
                 self._resolve_empty_jar_gift()
             elif action == "resolve_balloon_color":
                 self._resolve_balloon_color()
+            elif action == "resolve_ribbon_color":
+                self._resolve_ribbon_color()
         self._arm_required_events()
 
     def _resolve_empty_jar_gift(self) -> None:
@@ -215,6 +220,11 @@ class HoneyGiftEventController:
         # color topic is settled, so the "贈り物にする風船の色" unresolved
         # item is cleared deterministically regardless of phrasing.
         self.state.completed_event_ids.add("balloon_color_resolved")
+
+    def _resolve_ribbon_color(self) -> None:
+        # Same design as _resolve_balloon_color: Python only tracks that the
+        # ribbon-color topic is settled, never the chosen value itself.
+        self.state.completed_event_ids.add("ribbon_color_resolved")
 
     def _commit_gift(self) -> None:
         state = self.state
@@ -350,6 +360,11 @@ class HoneyGiftEventController:
             situation = apply_situation_update(
                 situation,
                 SituationUpdate(remove_unresolved=[BALLOON_COLOR_UNRESOLVED]),
+            )
+        if "ribbon_color_resolved" in self.state.completed_event_ids:
+            situation = apply_situation_update(
+                situation,
+                SituationUpdate(remove_unresolved=[RIBBON_COLOR_UNRESOLVED]),
             )
         if self.state.jar_holder == "participant":
             situation = apply_situation_update(

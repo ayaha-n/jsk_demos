@@ -18,6 +18,7 @@ from narrative_events import (
     HONEY_GIFT_COMMITTED_EVENT,
     HONEY_GIFT_COMMITTED_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
+    RIBBON_COLOR_UNRESOLVED,
 )
 from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
 from pooh_examples import (
@@ -41,7 +42,7 @@ EEYORE_BIRTHDAY_SITUATION = NarrativeSituation(
     place="100エーカーの森の空き地",
     purpose="プーと参加者が、イーヨーの誕生日プレゼントを一緒に考える",
     characters=["プー", "参加者", "イーヨー"],
-    props=["テーブル", "カップ", "皿", "蜂蜜壺", "いろいろな色の風船"],
+    props=["テーブル", "カップ", "皿", "蜂蜜壺", "いろいろな色の風船", "リボン"],
     events=[
         "今日はイーヨーの誕生日で、プーはまだ何も用意していない",
         "プーがイーヨーに会ってきたことを話した",
@@ -327,7 +328,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーがハチミツの入った壺をイーヨーに贈ることに決め、参加者も贈り物を考えている",
-                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船"],
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船", "リボン"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     HONEY_GIFT_COMMITTED_EVENT,
@@ -355,7 +356,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーがハチミツの入った壺をイーヨーに贈ることに決め、参加者も贈り物を考えている",
-                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船"],
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船", "リボン"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     HONEY_GIFT_COMMITTED_EVENT,
@@ -387,7 +388,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーはハチミツを食べてしまい、新しい贈り物を探している",
-                "props": ["テーブル", "カップ", "皿", "いろいろな色の風船", "参加者が選んだ風船", "空になった蜂蜜壺"],
+                "props": ["テーブル", "カップ", "皿", "いろいろな色の風船", "参加者が選んだ風船", "空になった蜂蜜壺", "リボン"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     HONEY_GIFT_COMMITTED_EVENT,
@@ -461,7 +462,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーがハチミツの入った壺をイーヨーに贈ることに決め、参加者も贈り物を考えている",
-                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船"],
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "参加者が選んだ風船", "リボン"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     HONEY_GIFT_COMMITTED_EVENT,
@@ -497,7 +498,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
                 "purpose": "プーが空になった蜂蜜壺をイーヨーへの贈り物にすることに決めた",
-                "props": ["テーブル", "カップ", "皿", "いろいろな色の風船", "参加者が選んだ風船", "空になった蜂蜜壺"],
+                "props": ["テーブル", "カップ", "皿", "いろいろな色の風船", "参加者が選んだ風船", "空になった蜂蜜壺", "リボン"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     HONEY_GIFT_COMMITTED_EVENT,
@@ -586,7 +587,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
     *example_variants(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
-                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船"],
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     HONEY_GIFT_COMMITTED_EVENT,
@@ -623,7 +624,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
     example(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
-                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船"],
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
                 "events": [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     HONEY_GIFT_COMMITTED_EVENT,
@@ -649,6 +650,78 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         bot_response="それなら青にしよう！晴れた空みたいで、イーヨーもきっと気にいると思うな。",
     ),
+    # 空の壺をリボンで飾ることを提案されたら、リボンの色という新しい
+    # 未解決項目を立てる(まだ色は決めない)。
+    example(
+        current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
+            update={
+                "purpose": "プーが空になった蜂蜜壺をイーヨーへの贈り物にすることに決めた",
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
+                "events": [
+                    *EEYORE_BIRTHDAY_SITUATION.events,
+                    HONEY_GIFT_COMMITTED_EVENT,
+                    "プーがイーヨーへの贈り物にする蜂蜜を全部食べてしまった",
+                    "蜂蜜壺が空になった",
+                    "参加者が空の壺を贈り物にする案を出した",
+                    "プーは壺を贈ることに決めた",
+                ],
+                "unresolved": [],
+            },
+            deep=True,
+        ),
+        user_action="リボンをかけてプレゼントっぽくしようよ",
+        history=(
+            "Turn 5\n参加者の生入力: 壺だけでもあげたら？\n"
+            "応答モード: narrative\n"
+            "プーの応答: …そうだね、からっぽでも、これはいいつぼだもの。うん、これにしよう。"
+        ),
+        interaction_mode="narrative",
+        current_scene="6",
+        situation_update=SituationUpdate(
+            add_events=["プーがリボンをかけることに決めた"],
+            add_unresolved=[RIBBON_COLOR_UNRESOLVED],
+        ),
+        bot_response="いいね！リボンをかけたら、もっとプレゼントらしくなるね。",
+    ),
+    # リボンの色を聞き返されても、参加者の好みを知らないと伝えつつ
+    # 自分の意見(pooh_preferences)ではっきり決める。聞き返さない。
+    example(
+        current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
+            update={
+                "purpose": "プーが空になった蜂蜜壺をイーヨーへの贈り物にすることに決めた",
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
+                "events": [
+                    *EEYORE_BIRTHDAY_SITUATION.events,
+                    HONEY_GIFT_COMMITTED_EVENT,
+                    "プーがイーヨーへの贈り物にする蜂蜜を全部食べてしまった",
+                    "蜂蜜壺が空になった",
+                    "参加者が空の壺を贈り物にする案を出した",
+                    "プーは壺を贈ることに決めた",
+                    "プーがリボンをかけることに決めた",
+                ],
+                "unresolved": [RIBBON_COLOR_UNRESOLVED],
+            },
+            deep=True,
+        ),
+        user_action="何色がいいかな？プーはイーヨーの好きな色，知ってる？",
+        history=(
+            "Turn 6\n参加者の生入力: リボンをかけてプレゼントっぽくしようよ\n"
+            "応答モード: narrative\n"
+            "プーの応答: いいね！リボンをかけたら、もっとプレゼントらしくなるね。"
+        ),
+        previous_bot_response="いいね！リボンをかけたら、もっとプレゼントらしくなるね。",
+        interaction_mode="narrative",
+        current_scene="6",
+        narrative_actions=["resolve_ribbon_color"],
+        situation_update=SituationUpdate(
+            add_events=["プーが赤いリボンを選んだ"],
+            remove_unresolved=[RIBBON_COLOR_UNRESOLVED],
+        ),
+        bot_response=(
+            "イーヨーの好きな色は、ぼくも知らないけれど、"
+            "赤がいいと思うな。お祝いらしくて素敵だと思うから。"
+        ),
+    ),
 ]
 
 
@@ -664,6 +737,7 @@ EEYORE_BIRTHDAY_OPENING_LINE = _TURN1_BOT_RESPONSE
 # (narrative_state.relevant_preferences参照)。
 EEYORE_BIRTHDAY_POOH_PREFERENCES = {
     BALLOON_COLOR_UNRESOLVED: "風船の色を選ぶなら青が好き。晴れた空のような色だから。",
+    RIBBON_COLOR_UNRESOLVED: "リボンの色を選ぶなら赤が好き。お祝いらしくて素敵だから。",
 }
 
 
@@ -677,7 +751,7 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES = build_response_examples(
 
 _HONEY_EATEN_SITUATION = EEYORE_BIRTHDAY_SITUATION.model_copy(
     update={
-        "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船"],
+        "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
         "events": [
             *EEYORE_BIRTHDAY_SITUATION.events,
             HONEY_GIFT_COMMITTED_EVENT,

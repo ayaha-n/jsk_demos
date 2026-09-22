@@ -61,7 +61,7 @@ from pooh_examples import (
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v20"
+PROGRAM_VERSION = "pooh-structured-state-v21"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -188,7 +188,9 @@ class GeneratePoohResponse(dspy.Signature):
             "block_pooh_honey_access、resolve_empty_jar_gift(空になった壺を"
             "どう贈るか、具体的な内容によらず決着した場合)、"
             "resolve_balloon_color(贈り物にする風船の色が、誰の案によるかに"
-            "関わらず決着した場合)。該当しなければ空リスト。"
+            "関わらず決着した場合)、"
+            "resolve_ribbon_color(リボンの色が、誰の案によるかに関わらず"
+            "決着した場合)。該当しなければ空リスト。"
         )
     )
     bot_response: str = dspy.OutputField(
