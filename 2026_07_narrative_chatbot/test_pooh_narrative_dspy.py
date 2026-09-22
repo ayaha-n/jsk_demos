@@ -67,6 +67,7 @@ from narrative_state import (
     apply_situation_update,
 )
 from narrative_events import (
+    BALLOON_COLOR_UNRESOLVED,
     BLOCKED_ACCESS_EVENT,
     EMPTY_JAR_UNRESOLVED,
     GIFT_CANCELLED_EVENT,
@@ -792,6 +793,20 @@ class RegressionTests(unittest.TestCase):
         # readable action alone must be enough to clear this deterministically.
         updated = controller.synchronize_situation(situation)
         self.assertNotIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
+
+    def test_synchronize_situation_clears_balloon_color_unresolved_without_example_support(self):
+        controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)
+        controller.observe_actions(["resolve_balloon_color"])
+        self.assertIn("balloon_color_resolved", controller.state.completed_event_ids)
+
+        situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
+            update={"unresolved": [BALLOON_COLOR_UNRESOLVED]},
+        )
+        # Whatever wording settled it (Pooh's own guess or the participant's
+        # own answer), the machine-readable action alone must be enough to
+        # clear this deterministically.
+        updated = controller.synchronize_situation(situation)
+        self.assertNotIn(BALLOON_COLOR_UNRESOLVED, updated.unresolved)
 
     def test_resolve_empty_jar_gift_is_ignored_before_honey_is_actually_empty(self):
         controller = HoneyGiftEventController(30.0, clock=lambda: 0.0)

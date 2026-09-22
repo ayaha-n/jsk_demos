@@ -16,6 +16,7 @@ NarrativeAction = Literal[
     "deliver_honey_jar_to_eeyore",
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
+    "resolve_balloon_color",
 ]
 
 KNOWN_NARRATIVE_ACTIONS = {
@@ -25,6 +26,7 @@ KNOWN_NARRATIVE_ACTIONS = {
     "deliver_honey_jar_to_eeyore",
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
+    "resolve_balloon_color",
 }
 
 HONEY_EATEN_RESPONSE = (
@@ -57,6 +59,7 @@ GIFT_DECISION_UNRESOLVED = (
 )
 HONEY_PREPARATION_UNRESOLVED = "ハチミツの準備をどう進めるか"
 EMPTY_JAR_UNRESOLVED = "空になった壺をどうするか"
+BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
 JAR_WITH_PARTICIPANT_EVENT = "参加者が蜂蜜壺を預かった"
 BLOCKED_ACCESS_EVENT = "参加者が贈り物の蜂蜜を食べないよう明確に制止した"
 GIFT_CANCELLED_EVENT = "プーが蜂蜜を贈る計画を取りやめた"
@@ -193,6 +196,8 @@ class HoneyGiftEventController:
                 self._cancel_schedule()
             elif action == "resolve_empty_jar_gift":
                 self._resolve_empty_jar_gift()
+            elif action == "resolve_balloon_color":
+                self._resolve_balloon_color()
         self._arm_required_events()
 
     def _resolve_empty_jar_gift(self) -> None:
@@ -203,6 +208,13 @@ class HoneyGiftEventController:
         if self.state.honey_status != "empty":
             return
         self.state.completed_event_ids.add("empty_jar_gift_resolved")
+
+    def _resolve_balloon_color(self) -> None:
+        # Whoever proposed the color (Pooh's own guess or the participant's
+        # own answer) is DSPy's call to make; Python only records that the
+        # color topic is settled, so the "贈り物にする風船の色" unresolved
+        # item is cleared deterministically regardless of phrasing.
+        self.state.completed_event_ids.add("balloon_color_resolved")
 
     def _commit_gift(self) -> None:
         state = self.state
@@ -333,6 +345,11 @@ class HoneyGiftEventController:
             situation = apply_situation_update(
                 situation,
                 SituationUpdate(remove_unresolved=[EMPTY_JAR_UNRESOLVED]),
+            )
+        if "balloon_color_resolved" in self.state.completed_event_ids:
+            situation = apply_situation_update(
+                situation,
+                SituationUpdate(remove_unresolved=[BALLOON_COLOR_UNRESOLVED]),
             )
         if self.state.jar_holder == "participant":
             situation = apply_situation_update(

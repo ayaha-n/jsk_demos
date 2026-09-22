@@ -10,6 +10,7 @@ multiple named participants).
 import dspy
 
 from narrative_events import (
+    BALLOON_COLOR_UNRESOLVED,
     BLOCKED_ACCESS_EVENT,
     HONEY_EATEN_DESCRIPTION,
     HONEY_EATEN_RESPONSE,
@@ -556,7 +557,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     *EEYORE_BIRTHDAY_SITUATION.events,
                     "参加者が風船をイーヨーへの贈り物として提案した",
                 ],
-                "unresolved": ["贈り物にする風船の色", "プレゼントの準備がまだできていない"],
+                "unresolved": [BALLOON_COLOR_UNRESOLVED, "プレゼントの準備がまだできていない"],
             },
             deep=True,
         ),
@@ -571,8 +572,10 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
+        narrative_actions=["resolve_balloon_color"],
         situation_update=SituationUpdate(
             add_events=["プーが自分の案として青い風船を提案した"],
+            remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
         ),
         bot_response=(
             "イーヨーの好きな色は、ぼくも知らないけれど、青はきっと気にいると思うな。晴れた空みたいで、見ていると気持ちがいいもの。"
@@ -591,7 +594,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "蜂蜜壺が空になった",
                     "参加者が風船を代わりの贈り物として提案した",
                 ],
-                "unresolved": ["贈り物にする風船の色"],
+                "unresolved": [BALLOON_COLOR_UNRESOLVED],
             },
             deep=True,
         ),
@@ -606,10 +609,10 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
-        narrative_actions=["resolve_empty_jar_gift"],
+        narrative_actions=["resolve_empty_jar_gift", "resolve_balloon_color"],
         situation_update=SituationUpdate(
             add_events=["プーが自分の案として青い風船を提案した"],
-            remove_unresolved=["贈り物にする風船の色"],
+            remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
         ),
         bot_response=(
             "イーヨーの好きな色は、ぼくも知らないんだ。"
@@ -628,7 +631,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "蜂蜜壺が空になった",
                     "参加者が風船を代わりの贈り物として提案した",
                 ],
-                "unresolved": ["贈り物にする風船の色"],
+                "unresolved": [BALLOON_COLOR_UNRESOLVED],
             },
             deep=True,
         ),
@@ -639,10 +642,10 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
-        narrative_actions=["resolve_empty_jar_gift"],
+        narrative_actions=["resolve_empty_jar_gift", "resolve_balloon_color"],
         situation_update=SituationUpdate(
             add_events=["プーが青い風船を選んだ"],
-            remove_unresolved=["贈り物にする風船の色"],
+            remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
         ),
         bot_response="それなら青にしよう！晴れた空みたいで、イーヨーもきっと気にいると思うな。",
     ),
