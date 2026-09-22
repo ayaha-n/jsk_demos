@@ -1,6 +1,7 @@
 """LLM/APIを呼ばずに行う最小回帰テスト。"""
 
 import ast
+import json
 import sys
 import types
 import unittest
@@ -150,6 +151,73 @@ class RegressionTests(unittest.TestCase):
 
     def test_source_is_valid_python(self):
         ast.parse(Path(pooh.__file__).read_text(encoding="utf-8"))
+
+    def test_narrative_relay_publisher_sends_expected_json(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        sent = []
+
+        class FakeSocket:
+            def sendall(self, data):
+                sent.append(data)
+
+            def close(self):
+                pass
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, scenario.key)
+        publisher._socket = FakeSocket()  # bypass the real TCP connection
+        publisher.publish(
+            bot_response="うん、そうしよう。",
+            narrative_actions=["commit_honey_jar_gift"],
+            scene_id="1a",
+            source="participant",
+        )
+
+        self.assertEqual(len(sent), 1)
+        payload = json.loads(sent[0].decode("utf-8"))
+        self.assertEqual(payload["scenario"], "eeyore_birthday")
+        self.assertEqual(payload["bot_response"], "うん、そうしよう。")
+        self.assertEqual(payload["narrative_actions"], ["commit_honey_jar_gift"])
+        self.assertEqual(payload["scene_id"], "1a")
+        self.assertEqual(payload["source"], "participant")
+        self.assertNotIn("world_event_id", payload)
+
+    def test_narrative_relay_publisher_includes_world_event_id_when_given(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        sent = []
+
+        class FakeSocket:
+            def sendall(self, data):
+                sent.append(data)
+
+            def close(self):
+                pass
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, scenario.key)
+        publisher._socket = FakeSocket()
+        publisher.publish(
+            bot_response="…",
+            narrative_actions=[],
+            scene_id="3",
+            source="world_event",
+            world_event_id="pooh_ate_honey",
+        )
+
+        payload = json.loads(sent[0].decode("utf-8"))
+        self.assertEqual(payload["world_event_id"], "pooh_ate_honey")
+
+    def test_narrative_relay_publisher_does_not_raise_when_relay_is_unreachable(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 1, scenario.key)
+        with patch(
+            "narrative_relay.socket.create_connection",
+            side_effect=OSError("unreachable"),
+        ), patch("narrative_relay.print"):
+            publisher.publish(
+                bot_response="test",
+                narrative_actions=[],
+                scene_id="none",
+                source="participant",
+            )
 
     def test_initial_state_has_required_blue_balloon_and_context(self):
         state = pooh.INITIAL_SITUATION

@@ -58,6 +58,7 @@ from pooh_examples import (
     RESPONSE_EXAMPLES,
     TRAINSET,
 )
+from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
@@ -880,6 +881,7 @@ def run_chat(
     *,
     input_fn: Callable[[str], str] | None = None,
     event_controller: HoneyGiftEventController | None = None,
+    ros_publisher: NarrativeRelayPublisher | None = None,
 ) -> None:
     current_situation = scenario.initial_situation
     turns: list[Turn] = []
@@ -914,6 +916,14 @@ def run_chat(
             )
             result.current_scene = event.scene_id
             print_result("Timed Event", result, scenario, situation_before_event)
+            if ros_publisher is not None:
+                ros_publisher.publish(
+                    bot_response=str(result.bot_response),
+                    narrative_actions=event_narrative_actions,
+                    scene_id=event.scene_id,
+                    source="world_event",
+                    world_event_id=event.event_id,
+                )
             turn = Turn(
                 user_action="",
                 interaction_mode=result.interaction_mode,
@@ -989,6 +999,13 @@ def run_chat(
             turns[-1].bot_response if turns else None,
         )
         print_result("Compiled", result, scenario, current_situation)
+        if ros_publisher is not None:
+            ros_publisher.publish(
+                bot_response=str(result.bot_response),
+                narrative_actions=list(getattr(result, "narrative_actions", [])),
+                scene_id=result.current_scene,
+                source="participant",
+            )
         turn = Turn(
             user_action=user_input,
             interaction_mode=result.interaction_mode,
@@ -1043,6 +1060,22 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_SCENARIO,
         help="使用する物語シナリオ。",
     )
+    parser.add_argument(
+        "--ros-relay",
+        action="store_true",
+        help="指定時、各ターンをTCPのROS中継へ送信する。",
+    )
+    parser.add_argument(
+        "--ros-relay-host",
+        default="127.0.0.1",
+        help="ROS中継のTCPホスト（デフォルト: 127.0.0.1）。",
+    )
+    parser.add_argument(
+        "--ros-relay-port",
+        type=int,
+        default=8765,
+        help="ROS中継のTCPポート（デフォルト: 8765）。",
+    )
     return parser.parse_args()
 
 
@@ -1060,7 +1093,18 @@ def main() -> int:
         if args.mode == "compare":
             run_comparison(compiled, scenario)
         else:
-            run_chat(compiled, train_model, cache_hash(train_model, judge_model, scenario), scenario)
+            ros_publisher = (
+                NarrativeRelayPublisher(args.ros_relay_host, args.ros_relay_port, scenario.key)
+                if args.ros_relay
+                else None
+            )
+            run_chat(
+                compiled,
+                train_model,
+                cache_hash(train_model, judge_model, scenario),
+                scenario,
+                ros_publisher=ros_publisher,
+            )
         return 0
     except Exception as exc:
         # APIキーやLMリクエスト本文を含む可能性のある詳細tracebackは表示しない。

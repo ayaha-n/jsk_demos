@@ -202,6 +202,43 @@ exit
 
 Empty input is ignored with a prompt to try again. End-of-file input and Ctrl+C also terminate the session safely.
 
+### Connect to the Pooh body (optional)
+
+The chatbot remains a Python 3.12 application and does not import ROS. When
+`--ros-relay` is specified, it sends each response as newline-delimited JSON
+over TCP to the ROS-side bridge in the
+[pooh_body package](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/tree/add-pooh-model/pooh_body).
+The bridge publishes the JSON on `/pooh_narrative_response`, selects a motion
+preset, and executes the corresponding body motion.
+
+Start the bridge with the ROS system Python:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/catkin_ws/devel/setup.bash
+python3 ~/catkin_ws/src/modular_robot_model_zoo/pooh_body/scripts/narrative_motion_bridge.py
+```
+
+Then start the chatbot in the project `.venv`:
+
+```bash
+source .venv/bin/activate
+python pooh_narrative_dspy.py \
+  --mode chat \
+  --scenario eeyore_birthday \
+  --ros-relay
+```
+
+The bridge listens on `127.0.0.1:8765` by default. To inspect the generated
+turns from another terminal:
+
+```bash
+rostopic echo /pooh_narrative_response
+```
+
+See the [pooh_body operation guide](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/blob/add-pooh-model/pooh_body/README.md)
+for the robot-side setup and motion configuration.
+
 ### Compare implementation variants
 
 ```bash
