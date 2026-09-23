@@ -210,11 +210,14 @@ Empty input is ignored with a prompt to try again. End-of-file input and Ctrl+C 
 ### Connect to the Pooh body (optional)
 
 The chatbot remains a Python 3.12 application and does not import ROS. When
-`--ros-relay` is specified, it sends each response as newline-delimited JSON
-over TCP to the ROS-side bridge in the
+`--ros-relay` is specified, it receives recognized speech and sends each
+generated response as newline-delimited JSON over one TCP connection to the
+ROS-side bridge in the
 [pooh_body package](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/tree/add-pooh-model/pooh_body).
-The bridge publishes the JSON on `/pooh_narrative_response`, selects a motion
-preset, and executes the corresponding body motion.
+The bridge subscribes to `/speech_to_text_final`, sends its text to DSPy,
+publishes response JSON on `/pooh_narrative_response`, selects a motion preset,
+and executes the corresponding body motion. In relay mode, the terminal input
+prompt is replaced by `/speech_to_text_final` input.
 
 Start the bridge with the ROS system Python:
 
@@ -239,6 +242,12 @@ turns from another terminal:
 
 ```bash
 rostopic echo /pooh_narrative_response
+```
+
+To send a text input through the same route without speaking:
+
+```bash
+rostopic pub -1 /speech_to_text_final std_msgs/String "data: '青い風船がいいな'"
 ```
 
 See the [pooh_body operation guide](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/blob/add-pooh-model/pooh_body/README.md)

@@ -889,7 +889,7 @@ def run_chat(
     program_id: str,
     scenario: Scenario,
     *,
-    input_fn: Callable[[str], str] | None = None,
+    input_fn: Callable[[str], str | None] | None = None,
     event_controller: HoneyGiftEventController | None = None,
     ros_publisher: NarrativeRelayPublisher | None = None,
 ) -> None:
@@ -965,7 +965,10 @@ def run_chat(
                 timeout = controller.seconds_until_due() if controller is not None else None
                 user_input = read_console_input(prompt, timeout)
             else:
-                user_input = input_fn(prompt).strip()
+                relayed_input = input_fn(prompt)
+                if relayed_input is not None:
+                    print(f"{prompt}{relayed_input}{_ANSI_RESET}")
+                user_input = relayed_input.strip() if relayed_input is not None else None
         except (EOFError, KeyboardInterrupt):
             print(_ANSI_RESET)
             break
@@ -1073,7 +1076,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ros-relay",
         action="store_true",
-        help="指定時、各ターンをTCPのROS中継へ送信する。",
+        help="指定時、TCPのROS中継から音声入力を受け、各ターンを送り返す。",
     )
     parser.add_argument(
         "--ros-relay-host",
@@ -1113,6 +1116,7 @@ def main() -> int:
                 train_model,
                 cache_hash(train_model, judge_model, scenario),
                 scenario,
+                input_fn=ros_publisher.receive_user_input if ros_publisher else None,
                 ros_publisher=ros_publisher,
             )
         return 0

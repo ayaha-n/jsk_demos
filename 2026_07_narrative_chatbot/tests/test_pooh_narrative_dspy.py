@@ -179,6 +179,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(payload["narrative_actions"], ["commit_honey_jar_gift"])
         self.assertEqual(payload["scene_id"], "1a")
         self.assertEqual(payload["source"], "participant")
+        self.assertEqual(payload["type"], "narrative_response")
         self.assertNotIn("world_event_id", payload)
 
     def test_narrative_relay_publisher_includes_world_event_id_when_given(self):
@@ -218,6 +219,25 @@ class RegressionTests(unittest.TestCase):
                 scene_id="none",
                 source="participant",
             )
+
+    def test_narrative_relay_receives_speech_input_json(self):
+        class FakeSocket:
+            def recv(self, _size):
+                return '{"type":"user_input","text":"青い風船がいいな"}\n'.encode()
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
+        publisher._socket = FakeSocket()
+        with patch(
+            "narrative_relay.select.select",
+            return_value=([publisher._socket], [], []),
+        ):
+            self.assertEqual(publisher.receive_user_input(), "青い風船がいいな")
+
+    def test_narrative_relay_receive_poll_allows_timed_event_checks(self):
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
+        publisher._socket = object()
+        with patch("narrative_relay.select.select", return_value=([], [], [])):
+            self.assertIsNone(publisher.receive_user_input())
 
     def test_initial_state_has_required_blue_balloon_and_context(self):
         state = pooh.INITIAL_SITUATION
