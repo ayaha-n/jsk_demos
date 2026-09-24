@@ -709,6 +709,23 @@ class SessionOutput:
         """Compatibility name used by the existing terminal renderer."""
         return self.scene_id
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return only browser-safe public fields, excluding internal turns."""
+        return {
+            "source": self.source,
+            "bot_response": self.bot_response,
+            "interaction_mode": self.interaction_mode,
+            "scene_id": self.scene_id,
+            "scene_label": self.scene_label,
+            "situation": self.updated_situation.model_dump(),
+            "situation_diff": self.situation_diff,
+            "narrative_actions": list(self.narrative_actions),
+            "performance_cue": self.performance_cue,
+            "world_event_id": self.world_event_id,
+            "latency_ms": round(self.latency_ms, 1),
+            "generation_fallback": self.generation_fallback,
+        }
+
 
 def format_history(turns: list[Turn], max_turns: int = 6) -> str:
     chunks = []

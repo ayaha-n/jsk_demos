@@ -260,6 +260,10 @@ class RegressionTests(unittest.TestCase):
             publisher.publish.call_args_list[1].kwargs["performance_cue"],
             "ending",
         )
+        public = opening.to_dict()
+        self.assertEqual(public["source"], "session_open")
+        self.assertEqual(public["situation"]["place"], scenario.initial_situation.place)
+        self.assertNotIn("turn", public)
 
     def test_narrative_sessions_keep_state_and_timers_separate(self):
         scenario = pooh.get_scenario("eeyore_birthday")

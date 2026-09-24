@@ -1,0 +1,173 @@
+:root {
+  --bg: #fbf6ea;
+  --surface: #ffffff;
+  --text: #2f2a22;
+  --muted: #7a7064;
+  --border: #e4d9c3;
+  --pooh: #fde7a6;
+  --pooh-border: #e8c35a;
+  --user: #dcebf7;
+  --user-border: #a9c8e3;
+  --event: #efe7d7;
+  --accent: #c7861e;
+  --accent-text: #ffffff;
+  --error: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1f1c17;
+    --surface: #2a2620;
+    --text: #efe8dc;
+    --muted: #a89e90;
+    --border: #3d372e;
+    --pooh: #4a3c18;
+    --pooh-border: #7a6224;
+    --user: #1f3446;
+    --user-border: #33536f;
+    --event: #332d24;
+    --accent: #e0a13a;
+    --accent-text: #1f1c17;
+    --error: #f2b8b5;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Hiragino Maru Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+  line-height: 1.6;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+h1 { margin: 0; font-size: 1.15rem; }
+
+.controls { display: flex; align-items: center; gap: 8px; }
+
+.toggle { font-size: 0.85rem; color: var(--muted); }
+
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message {
+  max-width: min(640px, 88%);
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1px solid;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message.pooh {
+  align-self: flex-start;
+  background: var(--pooh);
+  border-color: var(--pooh-border);
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--user);
+  border-color: var(--user-border);
+}
+
+.speaker { font-size: 0.75rem; color: var(--muted); display: block; }
+
+.details {
+  display: none;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--pooh-border);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+body.show-details .details { display: block; }
+
+.scene-intro {
+  align-self: center;
+  max-width: min(640px, 100%);
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+
+.notice {
+  align-self: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.notice.error { color: var(--error); }
+
+#status {
+  min-height: 1.6em;
+  padding: 0 16px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+form {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+button {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }

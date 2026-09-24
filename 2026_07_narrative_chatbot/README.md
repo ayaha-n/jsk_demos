@@ -207,6 +207,47 @@ exit
 
 Empty input is ignored with a prompt to try again. End-of-file input and Ctrl+C also terminate the session safely.
 
+### Start the Web chat UI (optional)
+
+The Web UI lets other people try the same compiled program from a browser.
+The API key stays on the server, and each browser tab gets its own
+`NarrativeSession` with independent story state, history, timers, and log file.
+
+```bash
+python scripts/web_server.py --scenario eeyore_birthday
+```
+
+Open `http://127.0.0.1:8080/`. To accept connections from other machines,
+bind to all interfaces and require an access token so that strangers cannot
+spend API credits:
+
+```bash
+export POOH_WEB_TOKEN='choose-a-long-random-string'
+python scripts/web_server.py --scenario eeyore_birthday --host 0.0.0.0
+```
+
+The server refuses to start on a non-loopback host when `POOH_WEB_TOKEN` is
+unset. It prints the URL including `?token=...`; share that URL.
+
+- Timed world events are pushed to the browser even when the participant says
+  nothing.
+- Closing or reloading the tab does not end the story. The tab reconnects to
+  the same session until `--session-ttl` seconds (default 600) of inactivity
+  pass; an expired session is discarded without the ending line or motion.
+- The **終了** button (or typing `exit`) plays the scenario's fixed ending
+  line with `performance_cue: ending`. When the model itself interprets an
+  utterance as leaving, its generated response carries the same ending cue.
+- **はじめから** ends the current session (with the ending cue, sent to ROS
+  once, if the story was still running), frees its slot, and starts a new one.
+- The **詳細** toggle shows the interaction mode, reference scene, narrative
+  actions, and state changes for each turn.
+- Each session loads its own copy of the compiled program, so different
+  participants' LLM calls run concurrently; calls within one session are
+  serialized. `--max-sessions` (default 20) limits concurrent sessions.
+- `--ros-relay` also sends every Web turn to the ROS relay (output only; the
+  relay's speech input is not read). Use it only when one participant drives
+  the robot.
+
 ### Connect to the Pooh body (optional)
 
 The chatbot remains a Python 3.12 application and does not import ROS. When
@@ -280,7 +321,9 @@ Run a syntax check:
 ```bash
 python -m py_compile \
   scripts/pooh_narrative_dspy.py \
-  tests/test_pooh_narrative_dspy.py
+  scripts/web_server.py \
+  tests/test_pooh_narrative_dspy.py \
+  tests/test_web_server.py
 ```
 
 The current regression tests verify that:
@@ -349,7 +392,10 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 │   ├── narrative_events.py
 │   ├── narrative_state.py
 │   ├── scenarios.py
+│   ├── web_server.py                 # Browser chat UI server
 │   └── ...
+├── web/                               # Browser chat UI (HTML/JS/CSS)
 └── tests/
-    └── test_pooh_narrative_dspy.py   # Regression tests without LLM calls
+    ├── test_pooh_narrative_dspy.py   # Regression tests without LLM calls
+    └── test_web_server.py            # Web UI server tests with a fake session
 ```

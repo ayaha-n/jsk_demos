@@ -36,6 +36,9 @@ class SceneDefinition:
 class Scenario:
     key: str
     label: str
+    # Display-only prose shown by the Web UI; never used for event control or
+    # passed to DSPy as narrative state.
+    scene_intro: str
     initial_situation: NarrativeSituation
     opening_line: str
     ending_line: str
@@ -73,6 +76,11 @@ def _tea_party() -> Scenario:
     return Scenario(
         key="tea_party",
         label="森のお茶会",
+        scene_intro=(
+            "森の空き地。テーブルのところにプーが座っています。"
+            "テーブルの上には、カップとお皿、ハチミツの入った壺。"
+            "そばには青い風船があります。"
+        ),
         initial_situation=INITIAL_SITUATION,
         opening_line=TEA_PARTY_OPENING_LINE,
         ending_line="またね。いっしょに過ごせて、うれしかったよ。",
@@ -97,6 +105,11 @@ def _eeyore_birthday() -> Scenario:
     return Scenario(
         key="eeyore_birthday",
         label="イーヨーの誕生日プレゼント",
+        scene_intro=(
+            "100エーカーの森の空き地。テーブルのところにプーが座っています。"
+            "テーブルの上には、カップとお皿、ハチミツの入った壺。"
+            "そばには色とりどりの風船とリボンがあります。"
+        ),
         initial_situation=EEYORE_BIRTHDAY_SITUATION,
         opening_line=EEYORE_BIRTHDAY_OPENING_LINE,
         ending_line="またね。イーヨーのお祝いをいっしょに考えてくれて、ありがとう。",
