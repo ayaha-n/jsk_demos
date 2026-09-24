@@ -8,7 +8,6 @@
   --pooh-border: #e8c35a;
   --user: #dcebf7;
   --user-border: #a9c8e3;
-  --event: #efe7d7;
   --accent: #c7861e;
   --accent-text: #ffffff;
   --error: #b3261e;
@@ -25,7 +24,6 @@
     --pooh-border: #7a6224;
     --user: #1f3446;
     --user-border: #33536f;
-    --event: #332d24;
     --accent: #e0a13a;
     --accent-text: #1f1c17;
     --error: #f2b8b5;
@@ -171,3 +169,59 @@ button.secondary {
 }
 
 button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+dialog {
+  width: min(820px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  padding: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+dialog::backdrop { background: rgb(0 0 0 / 45%); }
+
+.dialog-header, .log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dialog-header h2 { margin: 0; font-size: 1.05rem; }
+
+.log-toolbar { margin: 12px 0 8px; }
+
+#log-select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+#log-viewer-status { min-height: 1.6em; color: var(--muted); font-size: 0.85rem; }
+
+#log-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+.log-record {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.log-record-meta { color: var(--muted); font-size: 0.75rem; }
+.log-record-user { margin-top: 6px; color: var(--text); }
+.log-record-pooh { margin-top: 4px; font-weight: 600; }
+.log-record details { margin-top: 6px; color: var(--muted); font-size: 0.8rem; }
+.log-record pre { white-space: pre-wrap; overflow-wrap: anywhere; }

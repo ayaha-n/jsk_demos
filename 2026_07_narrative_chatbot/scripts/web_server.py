@@ -12,6 +12,8 @@ import argparse
 import asyncio
 import html
 import hmac
+import ipaddress
+import json
 import os
 import sys
 import threading
@@ -29,6 +31,8 @@ DEFAULT_SESSION_TTL_SECONDS = 600.0
 DEFAULT_MAX_SESSIONS = 20
 SWEEP_INTERVAL_SECONDS = 30.0
 MAX_INPUT_CHARS = 500
+MAX_LOG_BYTES = 5 * 1024 * 1024
+MAX_LOG_RECORDS = 2000
 MIN_TIMER_WAIT_SECONDS = 0.1
 TOKEN_HEADER = "X-Pooh-Token"
 
@@ -223,6 +227,7 @@ class SessionRegistry:
 REGISTRY_KEY = web.AppKey("registry", SessionRegistry)
 TOKEN_KEY = web.AppKey("access_token", str)
 INDEX_HTML_KEY = web.AppKey("index_html", str)
+LOG_DIR_KEY = web.AppKey("log_dir", Path)
 
 
 def _authorized(request: web.Request) -> bool:
@@ -234,7 +239,133 @@ def _authorized(request: web.Request) -> bool:
 
 
 async def index(request: web.Request) -> web.Response:
-    return web.Response(text=request.app[INDEX_HTML_KEY], content_type="text/html")
+    body = request.app[INDEX_HTML_KEY].replace(
+        "{{LOCAL_LOG_STYLE}}", _local_log_style(request.remote)
+    )
+    return web.Response(text=body, content_type="text/html")
+
+
+def _is_loopback_address(address: str | None) -> bool:
+    """Trust only the TCP peer address, never forwarding headers."""
+    if not address:
+        return False
+    try:
+        parsed = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if parsed.is_loopback:
+        return True
+    return bool(
+        isinstance(parsed, ipaddress.IPv6Address)
+        and parsed.ipv4_mapped is not None
+        and parsed.ipv4_mapped.is_loopback
+    )
+
+
+def _local_log_style(address: str | None) -> str:
+    if _is_loopback_address(address):
+        return ""
+    return ".local-log-feature { display: none !important; }"
+
+
+def _local_log_access_allowed(request: web.Request) -> bool:
+    return _is_loopback_address(request.remote)
+
+
+async def static_app_script(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(WEB_ROOT / "app.js")
+
+
+async def static_stylesheet(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(WEB_ROOT / "style.css")
+
+
+def _resolve_log_path(log_dir: Path, name: str) -> Path | None:
+    """Resolve one server-owned session log without allowing path traversal."""
+    if (
+        not name.startswith("session_")
+        or not name.endswith(".jsonl")
+        or Path(name).name != name
+        or "/" in name
+        or "\\" in name
+    ):
+        return None
+    root = log_dir.resolve()
+    candidate = log_dir / name
+    if candidate.is_symlink():
+        return None
+    resolved = candidate.resolve()
+    if resolved.parent != root or not resolved.is_file():
+        return None
+    return resolved
+
+
+def _list_logs(log_dir: Path) -> list[dict[str, Any]]:
+    if not log_dir.is_dir():
+        return []
+    items = []
+    for candidate in log_dir.glob("session_*.jsonl"):
+        path = _resolve_log_path(log_dir, candidate.name)
+        if path is None:
+            continue
+        stat = path.stat()
+        items.append({
+            "name": candidate.name,
+            "size": stat.st_size,
+            "modified_at": stat.st_mtime,
+        })
+    return sorted(items, key=lambda item: item["modified_at"], reverse=True)
+
+
+def _read_log(path: Path) -> tuple[list[dict[str, Any]], int, bool]:
+    records: list[dict[str, Any]] = []
+    invalid_lines = 0
+    truncated = False
+    with path.open(encoding="utf-8") as stream:
+        for line in stream:
+            if len(records) >= MAX_LOG_RECORDS:
+                truncated = True
+                break
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                invalid_lines += 1
+                continue
+            if isinstance(value, dict):
+                records.append(value)
+            else:
+                invalid_lines += 1
+    return records, invalid_lines, truncated
+
+
+async def list_logs(request: web.Request) -> web.Response:
+    if not _local_log_access_allowed(request):
+        return web.json_response({"error": "local access only"}, status=403)
+    if not _authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    logs = await asyncio.to_thread(_list_logs, request.app[LOG_DIR_KEY])
+    return web.json_response({"logs": logs})
+
+
+async def read_log(request: web.Request) -> web.Response:
+    if not _local_log_access_allowed(request):
+        return web.json_response({"error": "local access only"}, status=403)
+    if not _authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    path = _resolve_log_path(request.app[LOG_DIR_KEY], request.match_info["name"])
+    if path is None:
+        return web.json_response({"error": "log not found"}, status=404)
+    if path.stat().st_size > MAX_LOG_BYTES:
+        return web.json_response({"error": "log is too large"}, status=413)
+    records, invalid_lines, truncated = await asyncio.to_thread(_read_log, path)
+    return web.json_response({
+        "name": path.name,
+        "records": records,
+        "invalid_lines": invalid_lines,
+        "truncated": truncated,
+    })
 
 
 async def create_session(request: web.Request) -> web.Response:
@@ -312,11 +443,15 @@ def create_app(
     access_token: str = "",
     scenario_title: str = "Narrative Chat",
     scene_intro: str = "",
+    log_dir: Path | None = None,
 ) -> web.Application:
     app = web.Application()
     registry = SessionRegistry(factory, ttl_seconds=ttl_seconds, max_sessions=max_sessions)
     app[REGISTRY_KEY] = registry
     app[TOKEN_KEY] = access_token
+    app[LOG_DIR_KEY] = log_dir or Path(
+        os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs"))
+    )
     index_template = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
     app[INDEX_HTML_KEY] = index_template.replace(
         "{{SCENARIO_TITLE}}", html.escape(scenario_title)
@@ -330,10 +465,14 @@ def create_app(
 
     app.cleanup_ctx.append(lifecycle)
     app.router.add_get("/", index)
+    app.router.add_get("/api/logs", list_logs)
+    app.router.add_get("/api/logs/{name}", read_log)
     app.router.add_post("/api/sessions", create_session)
     app.router.add_delete("/api/sessions/{session_id}", delete_session)
     app.router.add_get("/ws/{session_id}", session_socket)
-    app.router.add_static("/static/", WEB_ROOT)
+    # Do not expose index.html as a static file: it would bypass per-peer UI hiding.
+    app.router.add_get("/static/app.js", static_app_script)
+    app.router.add_get("/static/style.css", static_stylesheet)
     return app
 
 

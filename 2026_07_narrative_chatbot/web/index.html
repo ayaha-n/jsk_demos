@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SCENARIO_TITLE}}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <style>{{LOCAL_LOG_STYLE}}</style>
 </head>
 <body>
   <header>
     <h1>{{SCENARIO_TITLE}}</h1>
     <div class="controls">
       <label class="toggle"><input type="checkbox" id="show-details"> 詳細</label>
+      <button type="button" id="log-button" class="secondary local-log-feature">過去ログ</button>
       <button type="button" id="end-button" class="secondary" disabled>終了</button>
       <button type="button" id="restart-button" class="secondary">はじめから</button>
     </div>
@@ -25,6 +27,19 @@
            placeholder="話しかける・行動を書く" disabled>
     <button type="submit" id="send-button" disabled>送る</button>
   </form>
+
+  <dialog id="log-dialog" class="local-log-feature">
+    <div class="dialog-header">
+      <h2>過去ログ</h2>
+      <button type="button" id="log-close-button" class="secondary">閉じる</button>
+    </div>
+    <div class="log-toolbar">
+      <select id="log-select" aria-label="確認するログ"></select>
+      <button type="button" id="log-refresh-button" class="secondary">更新</button>
+    </div>
+    <div id="log-viewer-status" role="status"></div>
+    <div id="log-viewer"></div>
+  </dialog>
 
   <!-- Scenario-authored scene description; display only, not model input. -->
   <template id="scene-intro-template"><div class="scene-intro">{{SCENE_INTRO}}</div></template>

@@ -13,6 +13,13 @@ const sendButton = document.getElementById("send-button");
 const endButton = document.getElementById("end-button");
 const restartButton = document.getElementById("restart-button");
 const showDetails = document.getElementById("show-details");
+const logButton = document.getElementById("log-button");
+const logDialog = document.getElementById("log-dialog");
+const logCloseButton = document.getElementById("log-close-button");
+const logRefreshButton = document.getElementById("log-refresh-button");
+const logSelect = document.getElementById("log-select");
+const logViewerStatus = document.getElementById("log-viewer-status");
+const logViewer = document.getElementById("log-viewer");
 
 let socket = null;
 let sessionId = null;
@@ -36,6 +43,10 @@ function accessToken() {
   const fromUrl = new URLSearchParams(location.search).get("token");
   if (fromUrl) storageSet(TOKEN_KEY, fromUrl);
   return fromUrl || storageGet(TOKEN_KEY) || "";
+}
+
+function authenticatedHeaders() {
+  return { "X-Pooh-Token": accessToken() };
 }
 
 function updateControls() {
@@ -106,6 +117,101 @@ function appendOutput(output) {
   node.append(speaker, body, details);
   log.appendChild(node);
   scrollToBottom();
+}
+
+function formatLogTime(value) {
+  if (!value) return "時刻不明";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("ja-JP");
+}
+
+function appendLogRecord(record, index) {
+  const item = document.createElement("article");
+  item.className = "log-record";
+
+  const meta = document.createElement("div");
+  meta.className = "log-record-meta";
+  meta.textContent = `Turn ${index + 1} · ${formatLogTime(record.timestamp)}`;
+  item.appendChild(meta);
+
+  if (record.user_action) {
+    const user = document.createElement("div");
+    user.className = "log-record-user";
+    user.textContent = `参加者: ${record.user_action}`;
+    item.appendChild(user);
+  }
+
+  const pooh = document.createElement("div");
+  pooh.className = "log-record-pooh";
+  pooh.textContent = `プー: ${record.bot_response || ""}`;
+  item.appendChild(pooh);
+
+  const details = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = "記録の詳細";
+  const body = document.createElement("pre");
+  body.textContent = JSON.stringify({
+    source: record.source,
+    world_event: record.world_event,
+    interaction_mode: record.interaction_mode,
+    scene_id: record.scene_id,
+    narrative_actions: record.narrative_actions || [],
+    latency_ms: record.latency_ms,
+    updated_situation: record.updated_situation,
+  }, null, 2);
+  details.append(summary, body);
+  item.appendChild(details);
+  logViewer.appendChild(item);
+}
+
+async function loadSelectedLog() {
+  const name = logSelect.value;
+  if (!name) {
+    logViewer.replaceChildren();
+    logViewerStatus.textContent = "確認できるログはありません。";
+    return;
+  }
+  logViewerStatus.textContent = "読み込んでいます…";
+  logViewer.replaceChildren();
+  try {
+    const response = await fetch(`/api/logs/${encodeURIComponent(name)}`, {
+      headers: authenticatedHeaders(),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+    body.records.forEach(appendLogRecord);
+    const notes = [`${body.records.length}件`];
+    if (body.invalid_lines) notes.push(`読めない行: ${body.invalid_lines}`);
+    if (body.truncated) notes.push("表示上限以降は省略");
+    logViewerStatus.textContent = notes.join(" / ");
+  } catch (error) {
+    logViewerStatus.textContent = `ログを読み込めませんでした: ${error.message}`;
+  }
+}
+
+async function refreshLogList() {
+  logViewerStatus.textContent = "ログ一覧を取得しています…";
+  try {
+    const response = await fetch("/api/logs", { headers: authenticatedHeaders() });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+    const previous = logSelect.value;
+    logSelect.replaceChildren();
+    for (const item of body.logs) {
+      const option = document.createElement("option");
+      option.value = item.name;
+      option.textContent = `${formatLogTime(item.modified_at * 1000)} · ${item.name}`;
+      logSelect.appendChild(option);
+    }
+    if ([...logSelect.options].some((option) => option.value === previous)) {
+      logSelect.value = previous;
+    }
+    await loadSelectedLog();
+  } catch (error) {
+    logSelect.replaceChildren();
+    logViewer.replaceChildren();
+    logViewerStatus.textContent = `ログ一覧を取得できませんでした: ${error.message}`;
+  }
 }
 
 function renderMessage(message) {
@@ -183,7 +289,7 @@ async function startNewSession() {
   try {
     response = await fetch("/api/sessions", {
       method: "POST",
-      headers: { "X-Pooh-Token": accessToken() },
+      headers: authenticatedHeaders(),
     });
   } catch {
     appendNotice("サーバに接続できませんでした。", true);
@@ -220,7 +326,7 @@ async function abandonSession(id) {
   try {
     await fetch(`/api/sessions/${id}`, {
       method: "DELETE",
-      headers: { "X-Pooh-Token": accessToken() },
+      headers: authenticatedHeaders(),
     });
   } catch { /* the server discards it at TTL anyway */ }
 }
@@ -236,6 +342,15 @@ restartButton.addEventListener("click", async () => {
 showDetails.addEventListener("change", () => {
   document.body.classList.toggle("show-details", showDetails.checked);
 });
+
+logButton.addEventListener("click", () => {
+  logDialog.showModal();
+  refreshLogList();
+});
+
+logCloseButton.addEventListener("click", () => logDialog.close());
+logRefreshButton.addEventListener("click", refreshLogList);
+logSelect.addEventListener("change", loadSelectedLog);
 
 sessionId = storageGet(SESSION_KEY);
 if (sessionId) connect();

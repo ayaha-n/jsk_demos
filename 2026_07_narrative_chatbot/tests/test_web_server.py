@@ -1,12 +1,16 @@
 """Web UI server tests with a fake session; no LLM/API calls."""
 
 import asyncio
+import json
+import os
 import sys
+import tempfile
 import threading
 import time
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from aiohttp import WSMsgType
@@ -301,6 +305,74 @@ class BindSecurityTests(unittest.TestCase):
             self.assertIsNone(web_server.check_bind_security(host, "secret"))
 
 
+class LogPathTests(unittest.TestCase):
+    def test_log_path_rejects_traversal_and_unrelated_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "session_ok.jsonl").write_text("{}\n", encoding="utf-8")
+            self.assertIsNotNone(web_server._resolve_log_path(root, "session_ok.jsonl"))
+            self.assertIsNone(web_server._resolve_log_path(root, "../session_ok.jsonl"))
+            self.assertIsNone(web_server._resolve_log_path(root, "notes.jsonl"))
+
+
+class LogLocalAccessTests(unittest.IsolatedAsyncioTestCase):
+    def test_accepts_only_loopback_peer_addresses(self):
+        for address in ("127.0.0.1", "127.10.20.30", "::1", "::ffff:127.0.0.1"):
+            self.assertTrue(web_server._is_loopback_address(address), address)
+            self.assertEqual(web_server._local_log_style(address), "")
+
+        for address in (None, "localhost", "0.0.0.0", "192.168.1.20", "::"):
+            self.assertFalse(web_server._is_loopback_address(address), address)
+            self.assertIn("display: none", web_server._local_log_style(address))
+
+    async def test_remote_peer_cannot_list_logs(self):
+        request = SimpleNamespace(remote="192.168.1.20")
+        response = await web_server.list_logs(request)
+        self.assertEqual(response.status, 403)
+
+
+class LogViewerTests(AioHTTPTestCase):
+    async def get_application(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.log_dir = Path(temporary.name)
+        first = self.log_dir / "session_first.jsonl"
+        second = self.log_dir / "session_second.jsonl"
+        first.write_text(json.dumps({
+            "timestamp": "2026-09-24T01:00:00+00:00",
+            "user_action": "こんにちは",
+            "bot_response": "こんにちは。",
+            "source": "participant",
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+        second.write_text(
+            json.dumps({
+                "timestamp": "2026-09-24T02:00:00+00:00",
+                "bot_response": "ハチミツを味見しよう。",
+                "source": "world_event",
+            }, ensure_ascii=False) + "\nnot-json\n",
+            encoding="utf-8",
+        )
+        os.utime(first, (1, 1))
+        os.utime(second, (2, 2))
+        (self.log_dir / "unrelated.jsonl").write_text("{}\n", encoding="utf-8")
+        return web_server.create_app(FakeSession, log_dir=self.log_dir)
+
+    async def test_lists_session_logs_newest_first(self):
+        body = await (await self.client.get("/api/logs")).json()
+        self.assertEqual(
+            [item["name"] for item in body["logs"]],
+            ["session_second.jsonl", "session_first.jsonl"],
+        )
+
+    async def test_reads_records_and_reports_invalid_lines(self):
+        response = await self.client.get("/api/logs/session_second.jsonl")
+        body = await response.json()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(body["records"][0]["source"], "world_event")
+        self.assertEqual(body["invalid_lines"], 1)
+        self.assertFalse(body["truncated"])
+
+
 class AccessTokenTests(AioHTTPTestCase):
     async def get_application(self):
         return web_server.create_app(FakeSession, access_token="secret")
@@ -312,6 +384,8 @@ class AccessTokenTests(AioHTTPTestCase):
             "/api/sessions", headers={web_server.TOKEN_HEADER: "secret"}
         )
         self.assertEqual(response.status, 200)
+        response = await self.client.get("/api/logs")
+        self.assertEqual(response.status, 401)
 
 
 if __name__ == "__main__":

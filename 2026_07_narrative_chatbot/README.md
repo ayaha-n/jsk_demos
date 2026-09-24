@@ -241,6 +241,11 @@ unset. It prints the URL including `?token=...`; share that URL.
   once, if the story was still running), frees its slot, and starts a new one.
 - The **詳細** toggle shows the interaction mode, reference scene, narrative
   actions, and state changes for each turn.
+- **過去ログ** lists the server's `logs/session_*.jsonl` files and opens a
+  read-only turn viewer. It is shown only when the browser connects through
+  `127.0.0.1` or `::1`; the server rejects log API access from other machines
+  even if they know the URL or Web access token. Arbitrary filesystem paths
+  cannot be opened.
 - Each session loads its own copy of the compiled program, so different
   participants' LLM calls run concurrently; calls within one session are
   serialized. `--max-sessions` (default 20) limits concurrent sessions.
