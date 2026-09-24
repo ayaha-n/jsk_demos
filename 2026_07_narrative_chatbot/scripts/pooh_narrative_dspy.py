@@ -16,11 +16,12 @@ import platform
 import select
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -685,6 +686,29 @@ class Turn:
     narrative_actions: list[str] | None = None
 
 
+@dataclass
+class SessionOutput:
+    """One browser/CLI/ROS-visible output from a narrative session."""
+
+    source: str
+    bot_response: str
+    interaction_mode: str
+    scene_id: str
+    updated_situation: NarrativeSituation
+    scene_label: str | None = None
+    situation_diff: str = "(変化なし)"
+    narrative_actions: list[str] = field(default_factory=list)
+    world_event_id: str | None = None
+    latency_ms: float = 0.0
+    generation_fallback: bool = False
+    turn: Turn | None = None
+
+    @property
+    def current_scene(self) -> str:
+        """Compatibility name used by the existing terminal renderer."""
+        return self.scene_id
+
+
 def format_history(turns: list[Turn], max_turns: int = 6) -> str:
     chunks = []
     recent = turns[-max_turns:]
@@ -883,6 +907,255 @@ def _event_result(
         ), 0.0, True
 
 
+class NarrativeSession:
+    """Stateful session API shared by the terminal, Web UI, and ROS relay.
+
+    Each instance owns its story state, history, timers, lifecycle guards, and
+    log file.  Callers must serialize calls for one instance; different
+    instances are independent and may be used for different participants.
+    """
+
+    def __init__(
+        self,
+        agent: Any,
+        model_name: str,
+        program_id: str,
+        scenario: Scenario,
+        *,
+        event_controller: HoneyGiftEventController | None = None,
+        ros_publisher: NarrativeRelayPublisher | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        self.agent = agent
+        self.model_name = model_name
+        self.program_id = program_id
+        self.scenario = scenario
+        self.current_situation = scenario.initial_situation.model_copy(deep=True)
+        self.turns: list[Turn] = []
+        self.controller = event_controller or create_event_controller(scenario)
+        self.ros_publisher = ros_publisher
+        self.session_id = session_id or uuid4().hex
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        self.log_path = LOG_DIR / f"session_{timestamp}_{self.session_id[:8]}.jsonl"
+        self.started = False
+        self.ended = False
+
+    def _history(self) -> str:
+        return (
+            f"会話の冒頭\nプーの応答: {self.scenario.opening_line}\n\n"
+            f"{format_history(self.turns)}"
+        )
+
+    def _publish(self, output: SessionOutput) -> None:
+        if self.ros_publisher is None:
+            return
+        self.ros_publisher.publish(
+            bot_response=output.bot_response,
+            narrative_actions=output.narrative_actions,
+            scene_id=output.scene_id,
+            source=output.source,
+            world_event_id=output.world_event_id,
+        )
+
+    def start(self) -> SessionOutput | None:
+        """Start once and return the scripted opening for local display."""
+        if self.started or self.ended:
+            return None
+        self.started = True
+        output = SessionOutput(
+            source="session_open",
+            bot_response=self.scenario.opening_line,
+            interaction_mode="narrative",
+            scene_id="none",
+            updated_situation=self.current_situation,
+            situation_diff=format_situation_diff(None, self.current_situation),
+        )
+        return output
+
+    def close(self, reason: str = "requested") -> SessionOutput | None:
+        """Close once and return the fixed ending line for local display."""
+        if self.ended:
+            return None
+        self.ended = True
+        output = SessionOutput(
+            source="session_close",
+            bot_response="またね。いっしょに過ごせて、うれしかったよ。",
+            interaction_mode="exit",
+            scene_id="none",
+            updated_situation=self.current_situation,
+        )
+        return output
+
+    def seconds_until_due(self) -> float | None:
+        if self.ended or self.controller is None:
+            return None
+        return self.controller.seconds_until_due()
+
+    def poll(self) -> SessionOutput | None:
+        """Return one due world event without waiting, if any."""
+        if not self.started or self.ended or self.controller is None:
+            return None
+        event = self.controller.pop_due_event()
+        if event is None:
+            return None
+
+        previous_situation = self.current_situation
+        self.current_situation = apply_situation_update(
+            self.current_situation,
+            event.situation_update,
+        )
+        result, latency_ms, used_fallback = _event_result(
+            self.agent,
+            self.current_situation,
+            event,
+            self._history(),
+            previous_bot_response=self.turns[-1].bot_response if self.turns else "",
+            pooh_preferences=relevant_preferences(
+                self.current_situation, self.scenario.pooh_preferences
+            ),
+        )
+        actions = list(getattr(result, "narrative_actions", []))
+        self.controller.observe_actions(actions)
+        result.updated_situation = self.controller.synchronize_situation(
+            result.updated_situation
+        )
+        result.current_scene = event.scene_id
+        turn = Turn(
+            user_action="",
+            interaction_mode=result.interaction_mode,
+            bot_response=str(result.bot_response),
+            updated_situation=result.updated_situation,
+            scene_id=event.scene_id,
+            source="world_event",
+            world_event=event.description,
+            narrative_actions=actions,
+        )
+        self.turns.append(turn)
+        self.current_situation = result.updated_situation
+        append_log(
+            self.log_path,
+            turn,
+            {
+                "model": self.model_name,
+                "program_id": self.program_id,
+                "scenario": self.scenario.key,
+                "session_id": self.session_id,
+                "world_event_id": event.event_id,
+                "generation_fallback": used_fallback,
+                "latency_ms": round(latency_ms, 1),
+            },
+        )
+        output = SessionOutput(
+            source="world_event",
+            bot_response=turn.bot_response,
+            interaction_mode=turn.interaction_mode,
+            scene_id=turn.scene_id,
+            updated_situation=turn.updated_situation,
+            scene_label=self.scenario.scene_label(turn.scene_id),
+            situation_diff=format_situation_diff(
+                previous_situation, turn.updated_situation
+            ),
+            narrative_actions=actions,
+            world_event_id=event.event_id,
+            latency_ms=latency_ms,
+            generation_fallback=used_fallback,
+            turn=turn,
+        )
+        self._publish(output)
+        return output
+
+    def submit(self, user_input: str) -> SessionOutput | None:
+        """Process one participant utterance or textual physical action."""
+        if not self.started:
+            raise RuntimeError("セッションを先に開始してください。")
+        if self.ended:
+            return None
+        user_input = user_input.strip()
+        if not user_input:
+            return None
+        if user_input.casefold() == "exit":
+            return self.close("exit_command")
+
+        if self.controller is not None:
+            self.controller.observe_user_input()
+        previous_situation = self.current_situation
+        history = self._history()
+        result, latency_ms = invoke(
+            self.agent,
+            self.current_situation,
+            user_input,
+            history,
+            previous_bot_response=self.turns[-1].bot_response if self.turns else "",
+            pooh_preferences=relevant_preferences(
+                self.current_situation, self.scenario.pooh_preferences
+            ),
+        )
+        result.bot_response = enforce_response_invariants(
+            user_action=user_input,
+            history=history,
+            bot_response=str(result.bot_response),
+            gift_status=(
+                self.controller.state.gift_status
+                if self.controller is not None
+                else "undecided"
+            ),
+        )
+        actions = list(getattr(result, "narrative_actions", []))
+        if self.controller is not None:
+            self.controller.observe_actions(actions)
+            result.updated_situation = self.controller.synchronize_situation(
+                result.updated_situation
+            )
+        result.current_scene = normalize_scene_id(
+            str(getattr(result, "current_scene", "none")),
+            self.scenario,
+        )
+        warn_if_response_repeated(
+            result.bot_response,
+            self.turns[-1].bot_response if self.turns else None,
+        )
+        is_exit = str(result.interaction_mode) == "exit"
+        turn = Turn(
+            user_action=user_input,
+            interaction_mode=str(result.interaction_mode),
+            bot_response=str(result.bot_response),
+            updated_situation=result.updated_situation,
+            scene_id=result.current_scene,
+            narrative_actions=actions,
+        )
+        self.turns.append(turn)
+        self.current_situation = result.updated_situation
+        append_log(
+            self.log_path,
+            turn,
+            {
+                "model": self.model_name,
+                "program_id": self.program_id,
+                "scenario": self.scenario.key,
+                "session_id": self.session_id,
+                "latency_ms": round(latency_ms, 1),
+            },
+        )
+        if is_exit:
+            self.ended = True
+        output = SessionOutput(
+            source="participant",
+            bot_response=turn.bot_response,
+            interaction_mode=turn.interaction_mode,
+            scene_id=turn.scene_id,
+            updated_situation=turn.updated_situation,
+            scene_label=self.scenario.scene_label(turn.scene_id),
+            situation_diff=format_situation_diff(
+                previous_situation, turn.updated_situation
+            ),
+            narrative_actions=actions,
+            latency_ms=latency_ms,
+            turn=turn,
+        )
+        self._publish(output)
+        return output
+
+
 def run_chat(
     agent: Any,
     model_name: str,
@@ -893,76 +1166,30 @@ def run_chat(
     event_controller: HoneyGiftEventController | None = None,
     ros_publisher: NarrativeRelayPublisher | None = None,
 ) -> None:
-    current_situation = scenario.initial_situation
-    turns: list[Turn] = []
-    controller = event_controller or create_event_controller(scenario)
-    session = datetime.now().strftime("%Y%m%dT%H%M%S")
-    log_path = LOG_DIR / f"session_{session}.jsonl"
+    session = NarrativeSession(
+        agent,
+        model_name,
+        program_id,
+        scenario,
+        event_controller=event_controller,
+        ros_publisher=ros_publisher,
+    )
     print(f"シナリオ: {scenario.label}")
-    print(current_situation)
-    print(f"\n{pooh_line(scenario.opening_line)}")
+    print(session.current_situation)
+    opening = session.start()
+    if opening is not None:
+        print(f"\n{pooh_line(opening.bot_response)}")
     print("終了するには exit と入力してください。")
-    while True:
-        event = controller.pop_due_event() if controller is not None else None
-        if event is not None:
-            situation_before_event = current_situation
-            current_situation = apply_situation_update(
-                current_situation,
-                event.situation_update,
-            )
-            history = f"会話の冒頭\nプーの応答: {scenario.opening_line}\n\n{format_history(turns)}"
-            result, latency_ms, used_fallback = _event_result(
-                agent,
-                current_situation,
-                event,
-                history,
-                previous_bot_response=turns[-1].bot_response if turns else "",
-                pooh_preferences=relevant_preferences(current_situation, scenario.pooh_preferences),
-            )
-            event_narrative_actions = list(getattr(result, "narrative_actions", []))
-            controller.observe_actions(event_narrative_actions)
-            result.updated_situation = controller.synchronize_situation(
-                result.updated_situation
-            )
-            result.current_scene = event.scene_id
-            print_result("Timed Event", result, scenario, situation_before_event)
-            if ros_publisher is not None:
-                ros_publisher.publish(
-                    bot_response=str(result.bot_response),
-                    narrative_actions=event_narrative_actions,
-                    scene_id=event.scene_id,
-                    source="world_event",
-                    world_event_id=event.event_id,
-                )
-            turn = Turn(
-                user_action="",
-                interaction_mode=result.interaction_mode,
-                bot_response=result.bot_response,
-                updated_situation=result.updated_situation,
-                scene_id=event.scene_id,
-                source="world_event",
-                world_event=event.description,
-                narrative_actions=event_narrative_actions,
-            )
-            turns.append(turn)
-            current_situation = result.updated_situation
-            append_log(
-                log_path,
-                turn,
-                {
-                    "model": model_name,
-                    "program_id": program_id,
-                    "scenario": scenario.key,
-                    "world_event_id": event.event_id,
-                    "generation_fallback": used_fallback,
-                    "latency_ms": round(latency_ms, 1),
-                },
-            )
+    while not session.ended:
+        situation_before_event = session.current_situation
+        event_output = session.poll()
+        if event_output is not None:
+            print_result("Timed Event", event_output, scenario, situation_before_event)
             continue
         try:
             prompt = f"\n{_ANSI_PARTICIPANT}あなたの発話・行為: "
             if input_fn is None:
-                timeout = controller.seconds_until_due() if controller is not None else None
+                timeout = session.seconds_until_due()
                 user_input = read_console_input(prompt, timeout)
             else:
                 relayed_input = input_fn(prompt)
@@ -971,77 +1198,23 @@ def run_chat(
                 user_input = relayed_input.strip() if relayed_input is not None else None
         except (EOFError, KeyboardInterrupt):
             print(_ANSI_RESET)
+            closing = session.close("input_closed")
+            if closing is not None:
+                print(pooh_line(closing.bot_response))
             break
         if user_input is None:
             continue
-        if user_input.lower() == "exit":
-            break
         if not user_input:
             print("発話か行為を入力してください。")
             continue
-        if controller is not None:
-            controller.observe_user_input()
-        history = f"会話の冒頭\nプーの応答: {scenario.opening_line}\n\n{format_history(turns)}"
-        result, latency_ms = invoke(
-            agent,
-            current_situation,
-            user_input,
-            history,
-            previous_bot_response=turns[-1].bot_response if turns else "",
-            pooh_preferences=relevant_preferences(current_situation, scenario.pooh_preferences),
-        )
-        result.bot_response = enforce_response_invariants(
-            user_action=user_input,
-            history=history,
-            bot_response=str(result.bot_response),
-            gift_status=controller.state.gift_status if controller is not None else "undecided",
-        )
-        if controller is not None:
-            controller.observe_actions(
-                list(getattr(result, "narrative_actions", []))
-            )
-            result.updated_situation = controller.synchronize_situation(
-                result.updated_situation
-            )
-        result.current_scene = normalize_scene_id(
-            str(getattr(result, "current_scene", "none")),
-            scenario,
-        )
-        warn_if_response_repeated(
-            result.bot_response,
-            turns[-1].bot_response if turns else None,
-        )
-        print_result("Compiled", result, scenario, current_situation)
-        if ros_publisher is not None:
-            ros_publisher.publish(
-                bot_response=str(result.bot_response),
-                narrative_actions=list(getattr(result, "narrative_actions", [])),
-                scene_id=result.current_scene,
-                source="participant",
-            )
-        turn = Turn(
-            user_action=user_input,
-            interaction_mode=result.interaction_mode,
-            bot_response=result.bot_response,
-            updated_situation=result.updated_situation,
-            scene_id=result.current_scene,
-            narrative_actions=list(getattr(result, "narrative_actions", [])),
-        )
-        turns.append(turn)
-        current_situation = result.updated_situation
-        append_log(
-            log_path,
-            turn,
-            {
-                "model": model_name,
-                "program_id": program_id,
-                "scenario": scenario.key,
-                "latency_ms": round(latency_ms, 1),
-            },
-        )
-        if result.interaction_mode == "exit":
-            return
-    print(pooh_line("またね。いっしょに過ごせて、うれしかったよ。"))
+        situation_before_turn = session.current_situation
+        output = session.submit(user_input)
+        if output is None:
+            continue
+        if output.source == "session_close":
+            print(pooh_line(output.bot_response))
+            break
+        print_result("Compiled", output, scenario, situation_before_turn)
 
 
 def run_comparison(compiled: Any, scenario: Scenario) -> None:

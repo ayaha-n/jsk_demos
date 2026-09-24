@@ -206,6 +206,27 @@ class RegressionTests(unittest.TestCase):
         payload = json.loads(sent[0].decode("utf-8"))
         self.assertEqual(payload["world_event_id"], "pooh_ate_honey")
 
+    def test_narrative_sessions_keep_state_and_timers_separate(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        first_controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        second_controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        first = pooh.NarrativeSession(
+            Mock(), "model", "program", scenario,
+            event_controller=first_controller,
+        )
+        second = pooh.NarrativeSession(
+            Mock(), "model", "program", scenario,
+            event_controller=second_controller,
+        )
+        first.start()
+        second.start()
+
+        first.controller.observe_actions(["commit_honey_jar_gift"])
+
+        self.assertEqual(first.controller.state.gift_status, "committed")
+        self.assertEqual(second.controller.state.gift_status, "undecided")
+        self.assertIsNot(first.current_situation, second.current_situation)
+
     def test_narrative_relay_publisher_does_not_raise_when_relay_is_unreachable(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 1, scenario.key)
