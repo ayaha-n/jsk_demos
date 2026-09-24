@@ -206,6 +206,61 @@ class RegressionTests(unittest.TestCase):
         payload = json.loads(sent[0].decode("utf-8"))
         self.assertEqual(payload["world_event_id"], "pooh_ate_honey")
 
+    def test_narrative_relay_publisher_includes_performance_cue_when_given(self):
+        sent = []
+
+        class FakeSocket:
+            def sendall(self, data):
+                sent.append(data)
+
+            def close(self):
+                pass
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
+        publisher._socket = FakeSocket()
+        publisher.publish(
+            bot_response="またね。",
+            narrative_actions=[],
+            scene_id="none",
+            source="session_close",
+            performance_cue="ending",
+        )
+
+        payload = json.loads(sent[0].decode("utf-8"))
+        self.assertEqual(payload["source"], "session_close")
+        self.assertEqual(payload["performance_cue"], "ending")
+
+    def test_session_publishes_opening_and_ending_once(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        publisher = Mock()
+        session = pooh.NarrativeSession(
+            Mock(),
+            "test-model",
+            "test-program",
+            scenario,
+            ros_publisher=publisher,
+            session_id="test-session",
+        )
+
+        opening = session.start()
+        self.assertEqual(opening.bot_response, scenario.opening_line)
+        self.assertEqual(opening.performance_cue, "opening")
+        self.assertIsNone(session.start())
+
+        ending = session.close()
+        self.assertEqual(ending.bot_response, scenario.ending_line)
+        self.assertEqual(ending.performance_cue, "ending")
+        self.assertIsNone(session.close())
+        self.assertEqual(publisher.publish.call_count, 2)
+        self.assertEqual(
+            publisher.publish.call_args_list[0].kwargs["performance_cue"],
+            "opening",
+        )
+        self.assertEqual(
+            publisher.publish.call_args_list[1].kwargs["performance_cue"],
+            "ending",
+        )
+
     def test_narrative_sessions_keep_state_and_timers_separate(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         first_controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
@@ -226,6 +281,29 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(first.controller.state.gift_status, "committed")
         self.assertEqual(second.controller.state.gift_status, "undecided")
         self.assertIsNot(first.current_situation, second.current_situation)
+
+    def test_session_marks_generated_exit_response_as_the_ending_cue(self):
+        scenario = pooh.get_scenario("tea_party")
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="exit",
+            current_scene="none",
+            narrative_actions=[],
+            bot_response="うん、わかったよ。またね。",
+            updated_situation=scenario.initial_situation,
+        ))
+        publisher = Mock()
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, ros_publisher=publisher,
+        )
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("もう終わりにしたい")
+
+        self.assertTrue(session.ended)
+        self.assertEqual(output.performance_cue, "ending")
+        self.assertEqual(output.bot_response, "うん、わかったよ。またね。")
+        self.assertIsNone(session.close())
+        self.assertEqual(publisher.publish.call_count, 2)
 
     def test_narrative_relay_publisher_does_not_raise_when_relay_is_unreachable(self):
         scenario = pooh.get_scenario("eeyore_birthday")

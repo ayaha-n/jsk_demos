@@ -38,6 +38,7 @@ class Scenario:
     label: str
     initial_situation: NarrativeSituation
     opening_line: str
+    ending_line: str
     trainset: list[dspy.Example]
     mode_examples: list[dspy.Example]
     mishearing_examples: list[dspy.Example]
@@ -74,6 +75,7 @@ def _tea_party() -> Scenario:
         label="森のお茶会",
         initial_situation=INITIAL_SITUATION,
         opening_line=TEA_PARTY_OPENING_LINE,
+        ending_line="またね。いっしょに過ごせて、うれしかったよ。",
         trainset=TRAINSET,
         mode_examples=MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,
@@ -97,6 +99,7 @@ def _eeyore_birthday() -> Scenario:
         label="イーヨーの誕生日プレゼント",
         initial_situation=EEYORE_BIRTHDAY_SITUATION,
         opening_line=EEYORE_BIRTHDAY_OPENING_LINE,
+        ending_line="またね。イーヨーのお祝いをいっしょに考えてくれて、ありがとう。",
         trainset=EEYORE_BIRTHDAY_TRAINSET,
         mode_examples=EEYORE_BIRTHDAY_MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,

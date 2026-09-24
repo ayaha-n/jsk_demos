@@ -698,6 +698,7 @@ class SessionOutput:
     scene_label: str | None = None
     situation_diff: str = "(変化なし)"
     narrative_actions: list[str] = field(default_factory=list)
+    performance_cue: str | None = None
     world_event_id: str | None = None
     latency_ms: float = 0.0
     generation_fallback: bool = False
@@ -955,10 +956,11 @@ class NarrativeSession:
             scene_id=output.scene_id,
             source=output.source,
             world_event_id=output.world_event_id,
+            performance_cue=output.performance_cue,
         )
 
     def start(self) -> SessionOutput | None:
-        """Start once and return the scripted opening for local display."""
+        """Start once and expose the scripted opening to every output path."""
         if self.started or self.ended:
             return None
         self.started = True
@@ -969,21 +971,25 @@ class NarrativeSession:
             scene_id="none",
             updated_situation=self.current_situation,
             situation_diff=format_situation_diff(None, self.current_situation),
+            performance_cue="opening",
         )
+        self._publish(output)
         return output
 
     def close(self, reason: str = "requested") -> SessionOutput | None:
-        """Close once and return the fixed ending line for local display."""
+        """Close once with the scenario's fixed ending line."""
         if self.ended:
             return None
         self.ended = True
         output = SessionOutput(
             source="session_close",
-            bot_response="またね。いっしょに過ごせて、うれしかったよ。",
+            bot_response=self.scenario.ending_line,
             interaction_mode="exit",
             scene_id="none",
             updated_situation=self.current_situation,
+            performance_cue="ending",
         )
+        self._publish(output)
         return output
 
     def seconds_until_due(self) -> float | None:
@@ -1149,6 +1155,7 @@ class NarrativeSession:
                 previous_situation, turn.updated_situation
             ),
             narrative_actions=actions,
+            performance_cue="ending" if is_exit else None,
             latency_ms=latency_ms,
             turn=turn,
         )

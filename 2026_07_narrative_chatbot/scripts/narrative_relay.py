@@ -44,6 +44,7 @@ class NarrativeRelayPublisher:
         scene_id: str,
         source: str,
         world_event_id: str | None = None,
+        performance_cue: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "type": "narrative_response",
@@ -55,6 +56,8 @@ class NarrativeRelayPublisher:
         }
         if world_event_id is not None:
             payload["world_event_id"] = world_event_id
+        if performance_cue is not None:
+            payload["performance_cue"] = performance_cue
         connection = self._connect()
         if connection is None:
             return
