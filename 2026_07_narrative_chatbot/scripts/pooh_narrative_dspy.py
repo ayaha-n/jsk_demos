@@ -65,7 +65,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v22"
+PROGRAM_VERSION = "pooh-structured-state-v28"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -93,8 +93,10 @@ class AnalyzeInteraction(dspy.Signature):
     """
 
     current_situation: NarrativeSituation = dspy.InputField()
-    user_action: str = dspy.InputField()
+    # Keep history before the current input so the newest participant line in
+    # the prompt is this turn's input, not the previous turn's.
     history: str = dspy.InputField()
+    user_action: str = dspy.InputField()
     technical_terms: list[str] = dspy.OutputField(
         desc="発話に含まれる物語世界外の技術語・研究語。存在しない場合は空。"
     )
@@ -148,8 +150,10 @@ class GeneratePoohResponse(dspy.Signature):
     """
 
     current_situation: NarrativeSituation = dspy.InputField()
-    user_action: str = dspy.InputField()
+    # Keep history before the current input so the newest participant line in
+    # the prompt is this turn's input, not the previous turn's.
     history: str = dspy.InputField()
+    user_action: str = dspy.InputField()
     world_event: str = dspy.InputField(
         desc="参加者の入力とは別に、既に確定・適用された世界の出来事。通常ターンは空文字列。"
     )
@@ -727,7 +731,9 @@ class SessionOutput:
         }
 
 
-def format_history(turns: list[Turn], max_turns: int = 6) -> str:
+def format_history(turns: list[Turn], max_turns: int = 12) -> str:
+    # The current state is passed separately as current_situation; repeating
+    # it per turn buries this turn's input under a long history.
     chunks = []
     recent = turns[-max_turns:]
     start = len(turns) - len(recent) + 1
@@ -742,7 +748,7 @@ def format_history(turns: list[Turn], max_turns: int = 6) -> str:
             f"応答モード: {turn.interaction_mode}\n"
             f"参考場面ID: {turn.scene_id}\n"
             f"物語アクション: {turn.narrative_actions or []}\n"
-            f"プーの応答: {turn.bot_response}\n更新後の状態: {turn.updated_situation}"
+            f"プーの応答: {turn.bot_response}"
         )
     return "\n\n".join(chunks)
 

@@ -442,11 +442,12 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("応答モード: meta", matches[0].history)
         self.assertNotIn("サーボ", matches[0].bot_response)
 
-    def test_history_retains_mode_and_updated_state(self):
+    def test_history_retains_mode_but_not_updated_state(self):
         turn = pooh.Turn("行為", "ordinary", "応答", "状態")
         history = pooh.format_history([turn])
-        for value in ("行為", "ordinary", "応答", "状態"):
+        for value in ("行為", "ordinary", "応答"):
             self.assertIn(value, history)
+        self.assertNotIn("状態", history)
 
     def test_mode_mismatch_is_a_hard_gate(self):
         def unexpected(**kwargs):

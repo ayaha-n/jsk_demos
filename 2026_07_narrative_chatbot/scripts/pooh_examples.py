@@ -190,8 +190,7 @@ TRAINSET = [
         user_action="サーボのことだよ",
         history=(
             "Turn 1\n参加者の生入力: きみ、モータはどこについてるの？\n"
-            "応答モード: meta\nプーの応答: もっとおいしいものが欲しいの？\n"
-            f"更新後の状態: {INITIAL_SITUATION}"
+            "応答モード: meta\nプーの応答: もっとおいしいものが欲しいの？"
         ),
         interaction_mode="meta",
         bot_response=(
