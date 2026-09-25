@@ -36,6 +36,11 @@ def example(*, situation_update: SituationUpdate | None = None, **values: Any) -
     values.setdefault("previous_bot_response", "")
     values.setdefault("narrative_actions", [])
     values.setdefault("settled_details", [])
+    # Dataset labeling only: an example line ending in a question to the
+    # participant awaits a reply.  Runtime never parses text for this.
+    values.setdefault(
+        "awaiting_reply", str(values.get("bot_response", "")).rstrip().endswith(("？", "?"))
+    )
     update = situation_update or SituationUpdate()
     values["situation_update"] = update
     values["updated_situation"] = apply_situation_update(
@@ -346,6 +351,7 @@ def build_response_examples(
             narrative_actions=item.narrative_actions,
             settled_details=item.settled_details,
             bot_response=item.bot_response,
+            awaiting_reply=item.awaiting_reply,
         ).with_inputs(
             "current_situation",
             "user_action",

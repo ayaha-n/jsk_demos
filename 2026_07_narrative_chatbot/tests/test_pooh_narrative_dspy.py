@@ -382,6 +382,54 @@ class RegressionTests(unittest.TestCase):
             "honey_gift_committed",
         )
 
+    def test_no_follow_up_while_pooh_awaits_the_participant_reply(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        replies = [
+            ("どんな色の風船がいい？", True),
+            ("青にしよう！晴れた空みたいだもの。", False),
+        ]
+        agent = Mock(side_effect=[
+            SimpleNamespace(
+                interaction_mode="narrative", current_scene="none", narrative_actions=[],
+                bot_response=line, awaiting_reply=awaiting,
+                updated_situation=scenario.initial_situation,
+            )
+            for line, awaiting in replies
+        ])
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, event_controller=controller,
+        )
+        session.start()
+        now[0] = 35.0
+        with patch.object(pooh, "append_log"):
+            session.submit("風船はどう？")
+            self.assertTrue(session.awaiting_reply)
+            self.assertIsNone(session.follow_up())
+            session.submit("青がいいな")
+            self.assertFalse(session.awaiting_reply)
+            event = session.follow_up()
+
+        self.assertEqual(event.world_event_id, "honey_gift_committed")
+
+    def test_runtime_replacement_is_not_awaiting_a_reply(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="narrative", current_scene="1a", narrative_actions=[],
+            bot_response="きみはどう思う？", awaiting_reply=True,
+            updated_situation=scenario.initial_situation,
+        ))
+        session = pooh.NarrativeSession(agent, "model", "program", scenario)
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("うーん、わからないな")
+
+        self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
+        self.assertFalse(session.awaiting_reply)
+
     def test_narrative_relay_publisher_does_not_raise_when_relay_is_unreachable(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 1, scenario.key)
@@ -1378,6 +1426,27 @@ class RegressionTests(unittest.TestCase):
             )
         )
         self.assertNotIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
+
+    def test_silence_after_a_question_waits_longer_before_the_wrap_up(self):
+        for awaiting, due_after in ((True, 30.0), (False, 12.0)):
+            now = [0.0]
+            controller = HoneyGiftEventController(
+                30.0, 30.0, 10.0, clock=lambda: now[0],
+                quiet_seconds=12.0, awaiting_quiet_seconds=30.0,
+            )
+            controller.observe_actions(["commit_honey_jar_gift"])
+            now[0] = 42.0
+            controller.pop_due_event()
+            now[0] = 52.0
+            controller.pop_due_event()
+            now[0] = 100.0
+            controller.observe_settled_details([SettledDetail(topic="飲み物", value="お茶")])
+            controller.observe_activity(0.0, awaiting_reply=awaiting)
+
+            now[0] = 100.0 + due_after - 0.1
+            self.assertIsNone(controller.pop_due_event(), awaiting)
+            now[0] = 100.0 + due_after
+            self.assertEqual(controller.pop_due_event().event_id, "story_wrap_up", awaiting)
 
     def test_model_cannot_settle_the_jar_question_as_free_text(self):
         now = [0.0]

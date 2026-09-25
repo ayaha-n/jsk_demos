@@ -884,7 +884,9 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         selected_mishearing="none",
         situation_update=SituationUpdate(),
         narrative_actions=[],
+        settled_details=[],
         bot_response=HONEY_EATEN_RESPONSE,
+        awaiting_reply=False,
     ).with_inputs(
         "current_situation",
         "user_action",
@@ -923,7 +925,9 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         selected_mishearing="none",
         situation_update=SituationUpdate(),
         narrative_actions=[],
+        settled_details=[],
         bot_response=HONEY_GIFT_COMMITTED_RESPONSE,
+        awaiting_reply=False,
     ).with_inputs(
         "current_situation",
         "user_action",

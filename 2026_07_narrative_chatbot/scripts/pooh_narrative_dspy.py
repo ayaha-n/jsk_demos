@@ -72,7 +72,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v31"
+PROGRAM_VERSION = "pooh-structured-state-v32"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -230,6 +230,12 @@ class GeneratePoohResponse(dspy.Signature):
             "参加者の質問を答えずにそのまま聞き返さない。"
             "毎回問いかけで終える必要はない。previous_bot_responseと同じ・"
             "意味的に同じ内容を繰り返さない。"
+        )
+    )
+    awaiting_reply: bool = dspy.OutputField(
+        desc=(
+            "bot_responseが参加者への問いかけで終わり、その答えを待っているならtrue。"
+            "自分の考えや感想で終えた場合、独り言の問いかけの場合はfalse。"
         )
     )
 
@@ -468,6 +474,7 @@ class PoohNarrativeAgent(dspy.Module):
             narrative_actions=narrative_actions,
             settled_details=settled_details,
             bot_response=bot_response,
+            awaiting_reply=bool(response.awaiting_reply),
         )
 
 
@@ -497,6 +504,7 @@ def serialize_prediction(value: Any) -> str:
         "narrative_actions",
         "settled_details",
         "bot_response",
+        "awaiting_reply",
     )
     payload = {}
     for field in fields:
@@ -1016,6 +1024,7 @@ def create_event_controller(
         quiet_seconds=scenario.event_quiet_seconds,
         idle_close_seconds=scenario.idle_close_after_wrap_up_seconds,
         speech_seconds=estimate_speech_seconds,
+        awaiting_quiet_seconds=scenario.awaiting_reply_quiet_seconds,
     )
 
 
@@ -1101,6 +1110,8 @@ class NarrativeSession:
         self.log_path = LOG_DIR / f"session_{timestamp}_{self.session_id[:8]}.jsonl"
         self.started = False
         self.ended = False
+        # Whether Pooh's latest answer asked the participant something.
+        self.awaiting_reply = False
 
     def _history(self) -> str:
         return (
@@ -1172,7 +1183,11 @@ class NarrativeSession:
 
         Events that wait for a quiet moment would otherwise never fire while
         the participant keeps talking; this lets them follow Pooh's answer.
+        An answer that asked the participant something is left for them to
+        reply to; the event then waits for silence or the next answer.
         """
+        if self.awaiting_reply:
+            return None
         return self._fire_event(follow_up=True)
 
     def _fire_event(self, follow_up: bool) -> SessionOutput | None:
@@ -1284,6 +1299,7 @@ class NarrativeSession:
                 self.current_situation, self.scenario.pooh_preferences
             ),
         )
+        generated_response = str(result.bot_response)
         result.bot_response = enforce_response_invariants(
             user_action=user_input,
             history=history,
@@ -1294,11 +1310,17 @@ class NarrativeSession:
                 else "undecided"
             ),
         )
+        # A runtime replacement is a statement, not a question to the participant.
+        self.awaiting_reply = (
+            bool(getattr(result, "awaiting_reply", False))
+            and result.bot_response == generated_response
+        )
         if self.controller is not None:
             # Quiet time and newly armed events count from when Pooh finishes
             # speaking this answer, not from the input or generation.
             self.controller.observe_activity(
-                self.controller.speech_seconds(str(result.bot_response))
+                self.controller.speech_seconds(str(result.bot_response)),
+                awaiting_reply=self.awaiting_reply,
             )
         actions = list(getattr(result, "narrative_actions", []))
         if (

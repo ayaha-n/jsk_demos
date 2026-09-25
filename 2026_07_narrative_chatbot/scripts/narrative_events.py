@@ -223,6 +223,7 @@ class HoneyGiftEventController:
         quiet_seconds: float = 0.0,
         idle_close_seconds: float | None = None,
         speech_seconds: Callable[[str], float] = lambda text: 0.0,
+        awaiting_quiet_seconds: float | None = None,
     ) -> None:
         if gift_decision_delay_seconds < 0:
             raise ValueError("gift_decision_delay_seconds must be non-negative")
@@ -238,6 +239,12 @@ class HoneyGiftEventController:
         self.tasting_delay_seconds = tasting_delay_seconds
         self.eating_delay_seconds = eating_delay_seconds
         self.quiet_seconds = quiet_seconds
+        # Longer silence to wait for while Pooh's last line asked the
+        # participant something, so a new beat does not cut off their reply.
+        self.awaiting_quiet_seconds = (
+            quiet_seconds if awaiting_quiet_seconds is None else awaiting_quiet_seconds
+        )
+        self._awaiting_reply = False
         self.clock = clock
         self.state = HoneyGiftState()
         self.required_events = required_events or self._default_required_events(
@@ -329,12 +336,14 @@ class HoneyGiftEventController:
             ):
                 self._deadlines[event.event_id] = start + event.delay_seconds
 
-    def observe_activity(self, speech_seconds: float = 0.0) -> None:
+    def observe_activity(self, speech_seconds: float = 0.0, awaiting_reply: bool = False) -> None:
         """Record participant input, or Pooh's line with its playback length.
 
         Deadlines already set never move; events armed afterwards, and quiet
-        time, count from the end of that speech.
+        time, count from the end of that speech.  ``awaiting_reply`` marks a
+        line that asked the participant something; any later activity clears it.
         """
+        self._awaiting_reply = awaiting_reply
         now = self.clock()
         self._speech_end = max(self._speech_end, now + speech_seconds)
         self._last_activity = max(now, self._speech_end)
@@ -355,6 +364,8 @@ class HoneyGiftEventController:
             return deadline - max(0.0, self._speech_end - self.clock())
         if event.waits_for_quiet and not follow_up:
             quiet = self.quiet_seconds if event.quiet_seconds is None else event.quiet_seconds
+            if self._awaiting_reply:
+                quiet = max(quiet, self.awaiting_quiet_seconds)
             return max(deadline, self._last_activity + quiet)
         return deadline
 
