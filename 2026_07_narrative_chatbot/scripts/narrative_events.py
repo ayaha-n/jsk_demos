@@ -516,6 +516,14 @@ class HoneyGiftEventController:
                     add_props=["空になった蜂蜜壺"],
                 ),
             )
+            if "empty_jar_gift_resolved" not in self.state.completed_event_ids:
+                # Only resolve_empty_jar_gift settles this item, which in turn
+                # triggers the wrap-up.  A reworded or dropped label in the
+                # model's own delta must not end the thread silently.
+                situation = apply_situation_update(
+                    situation,
+                    SituationUpdate(add_unresolved=[EMPTY_JAR_UNRESOLVED]),
+                )
         if "honey_gift_committed" in self.state.completed_event_ids:
             situation = apply_situation_update(
                 situation,

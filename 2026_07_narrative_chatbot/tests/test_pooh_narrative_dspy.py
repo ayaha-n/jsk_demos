@@ -1235,6 +1235,28 @@ class RegressionTests(unittest.TestCase):
             delta=3.0,
         )
 
+    def test_empty_jar_item_stays_unresolved_until_the_action_settles_it(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        controller.observe_actions(["commit_honey_jar_gift"])
+        now[0] = 30.0
+        controller.pop_due_event()
+        now[0] = 40.0
+        controller.pop_due_event()
+        # The model reworded the item and later dropped it without the action.
+        reworded = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
+            update={"unresolved": ["イーヨーへの贈り物をどうするか"]},
+        )
+        dropped = reworded.model_copy(update={"unresolved": []})
+
+        self.assertIn(EMPTY_JAR_UNRESOLVED, controller.synchronize_situation(reworded).unresolved)
+        self.assertIn(EMPTY_JAR_UNRESOLVED, controller.synchronize_situation(dropped).unresolved)
+
+        controller.observe_actions(["resolve_empty_jar_gift"])
+        self.assertNotIn(
+            EMPTY_JAR_UNRESOLVED, controller.synchronize_situation(dropped).unresolved,
+        )
+
     def test_participant_input_does_not_reset_eating_timer(self):
         now = [0.0]
         controller = HoneyGiftEventController(
