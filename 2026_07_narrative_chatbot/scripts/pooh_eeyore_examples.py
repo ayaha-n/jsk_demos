@@ -424,8 +424,8 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response="だよねえ。どうしたらいいかなあ。",
     ),
 
-    # 蜂蜜を食べた後、話が飲み物へそれて一段落したら、受け止めたうえで
-    # 未解決の空の壺の件へ、プー自身の案で話を戻す。まだ決まってはいない。
+    # 蜂蜜を食べた後に参加者が出したケーキや飲み物は、空になった壺の代わりの
+    # 贈り物としてプーがまとめ、決まったことをはっきり言葉にする。
     example(
         current_situation=_HONEY_EATEN_OPEN_SITUATION,
         user_action="飲み物も準備しなきゃ",
@@ -438,10 +438,12 @@ EEYORE_BIRTHDAY_TRAINSET = [
         previous_bot_response="ケーキ、うれしいな。イーヨーもきっと喜ぶよ。",
         interaction_mode="narrative",
         current_scene="3",
+        narrative_actions=["not_give_empty_jar"],
+        settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="ケーキと飲み物")],
         situation_update=SituationUpdate(),
         bot_response=(
-            "そうだね、飲み物もあるといいね。それとね、空っぽになった壺のこと、"
-            "まだ決めてなかったね。ぼくは、壺のかわりに風船を贈るのがいいと思うな。"
+            "そうだね。壺は空っぽになっちゃったから、かわりにケーキと飲み物を用意しよう！"
+            "イーヨー、きっと喜ぶよ。"
         ),
     ),
 
