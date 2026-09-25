@@ -566,7 +566,7 @@ def cache_hash(train_model: str, judge_model: str, scenario: Scenario | None = N
             MAX_BOOTSTRAPPED_DEMOS,
             MAX_LABELED_DEMOS,
             MAX_TOTAL_DEMOS_PER_STAGE,
-            "merge_stage_demos_v2",
+            "merge_stage_demos_v3",
         ],
         "full_turn_examples": [item.toDict() for item in scenario.trainset],
         "mode_examples": [item.toDict() for item in scenario.mode_examples],
@@ -629,20 +629,97 @@ def select_labeled_demos(labeled_demos: list[Any], count: int) -> list[Any]:
     return selected
 
 
-def merge_module_demos(module: Any, labeled_demos: list[Any]) -> None:
+# Fields that make two demos "the same example" for each stage.  Phrasing
+# variants of one response example share history and bot_response, so the
+# response stage keeps one of them; the classify stage keeps each distinct
+# input because varied phrasings are exactly what it learns from.
+CLASSIFY_DEMO_IDENTITY = ("user_action", "history")
+PLAN_DEMO_IDENTITY = ("user_utterance", "history", "technical_terms")
+RESPOND_DEMO_IDENTITY = ("history", "world_event", "bot_response")
+# A bootstrapped trace carries the model's own output, so it is matched to
+# its source example by inputs only.
+RESPOND_DEMO_INPUTS = ("user_action", "history", "world_event")
+
+
+def demo_identity(demo: Any, fields: tuple[str, ...]) -> Any:
+    if not fields:
+        return id(demo)
+    return tuple(str(getattr(demo, name, "")) for name in fields)
+
+
+def unique_demos(
+    demos: list[Any], fields: tuple[str, ...], exclude: set[Any] | None = None,
+) -> list[Any]:
+    """Drop repeats (and anything in `exclude`) while keeping the first order."""
+    seen = set(exclude or ())
+    unique = []
+    for demo in demos:
+        key = demo_identity(demo, fields)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(demo)
+    return unique
+
+
+def merge_module_demos(
+    module: Any,
+    labeled_demos: list[Any],
+    identity_fields: tuple[str, ...] = (),
+    input_fields: tuple[str, ...] | None = None,
+) -> None:
     """Keep accepted traces first and fill the rest up to a fixed total
-    demo budget per stage, regardless of how large the curated set grows."""
+    demo budget per stage, regardless of how large the curated set grows.
+    A labeled demo that repeats a trace or another labeled demo would only
+    waste a slot, so each example appears at most once."""
+    input_fields = identity_fields if input_fields is None else input_fields
     for predictor in module.predictors():
-        bootstrapped = list(predictor.demos)
+        bootstrapped = unique_demos(list(predictor.demos), input_fields)
+        traced_inputs = {demo_identity(demo, input_fields) for demo in bootstrapped}
+        used = {
+            demo_identity(demo, identity_fields)
+            for demo in labeled_demos
+            if demo_identity(demo, input_fields) in traced_inputs
+        }
+        pool = unique_demos(labeled_demos, identity_fields, exclude=used)
         remaining = max(0, MAX_TOTAL_DEMOS_PER_STAGE - len(bootstrapped))
-        predictor.demos = bootstrapped + select_labeled_demos(labeled_demos, remaining)
+        predictor.demos = bootstrapped + select_labeled_demos(pool, remaining)
 
 
 def merge_agent_demos(agent: Any, scenario: Scenario) -> None:
     """Merge accepted traces with examples matching each Predictor schema."""
-    merge_module_demos(agent.classify, scenario.mode_examples)
-    merge_module_demos(agent.plan, scenario.mishearing_examples)
-    merge_module_demos(agent.respond, scenario.response_examples)
+    merge_module_demos(agent.classify, scenario.mode_examples, CLASSIFY_DEMO_IDENTITY)
+    merge_module_demos(agent.plan, scenario.mishearing_examples, PLAN_DEMO_IDENTITY)
+    merge_module_demos(
+        agent.respond, scenario.response_examples, RESPOND_DEMO_IDENTITY, RESPOND_DEMO_INPUTS,
+    )
+
+
+def bootstrap_order(trainset: list[Any]) -> list[Any]:
+    """Order the trainset so bootstrapping draws traces from many scenes.
+
+    BootstrapFewShot tries examples in order and stops after a few accepted
+    traces, so the file's scene grouping would otherwise decide that every
+    trace comes from the first scene.  Scenes take turns, and phrasing
+    variants of an example already queued go to the back.
+    """
+    first_of_group: list[Any] = []
+    repeats: list[Any] = []
+    seen: set[Any] = set()
+    for item in trainset:
+        key = demo_identity(item, RESPOND_DEMO_IDENTITY)
+        (repeats if key in seen else first_of_group).append(item)
+        seen.add(key)
+    by_scene: dict[str, list[Any]] = {}
+    for item in first_of_group:
+        by_scene.setdefault(str(getattr(item, "current_scene", "none")), []).append(item)
+    ordered: list[Any] = []
+    queues = list(by_scene.values())
+    while any(queues):
+        for queue in queues:
+            if queue:
+                ordered.append(queue.pop(0))
+    return ordered + repeats
 
 
 def compile_program(
@@ -663,7 +740,7 @@ def compile_program(
         program = optimizer.compile(
             student=student,
             teacher=teacher,
-            trainset=scenario.trainset,
+            trainset=bootstrap_order(scenario.trainset),
         )
     merge_agent_demos(program, scenario)
     target = cache_path(train_model, judge_model, scenario)
