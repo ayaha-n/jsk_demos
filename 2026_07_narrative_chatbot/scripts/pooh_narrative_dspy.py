@@ -56,6 +56,7 @@ from narrative_state import (
 from narrative_events import (
     HoneyGiftEventController,
     NarrativeAction,
+    SettledDetail,
     WorldEvent,
     estimate_speech_seconds,
     fixed_utterance_id,
@@ -71,7 +72,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v28"
+PROGRAM_VERSION = "pooh-structured-state-v30"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -199,13 +200,20 @@ class GeneratePoohResponse(dspy.Signature):
             "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
             "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
             "プーまたは参加者が提案したが、まだ決まっていない場合)、"
-            "commit_honey_jar_gift、block_pooh_honey_access、"
-            "resolve_empty_jar_gift(空になった壺をどうするか(そのまま贈る、"
-            "別の贈り物に替えるなど)が、具体的な内容によらず決着した場合)、"
-            "resolve_balloon_color(贈り物にする風船の色が、誰の案によるかに"
-            "関わらず決着した場合)、"
-            "resolve_ribbon_color(リボンの色が、誰の案によるかに関わらず"
-            "決着した場合)。該当しなければ空リスト。"
+            "commit_honey_jar_gift、block_pooh_honey_access。"
+            "該当しなければ空リスト。"
+        )
+    )
+    settled_details: list[SettledDetail] = dspy.OutputField(
+        desc=(
+            "このターンで一つに決まったこと。贈るもの、色、飲み物、ケーキなど何でもよい。"
+            "topicは、current_situationの【未解決・未確定】の項目が決まったならその項目名を"
+            "そのまま使い、それ以外は短い名詞(例: 飲み物)にする。蜂蜜の代わりに何を贈るかが"
+            "決まったら、topicは「空になった壺をどうするか」にする。valueは決まった内容"
+            "(例: 青、風船を贈る)で、一つに決まっていなければ含めない。"
+            "誰の案かは問わない。候補を挙げただけ、質問しただけなら含めない。"
+            "current_situationの【決まったこと】にある内容を同じ値で繰り返さない。"
+            "該当しなければ空リスト。"
         )
     )
     bot_response: str = dspy.OutputField(
@@ -429,6 +437,9 @@ class PoohNarrativeAgent(dspy.Module):
         # runtime guard is applied only by the interactive chat loop.
         bot_response = str(response.bot_response)
         narrative_actions = [str(action) for action in response.narrative_actions]
+        settled_details = [
+            SettledDetail.model_validate(detail) for detail in response.settled_details
+        ]
         uses_uncertain_candidate = any(
             candidate.narrative_link.startswith("技術語を理解できず")
             and candidate.heard_as in bot_response
@@ -451,6 +462,7 @@ class PoohNarrativeAgent(dspy.Module):
             situation_update=situation_update,
             updated_situation=updated_situation,
             narrative_actions=narrative_actions,
+            settled_details=settled_details,
             bot_response=bot_response,
         )
 
@@ -479,6 +491,7 @@ def serialize_prediction(value: Any) -> str:
         "selected_mishearing",
         "situation_update",
         "narrative_actions",
+        "settled_details",
         "bot_response",
     )
     payload = {}
@@ -515,6 +528,10 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
         if sorted(getattr(gold, "narrative_actions", [])) != sorted(
             getattr(pred, "narrative_actions", [])
         ):
+            return 0.0
+        # Which details were settled is a hard gate; the wording of each value
+        # (e.g. 青 vs 青色) is left to the judge.
+        if settled_topics(gold) != settled_topics(pred):
             return 0.0
         previous_bot_response = str(getattr(gold, "previous_bot_response", ""))
         # An exact repeat of the prior turn is unambiguous and cheap to check
@@ -778,6 +795,7 @@ class Turn:
     source: str = "participant"
     world_event: str = ""
     narrative_actions: list[str] | None = None
+    settled_details: list[dict[str, str]] | None = None
 
 
 @dataclass
@@ -821,6 +839,21 @@ class SessionOutput:
             "latency_ms": round(self.latency_ms, 1),
             "generation_fallback": self.generation_fallback,
         }
+
+
+def settled_topics(value: Any) -> list[str]:
+    return sorted(
+        SettledDetail.model_validate(detail).topic
+        for detail in getattr(value, "settled_details", []) or []
+    )
+
+
+def settled_details_of(result: Any) -> list[dict[str, str]]:
+    """Plain dicts for logging; validated again by the controller."""
+    return [
+        SettledDetail.model_validate(detail).model_dump()
+        for detail in getattr(result, "settled_details", [])
+    ]
 
 
 def format_history(turns: list[Turn], max_turns: int = 12) -> str:
@@ -1002,6 +1035,7 @@ def _event_result(
             situation_update=SituationUpdate(),
             updated_situation=current_situation,
             narrative_actions=[],
+            settled_details=[],
             bot_response=line,
         ), 0.0, False
     try:
@@ -1026,6 +1060,7 @@ def _event_result(
             situation_update=SituationUpdate(),
             updated_situation=current_situation,
             narrative_actions=[],
+            settled_details=[],
             bot_response=event.fallback_response,
         ), 0.0, True
 
@@ -1162,7 +1197,9 @@ class NarrativeSession:
             follow_up=follow_up,
         )
         actions = list(getattr(result, "narrative_actions", []))
+        details = settled_details_of(result)
         self.controller.observe_actions(actions)
+        self.controller.observe_settled_details(details)
         result.updated_situation = self.controller.synchronize_situation(
             result.updated_situation
         )
@@ -1176,6 +1213,7 @@ class NarrativeSession:
             source="world_event",
             world_event=event.description,
             narrative_actions=actions,
+            settled_details=details,
         )
         self.turns.append(turn)
         self.current_situation = result.updated_situation
@@ -1265,8 +1303,10 @@ class NarrativeSession:
         ):
             # The runtime guard itself voiced the proposal; record it as such.
             actions.append("propose_honey_jar_gift")
+        details = settled_details_of(result)
         if self.controller is not None:
             self.controller.observe_actions(actions)
+            self.controller.observe_settled_details(details)
             result.updated_situation = self.controller.synchronize_situation(
                 result.updated_situation
             )
@@ -1286,6 +1326,7 @@ class NarrativeSession:
             updated_situation=result.updated_situation,
             scene_id=result.current_scene,
             narrative_actions=actions,
+            settled_details=details,
         )
         self.turns.append(turn)
         self.current_situation = result.updated_situation

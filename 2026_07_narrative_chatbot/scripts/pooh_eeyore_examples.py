@@ -23,6 +23,8 @@ from narrative_events import (
     STORY_WRAP_UP_EVENT,
     STORY_WRAP_UP_RESPONSE,
     fixed_utterance,
+    EMPTY_JAR_UNRESOLVED,
+    SettledDetail,
 )
 from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
 from pooh_examples import (
@@ -367,7 +369,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response="ううん、もう空っぽなんだ。ぼく、みんな食べちゃった。",
     ),
     # 蜂蜜を食べてしまった直後、単なる相づちや短い感嘆では空壺の解決を
-    # 勝手に進めない(具体的な提案が無いのにresolve_empty_jar_giftを発火させない)。
+    # 勝手に進めない(具体的な提案が無いのに空の壺の扱いを決まったことにしない)。
     *example_variants(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
@@ -425,7 +427,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="4a",
-        narrative_actions=["resolve_empty_jar_gift"],
+        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")],
         situation_update=SituationUpdate(
             purpose="プーが空になった蜂蜜壺をイーヨーへの贈り物にすることに決めた",
             add_events=[
@@ -465,7 +467,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="4a",
-        narrative_actions=["resolve_empty_jar_gift"],
+        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺にクッキーを入れて贈る")],
         situation_update=SituationUpdate(
             remove_unresolved=["空になった壺をどうするか"],
         ),
@@ -500,7 +502,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         previous_bot_response="ううん、もう空っぽなんだ。ぼく、みんな食べちゃった。",
         interaction_mode="narrative",
         current_scene="4b",
-        narrative_actions=["resolve_empty_jar_gift"],
+        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="風船を贈る")],
         situation_update=SituationUpdate(
             add_events=["参加者が風船を代わりの贈り物として提案した"],
             remove_unresolved=["空になった壺をどうするか"],
@@ -525,6 +527,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "プーは壺を贈ることに決めた",
                 ],
                 "relationship": "参加者はプーと一緒に贈り物を用意する仲間",
+                "decided": ["空になった壺をどうするか：空の壺をそのまま贈る"],
                 "unresolved": [],
             },
             deep=True,
@@ -589,7 +592,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
-        narrative_actions=["resolve_balloon_color"],
+        settled_details=[SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
         situation_update=SituationUpdate(
             add_events=["プーが自分の案として青い風船を提案した"],
             remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
@@ -626,7 +629,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
-        narrative_actions=["resolve_empty_jar_gift", "resolve_balloon_color"],
+        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="風船を贈る"), SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
         situation_update=SituationUpdate(
             add_events=["プーが自分の案として青い風船を提案した"],
             remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
@@ -659,7 +662,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
-        narrative_actions=["resolve_empty_jar_gift", "resolve_balloon_color"],
+        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="風船を贈る"), SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
         situation_update=SituationUpdate(
             add_events=["プーが青い風船を選んだ"],
             remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
@@ -681,6 +684,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "参加者が空の壺を贈り物にする案を出した",
                     "プーは壺を贈ることに決めた",
                 ],
+                "decided": ["空になった壺をどうするか：空の壺をそのまま贈る"],
                 "unresolved": [],
             },
             deep=True,
@@ -715,6 +719,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "プーは壺を贈ることに決めた",
                     "プーがリボンをかけることに決めた",
                 ],
+                "decided": ["空になった壺をどうするか：空の壺をそのまま贈る"],
                 "unresolved": [RIBBON_COLOR_UNRESOLVED],
             },
             deep=True,
@@ -728,7 +733,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         previous_bot_response="いいね！リボンをかけたら、もっとプレゼントらしくなるね。",
         interaction_mode="narrative",
         current_scene="6",
-        narrative_actions=["resolve_ribbon_color"],
+        settled_details=[SettledDetail(topic=RIBBON_COLOR_UNRESOLVED, value="赤")],
         situation_update=SituationUpdate(
             add_events=["プーが赤いリボンを選んだ"],
             remove_unresolved=[RIBBON_COLOR_UNRESOLVED],
@@ -743,11 +748,13 @@ EEYORE_BIRTHDAY_TRAINSET = [
     # 続けたい参加者とは会話を続け、終えたい参加者はexitで見送る。
     # 空の壺の決着は、そのまま贈る場合と別の贈り物に替える場合の両方がある。
     *example_variants(
-        current_situation=_WRAPPED_UP_SITUATION,
+        current_situation=_WRAPPED_UP_SITUATION.model_copy(
+            update={"decided": ["空になった壺をどうするか：空の壺をそのまま贈る"]},
+        ),
         user_action=["ううん、もう大丈夫", "もういいかな", "そろそろ行くね", "バイバイ"],
         history=(
             "Turn 1\n参加者の生入力: からっぽでも、そのまま贈ろうよ\n応答モード: narrative\n"
-            "参考場面ID: 4a\n物語アクション: ['resolve_empty_jar_gift']\n"
+            "参考場面ID: 4a\n物語アクション: []\n"
             "プーの応答: うん、そうしよう。からっぽでも、これはいいつぼだもの。\n\n"
             f"Turn 2\n世界イベント: {STORY_WRAP_UP_DESCRIPTION}\n応答モード: narrative\n"
             f"参考場面ID: 5\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"
@@ -761,11 +768,13 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response="うん、わかった。いっしょに考えてくれて、ありがとう。またね。",
     ),
     *example_variants(
-        current_situation=_WRAPPED_UP_SITUATION,
+        current_situation=_WRAPPED_UP_SITUATION.model_copy(
+            update={"decided": ["空になった壺をどうするか：風船を贈る"]},
+        ),
         user_action=["うん！", "まだ話したいな", "うん、もっとおはなししよう"],
         history=(
             "Turn 1\n参加者の生入力: 壺のかわりに風船をあげようよ\n応答モード: narrative\n"
-            "参考場面ID: 4b\n物語アクション: ['resolve_empty_jar_gift']\n"
+            "参考場面ID: 4b\n物語アクション: []\n"
             "プーの応答: いいね、風船ならイーヨーもきっとうれしいよ。\n\n"
             f"Turn 2\n世界イベント: {STORY_WRAP_UP_DESCRIPTION}\n応答モード: narrative\n"
             f"参考場面ID: 5\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"

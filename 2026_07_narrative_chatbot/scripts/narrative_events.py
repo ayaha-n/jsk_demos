@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
 
+from pydantic import BaseModel, ConfigDict
+
 from narrative_state import NarrativeSituation, SituationUpdate, apply_situation_update
 
 
@@ -56,19 +58,25 @@ NarrativeAction = Literal[
     "propose_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
-    "resolve_empty_jar_gift",
-    "resolve_balloon_color",
-    "resolve_ribbon_color",
 ]
 
 KNOWN_NARRATIVE_ACTIONS = {
     "propose_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
-    "resolve_empty_jar_gift",
-    "resolve_balloon_color",
-    "resolve_ribbon_color",
 }
+
+class SettledDetail(BaseModel):
+    """One detail that was settled in a turn, with what it settled on.
+
+    Topics are open (a drink, the cake's decoration, ...); Python only keeps
+    the latest value per topic and renders it, it never interprets the text.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    topic: str
+    value: str
 
 HONEY_EATEN_RESPONSE = fixed_utterance("eeyore_birthday.honey_eaten")
 HONEY_EATEN_DESCRIPTION = (
@@ -109,6 +117,9 @@ EMPTY_JAR_UNRESOLVED = "空になった壺をどうするか"
 BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
 RIBBON_COLOR_UNRESOLVED = "リボンの色"
 BLOCKED_ACCESS_EVENT = "参加者が贈り物の蜂蜜を食べないよう明確に制止した"
+# Settling either of these topics decides what Eeyore gets.  Once the honey
+# is gone, that decision is what completes the story.
+GIFT_TOPICS = (EMPTY_JAR_UNRESOLVED, GIFT_DECISION_UNRESOLVED[0])
 STORY_WRAP_UP_EVENT = "イーヨーへの贈り物が決まった"
 STORY_WRAP_UP_DESCRIPTION = (
     "空になった壺をどうするか（そのまま贈る、別の贈り物に替えるなど）が決まり、"
@@ -172,6 +183,10 @@ class HoneyGiftState:
     honey_status: str = "full"
     access_restriction: str = "none"
     completed_event_ids: set[str] = field(default_factory=set)
+    # Settled gift details by topic (the unresolved label they answer).
+    settled_details: dict[str, str] = field(default_factory=dict)
+    # What Eeyore gets instead, decided after the honey was eaten.
+    replacement_gift: str | None = None
 
 
 class HoneyGiftEventController:
@@ -263,7 +278,7 @@ class HoneyGiftEventController:
                 delay_seconds=0.0,
                 waits_for_quiet=True,
                 prerequisite=lambda state: (
-                    "empty_jar_gift_resolved" in state.completed_event_ids
+                    state.replacement_gift is not None
                 ),
                 fire=HoneyGiftEventController._fire_story_wrap_up,
             ),
@@ -332,34 +347,30 @@ class HoneyGiftEventController:
             elif action == "block_pooh_honey_access":
                 self.state.access_restriction = "blocked"
                 self._cancel_schedule()
-            elif action == "resolve_empty_jar_gift":
-                self._resolve_empty_jar_gift()
-            elif action == "resolve_balloon_color":
-                self._resolve_balloon_color()
-            elif action == "resolve_ribbon_color":
-                self._resolve_ribbon_color()
         self._arm_required_events()
 
-    def _resolve_empty_jar_gift(self) -> None:
-        # Only meaningful once the jar is actually empty; a premature signal
-        # must not silently pre-clear the unresolved item before it even
-        # exists, which would hide the "空になった壺をどうするか" thread
-        # entirely once the honey is later eaten.
-        if self.state.honey_status != "empty":
-            return
-        self.state.completed_event_ids.add("empty_jar_gift_resolved")
+    def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
+        """Record what each gift detail settled on; a later value replaces it.
 
-    def _resolve_balloon_color(self) -> None:
-        # Whoever proposed the color (Pooh's own guess or the participant's
-        # own answer) is DSPy's call to make; Python only records that the
-        # color topic is settled, so the "贈り物にする風船の色" unresolved
-        # item is cleared deterministically regardless of phrasing.
-        self.state.completed_event_ids.add("balloon_color_resolved")
-
-    def _resolve_ribbon_color(self) -> None:
-        # Same design as _resolve_balloon_color: Python only tracks that the
-        # ribbon-color topic is settled, never the chosen value itself.
-        self.state.completed_event_ids.add("ribbon_color_resolved")
+        Who proposed it is DSPy's call; Python keeps the value so it stays in
+        the state after the turn leaves the history window.
+        """
+        for detail in details:
+            detail = SettledDetail.model_validate(detail)
+            value = detail.value.strip()
+            if not value:
+                continue
+            topic = detail.topic.strip()
+            if not topic:
+                continue
+            # The empty jar question only exists once the honey is gone; an
+            # early signal must not pre-settle it and skip the wrap-up.
+            if topic == EMPTY_JAR_UNRESOLVED and self.state.honey_status != "empty":
+                continue
+            self.state.settled_details[topic] = value
+            if topic in GIFT_TOPICS and self.state.honey_status == "empty":
+                self.state.replacement_gift = value
+        self._arm_required_events()
 
     def _commit_gift(self) -> None:
         state = self.state
@@ -516,8 +527,8 @@ class HoneyGiftEventController:
                     add_props=["空になった蜂蜜壺"],
                 ),
             )
-            if "empty_jar_gift_resolved" not in self.state.completed_event_ids:
-                # Only resolve_empty_jar_gift settles this item, which in turn
+            if self.state.replacement_gift is None:
+                # Only a settled detail closes this item, which in turn
                 # triggers the wrap-up.  A reworded or dropped label in the
                 # model's own delta must not end the thread silently.
                 situation = apply_situation_update(
@@ -537,21 +548,15 @@ class HoneyGiftEventController:
                 situation,
                 SituationUpdate(add_events=[HONEY_TASTED_EVENT]),
             )
-        if "empty_jar_gift_resolved" in self.state.completed_event_ids:
-            situation = apply_situation_update(
-                situation,
-                SituationUpdate(remove_unresolved=[EMPTY_JAR_UNRESOLVED]),
-            )
-        if "balloon_color_resolved" in self.state.completed_event_ids:
-            situation = apply_situation_update(
-                situation,
-                SituationUpdate(remove_unresolved=[BALLOON_COLOR_UNRESOLVED]),
-            )
-        if "ribbon_color_resolved" in self.state.completed_event_ids:
-            situation = apply_situation_update(
-                situation,
-                SituationUpdate(remove_unresolved=[RIBBON_COLOR_UNRESOLVED]),
-            )
+        settled = self.state.settled_details
+        closed = list(settled)
+        if self.state.replacement_gift is not None:
+            closed += list(GIFT_TOPICS)
+        situation = apply_situation_update(
+            situation, SituationUpdate(remove_unresolved=closed),
+        ).model_copy(
+            update={"decided": [f"{topic}：{value}" for topic, value in settled.items()]}
+        )
         if "story_wrap_up" in self.state.completed_event_ids:
             situation = apply_situation_update(
                 situation,

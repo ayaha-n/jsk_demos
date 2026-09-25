@@ -35,6 +35,7 @@ def example(*, situation_update: SituationUpdate | None = None, **values: Any) -
     values.setdefault("world_event", "")
     values.setdefault("previous_bot_response", "")
     values.setdefault("narrative_actions", [])
+    values.setdefault("settled_details", [])
     update = situation_update or SituationUpdate()
     values["situation_update"] = update
     values["updated_situation"] = apply_situation_update(
@@ -343,6 +344,7 @@ def build_response_examples(
             selected_mishearing=item.selected_mishearing,
             situation_update=item.situation_update,
             narrative_actions=item.narrative_actions,
+            settled_details=item.settled_details,
             bot_response=item.bot_response,
         ).with_inputs(
             "current_situation",

@@ -19,6 +19,9 @@ class NarrativeSituation(BaseModel):
     events: list[str] = Field(default_factory=list)
     relationship: str = ""
     unresolved: list[str] = Field(default_factory=list)
+    # Rendered by Python from settled details ("topic：value"); the model's
+    # SituationUpdate cannot edit it, so a decision is never forgotten.
+    decided: list[str] = Field(default_factory=list)
 
     def __str__(self) -> str:
         return format_situation(self)
@@ -67,7 +70,8 @@ def format_situation(situation: NarrativeSituation) -> str:
         f"【小道具と状態】{joined(situation.props)}。\n"
         f"【重要な出来事】{joined(situation.events)}。\n"
         f"【関係】{situation.relationship}。\n"
-        f"【未解決・未確定】{joined(situation.unresolved)}。"
+        f"【未解決・未確定】{joined(situation.unresolved)}。\n"
+        f"【決まったこと】{joined(situation.decided)}。"
     )
 
 

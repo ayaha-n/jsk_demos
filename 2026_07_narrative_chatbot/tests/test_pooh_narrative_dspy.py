@@ -90,6 +90,7 @@ from narrative_events import (
     STORY_WRAP_UP_RESPONSE,
     FIXED_UTTERANCES,
     HoneyGiftEventController,
+    SettledDetail,
     RequiredNarrativeEvent,
     WorldEvent,
     fixed_utterance_id,
@@ -532,6 +533,24 @@ class RegressionTests(unittest.TestCase):
         pred = SimpleNamespace(
             interaction_mode="ordinary", selected_mishearing="none",
             updated_situation=pooh.INITIAL_SITUATION, bot_response="こんにちは。",
+        )
+        self.assertEqual(metric(gold, pred), 0.0)
+
+    def test_settled_topic_mismatch_is_a_hard_gate(self):
+        def unexpected(**kwargs):
+            self.fail("semantic evaluator called after settled-topic mismatch")
+        metric = pooh.make_metric(unexpected, unexpected, object())
+        gold = SimpleNamespace(
+            current_situation=pooh.INITIAL_SITUATION, user_action="青にしよう", history="",
+            interaction_mode="narrative", selected_mishearing="none",
+            updated_situation=pooh.INITIAL_SITUATION, bot_response="青にしよう！",
+            narrative_actions=[],
+            settled_details=[SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
+        )
+        pred = SimpleNamespace(
+            interaction_mode="narrative", selected_mishearing="none",
+            updated_situation=pooh.INITIAL_SITUATION, bot_response="何色がいいかな？",
+            narrative_actions=[], settled_details=[],
         )
         self.assertEqual(metric(gold, pred), 0.0)
 
@@ -1132,7 +1151,7 @@ class RegressionTests(unittest.TestCase):
         controller.observe_activity()
         self.assertIsNone(controller.pop_due_event(follow_up=True))
 
-        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.observe_settled_details([SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")])
         controller.observe_activity()
         event = controller.pop_due_event(follow_up=True)
         self.assertEqual(event.event_id, "story_wrap_up")
@@ -1146,7 +1165,7 @@ class RegressionTests(unittest.TestCase):
     def test_idle_close_needs_silence_and_never_follows_an_answer(self):
         now = [100.0]
         controller = self._controller_with_empty_jar(now)
-        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.observe_settled_details([SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")])
         controller.pop_due_event(follow_up=True)
         controller.observe_activity()
 
@@ -1167,7 +1186,7 @@ class RegressionTests(unittest.TestCase):
         scenario = pooh.get_scenario("eeyore_birthday")
         now = [100.0]
         controller = self._controller_with_empty_jar(now)
-        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.observe_settled_details([SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")])
         controller.pop_due_event(follow_up=True)
         publisher = Mock()
         session = pooh.NarrativeSession(
@@ -1252,9 +1271,89 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(EMPTY_JAR_UNRESOLVED, controller.synchronize_situation(reworded).unresolved)
         self.assertIn(EMPTY_JAR_UNRESOLVED, controller.synchronize_situation(dropped).unresolved)
 
-        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.observe_settled_details([SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")])
         self.assertNotIn(
             EMPTY_JAR_UNRESOLVED, controller.synchronize_situation(dropped).unresolved,
+        )
+
+    def test_open_topics_such_as_drinks_are_kept_as_decided(self):
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        controller.observe_settled_details([
+            SettledDetail(topic="飲み物", value="ハチミツたっぷりのアザミドリンク"),
+            SettledDetail(topic="  ", value="無視される"),
+        ])
+        updated = controller.synchronize_situation(
+            pooh.get_scenario("eeyore_birthday").initial_situation
+        )
+        self.assertEqual(updated.decided, ["飲み物：ハチミツたっぷりのアザミドリンク"])
+
+    def test_wrap_up_needs_a_gift_decided_after_the_honey_is_eaten(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        # A gift chosen before the honey beat does not complete the story.
+        controller.observe_settled_details(
+            [SettledDetail(topic=GIFT_DECISION_UNRESOLVED[0], value="風船")]
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+        now[0] = 30.0
+        controller.pop_due_event()
+        now[0] = 40.0
+        self.assertEqual(controller.pop_due_event().event_id, "pooh_ate_honey")
+        self.assertIsNone(controller.pop_due_event(follow_up=True))
+
+        controller.observe_settled_details(
+            [SettledDetail(topic=GIFT_DECISION_UNRESOLVED[0], value="風船")]
+        )
+        self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "story_wrap_up")
+        updated = controller.synchronize_situation(
+            pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
+                update={"unresolved": [EMPTY_JAR_UNRESOLVED]},
+            )
+        )
+        self.assertNotIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
+
+    def test_settled_detail_stays_decided_and_later_value_replaces_it(self):
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
+            update={"unresolved": [BALLOON_COLOR_UNRESOLVED]},
+        )
+        controller.observe_settled_details([SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")])
+        first = controller.synchronize_situation(situation)
+        self.assertEqual(first.decided, ["贈り物にする風船の色：青"])
+        self.assertNotIn(BALLOON_COLOR_UNRESOLVED, first.unresolved)
+        self.assertIn("【決まったこと】贈り物にする風船の色：青", str(first))
+
+        # The model's own delta has no way to drop what Python decided.
+        after_turn = apply_situation_update(first, SituationUpdate(add_events=["別の話をした"]))
+        self.assertEqual(after_turn.decided, ["贈り物にする風船の色：青"])
+
+        controller.observe_settled_details([{"topic": BALLOON_COLOR_UNRESOLVED, "value": "黄色"}])
+        self.assertEqual(
+            controller.synchronize_situation(after_turn).decided, ["贈り物にする風船の色：黄色"],
+        )
+
+    def test_session_records_settled_details_from_the_model(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="narrative",
+            current_scene="6",
+            narrative_actions=[],
+            settled_details=[SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
+            bot_response="青にしよう！晴れた空みたいだもの。",
+            updated_situation=scenario.initial_situation,
+        ))
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, event_controller=controller,
+        )
+        session.start()
+        with patch.object(pooh, "append_log") as log:
+            output = session.submit("青がいいな")
+
+        self.assertEqual(output.updated_situation.decided, ["贈り物にする風船の色：青"])
+        self.assertEqual(
+            log.call_args.args[1].settled_details,
+            [{"topic": BALLOON_COLOR_UNRESOLVED, "value": "青"}],
         )
 
     def test_participant_input_does_not_reset_eating_timer(self):
@@ -1297,7 +1396,7 @@ class RegressionTests(unittest.TestCase):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         controller.observe_actions(["commit_honey_jar_gift"])
         controller.state.honey_status = "empty"
-        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.observe_settled_details([SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")])
         situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
             update={"unresolved": [EMPTY_JAR_UNRESOLVED]},
         )
@@ -1310,8 +1409,10 @@ class RegressionTests(unittest.TestCase):
 
     def test_synchronize_situation_clears_balloon_color_unresolved_without_example_support(self):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
-        controller.observe_actions(["resolve_balloon_color"])
-        self.assertIn("balloon_color_resolved", controller.state.completed_event_ids)
+        controller.observe_settled_details(
+            [SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")]
+        )
+        self.assertEqual(controller.state.settled_details[BALLOON_COLOR_UNRESOLVED], "青")
 
         situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
             update={"unresolved": [BALLOON_COLOR_UNRESOLVED]},
@@ -1324,8 +1425,8 @@ class RegressionTests(unittest.TestCase):
 
     def test_synchronize_situation_clears_ribbon_color_unresolved_without_example_support(self):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
-        controller.observe_actions(["resolve_ribbon_color"])
-        self.assertIn("ribbon_color_resolved", controller.state.completed_event_ids)
+        controller.observe_settled_details([SettledDetail(topic=RIBBON_COLOR_UNRESOLVED, value="赤")])
+        self.assertEqual(controller.state.settled_details[RIBBON_COLOR_UNRESOLVED], "赤")
 
         situation = pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
             update={"unresolved": [RIBBON_COLOR_UNRESOLVED]},
@@ -1333,17 +1434,17 @@ class RegressionTests(unittest.TestCase):
         updated = controller.synchronize_situation(situation)
         self.assertNotIn(RIBBON_COLOR_UNRESOLVED, updated.unresolved)
 
-    def test_resolve_empty_jar_gift_is_ignored_before_honey_is_actually_empty(self):
+    def test_empty_jar_detail_is_ignored_before_honey_is_actually_empty(self):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         # Fired prematurely, before the honey is even gone: must not silently
         # pre-clear the unresolved item that does not exist yet.
-        controller.observe_actions(["resolve_empty_jar_gift"])
-        self.assertNotIn("empty_jar_gift_resolved", controller.state.completed_event_ids)
+        controller.observe_settled_details([SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")])
+        self.assertNotIn(EMPTY_JAR_UNRESOLVED, controller.state.settled_details)
 
         now = [0.0]
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         controller.observe_actions(["commit_honey_jar_gift"])
-        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.observe_settled_details([SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")])
         now[0] = 30.0
         controller.pop_due_event()  # the tasting foreshadowing, not the eating itself
         now[0] = 40.0
