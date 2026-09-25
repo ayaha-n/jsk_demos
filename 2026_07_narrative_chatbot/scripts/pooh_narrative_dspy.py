@@ -75,7 +75,10 @@ from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 PROGRAM_VERSION = "pooh-structured-state-v36"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
-DEFAULT_MODEL = "openai/gpt-4o-mini"
+# gpt-4o follows the questioning and agency guidance far better than
+# gpt-4o-mini at similar latency; the judge stays on the cheaper model.
+DEFAULT_MODEL = "openai/gpt-4o"
+DEFAULT_JUDGE_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
 CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", str(PROJECT_ROOT / ".dspy_cache")))
 BOOTSTRAP_METRIC_THRESHOLD = 0.8
@@ -666,7 +669,7 @@ def cache_path(train_model: str, judge_model: str, scenario: Scenario | None = N
 def configure_models() -> tuple[Any, Any, str, str]:
     api_key = os.environ["OPENAI_API_KEY"]
     train_model = os.getenv("DSPY_TRAIN_MODEL", os.getenv("DSPY_MODEL", DEFAULT_MODEL))
-    judge_model = os.getenv("DSPY_JUDGE_MODEL", train_model)
+    judge_model = os.getenv("DSPY_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
     train_lm = dspy.LM(train_model, api_key=api_key)
     judge_lm = dspy.LM(judge_model, api_key=api_key)
     dspy.configure(lm=train_lm)

@@ -92,16 +92,16 @@ python -c "import os; print('set' if os.getenv('OPENAI_API_KEY') else 'unset')"
 The training/generation model and judge model can be configured independently:
 
 ```bash
-export DSPY_TRAIN_MODEL='openai/gpt-4o-mini'
+export DSPY_TRAIN_MODEL='openai/gpt-4o'
 export DSPY_JUDGE_MODEL='openai/gpt-4o-mini'
 ```
 
 | Variable | Purpose | Default |
 |---|---|---|
 | `OPENAI_API_KEY` | Authentication for the OpenAI API | Required |
-| `DSPY_TRAIN_MODEL` | Model used for compilation and conversation generation | `openai/gpt-4o-mini` |
-| `DSPY_JUDGE_MODEL` | Model used by the semantic evaluator during compilation | Same as the training model |
-| `DSPY_MODEL` | Compatibility setting used when `DSPY_TRAIN_MODEL` is unset | `openai/gpt-4o-mini` |
+| `DSPY_TRAIN_MODEL` | Model used for compilation and conversation generation | `openai/gpt-4o` |
+| `DSPY_JUDGE_MODEL` | Model used by the semantic evaluator during compilation | `openai/gpt-4o-mini` |
+| `DSPY_MODEL` | Compatibility setting used when `DSPY_TRAIN_MODEL` is unset | `openai/gpt-4o` |
 | `POOH_CACHE_DIR` | Directory for compiled programs | `.dspy_cache` |
 | `POOH_LOG_DIR` | Directory for conversation logs | `logs` |
 
