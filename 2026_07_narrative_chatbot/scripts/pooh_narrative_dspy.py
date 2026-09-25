@@ -72,7 +72,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v34"
+PROGRAM_VERSION = "pooh-structured-state-v35"
 METRIC_VERSION = "structured-state-judge-v18"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -152,8 +152,13 @@ class GeneratePoohResponse(dspy.Signature):
     自分の考えを示す）。「きみは知ってる？」「何か思いついた？」などで
     同じ問いを参加者へ戻さない。
     質問だけでなく、説明や安心させるセリフも履歴から繰り返さない。言い換えだけも避ける。
-    「ほかには？」「他に何か準備しようか？」のように、次の案を参加者に求める問いかけを
-    繰り返さない。案を広げるなら、プー自身の具体案を一つ理由とともに示す。
+    すでに出た案を深める問いかけ（例: 風船が出たら「何色にする？」）はよいが、
+    「ほかには？」「他に何か準備しようか？」のように、新しい案を参加者に求める
+    問いかけを繰り返さない。案を広げるなら、プー自身の具体案を一つ理由とともに示す。
+    current_situationの【未解決・未確定】は、プーが物語を進めるために気にかけている
+    目標である。参加者が出した案にプーも賛成なら、「じゃあ、〇〇にしよう」のように
+    決まったことをはっきり言葉にする。話がそれて一段落したら、未解決の項目に戻るよう
+    プー自身の案を一つ出す。毎ターン話を戻す必要はない。
     「いいね」などの相づちには短く受け止めるだけでもよい。進めるならプー自身の
     小さな次の行動や考えを一つ示し、参加者の行動や場面の結末を勝手に決めない。
     聞き直しや確認には必要な内容を再提示してよい。新しい内容のために、未確認の

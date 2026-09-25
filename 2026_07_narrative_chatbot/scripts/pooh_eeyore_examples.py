@@ -87,6 +87,26 @@ _WRAPPED_UP_SITUATION = EEYORE_BIRTHDAY_SITUATION.model_copy(
 )
 
 
+# 蜂蜜を食べてしまい、空の壺の扱いがまだ決まっていない状態。
+_HONEY_EATEN_OPEN_SITUATION = EEYORE_BIRTHDAY_SITUATION.model_copy(
+    update={
+        "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
+        "events": [
+            *EEYORE_BIRTHDAY_SITUATION.events,
+            HONEY_GIFT_COMMITTED_EVENT,
+            "プーがイーヨーへの贈り物にする蜂蜜を全部食べてしまった",
+            "蜂蜜壺が空になった",
+        ],
+        "unresolved": [EMPTY_JAR_UNRESOLVED],
+    },
+    deep=True,
+)
+_HONEY_EATEN_OPEN_HISTORY = (
+    f"Turn 6\n世界イベント: {HONEY_EATEN_DESCRIPTION}\n応答モード: narrative\n"
+    f"参考場面ID: 3\n物語アクション: []\nプーの応答: {HONEY_EATEN_RESPONSE}"
+)
+
+
 EEYORE_BIRTHDAY_TRAINSET = [
     # --- 場面1a：プーがハチミツを贈ると提案する ---------------------------
     # 迷いには具体案を示す。提案は参加者の決定として記録しない。
@@ -402,6 +422,27 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response="だよねえ。どうしたらいいかなあ。",
     ),
 
+    # 蜂蜜を食べた後、話が飲み物へそれて一段落したら、受け止めたうえで
+    # 未解決の空の壺の件へ、プー自身の案で話を戻す。まだ決まってはいない。
+    example(
+        current_situation=_HONEY_EATEN_OPEN_SITUATION,
+        user_action="飲み物も準備しなきゃ",
+        history=(
+            f"{_HONEY_EATEN_OPEN_HISTORY}\n\n"
+            "Turn 7\n参加者の生入力: ケーキも作るよ\n応答モード: narrative\n"
+            "参考場面ID: none\n物語アクション: []\n"
+            "プーの応答: ケーキ、うれしいな。イーヨーもきっと喜ぶよ。"
+        ),
+        previous_bot_response="ケーキ、うれしいな。イーヨーもきっと喜ぶよ。",
+        interaction_mode="narrative",
+        current_scene="3",
+        situation_update=SituationUpdate(),
+        bot_response=(
+            "そうだね、飲み物もあるといいね。それとね、空っぽになった壺のこと、"
+            "まだ決めてなかったね。ぼくは、壺のかわりに風船を贈るのがいいと思うな。"
+        ),
+    ),
+
     # --- 場面4a：空になった壺をそのまま贈ることにする -----------------------
     # 場面4a：ツボをあげることを決める(言い回しが変わっても受け入れる)
     *example_variants(
@@ -511,7 +552,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             add_events=["参加者が風船を代わりの贈り物として提案した"],
             remove_unresolved=["空になった壺をどうするか"],
         ),
-        bot_response="うん、それがいいね。風船なら、きっとイーヨーも喜んでくれるよ。",
+        bot_response="うん、それがいいね。壺のかわりに、風船を贈ろう！きっとイーヨーも喜んでくれるよ。",
     ),
 
     # --- 場面5：決めた贈り物を振り返る --------------------------------------
