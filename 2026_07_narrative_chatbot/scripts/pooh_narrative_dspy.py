@@ -72,7 +72,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v30"
+PROGRAM_VERSION = "pooh-structured-state-v31"
 METRIC_VERSION = "structured-state-judge-v17"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -201,17 +201,20 @@ class GeneratePoohResponse(dspy.Signature):
             "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
             "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
             "プーまたは参加者が提案したが、まだ決まっていない場合)、"
-            "commit_honey_jar_gift、block_pooh_honey_access。"
-            "該当しなければ空リスト。"
+            "commit_honey_jar_gift、block_pooh_honey_access、"
+            "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
+            "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
+            "決まった場合。別の贈り物に替える場合など)。該当しなければ空リスト。"
         )
     )
     settled_details: list[SettledDetail] = dspy.OutputField(
         desc=(
             "このターンで一つに決まったこと。贈るもの、色、飲み物、ケーキなど何でもよい。"
             "topicは、current_situationの【未解決・未確定】の項目が決まったならその項目名を"
-            "そのまま使い、それ以外は短い名詞(例: 飲み物)にする。蜂蜜の代わりに何を贈るかが"
-            "決まったら、topicは「空になった壺をどうするか」にする。valueは決まった内容"
-            "(例: 青、風船を贈る)で、一つに決まっていなければ含めない。"
+            "そのまま使い、それ以外は短い名詞(例: 飲み物)にする。壺以外にイーヨーに贈るものが"
+            "決まったら、topicは「イーヨーに何をあげるか」にする。空になった壺を贈るかどうかは"
+            "narrative_actionsで表し、ここには含めない。valueは決まった内容"
+            "(例: 青、風船)で、一つに決まっていなければ含めない。"
             "誰の案かは問わない。候補を挙げただけ、質問しただけなら含めない。"
             "current_situationの【決まったこと】にある内容を同じ値で繰り返さない。"
             "該当しなければ空リスト。"

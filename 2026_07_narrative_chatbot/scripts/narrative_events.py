@@ -58,12 +58,16 @@ NarrativeAction = Literal[
     "propose_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
+    "give_empty_jar",
+    "not_give_empty_jar",
 ]
 
 KNOWN_NARRATIVE_ACTIONS = {
     "propose_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
+    "give_empty_jar",
+    "not_give_empty_jar",
 }
 
 class SettledDetail(BaseModel):
@@ -112,17 +116,20 @@ GIFT_DECISION_UNRESOLVED = (
     "イーヨーに何をあげるか",
     "プレゼントの準備がまだできていない",
 )
+# Settled by the honey commitment, and reopened (as something other than
+# the jar) when the participant and Pooh decide not to give the empty jar.
+GIFT_UNRESOLVED = GIFT_DECISION_UNRESOLVED[0]
+HONEY_JAR_GIFT = "ハチミツの入った壺"
 HONEY_PREPARATION_UNRESOLVED = "ハチミツの準備をどう進めるか"
 EMPTY_JAR_UNRESOLVED = "空になった壺をどうするか"
+GIVE_EMPTY_JAR = "あげる"
+NOT_GIVE_EMPTY_JAR = "あげない"
 BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
 RIBBON_COLOR_UNRESOLVED = "リボンの色"
 BLOCKED_ACCESS_EVENT = "参加者が贈り物の蜂蜜を食べないよう明確に制止した"
-# Settling either of these topics decides what Eeyore gets.  Once the honey
-# is gone, that decision is what completes the story.
-GIFT_TOPICS = (EMPTY_JAR_UNRESOLVED, GIFT_DECISION_UNRESOLVED[0])
 STORY_WRAP_UP_EVENT = "イーヨーへの贈り物が決まった"
 STORY_WRAP_UP_DESCRIPTION = (
-    "空になった壺をどうするか（そのまま贈る、別の贈り物に替えるなど）が決まり、"
+    "蜂蜜がなくなった後で、空になった壺を贈るか、壺の代わりに贈るものが決まり、"
     "イーヨーへの贈り物が決まった。"
     "これは既に起きた出来事。"
 )
@@ -185,8 +192,22 @@ class HoneyGiftState:
     completed_event_ids: set[str] = field(default_factory=set)
     # Settled gift details by topic (the unresolved label they answer).
     settled_details: dict[str, str] = field(default_factory=dict)
+    # Whether the empty jar is given (GIVE_EMPTY_JAR / NOT_GIVE_EMPTY_JAR).
+    jar_decision: str | None = None
     # What Eeyore gets instead, decided after the honey was eaten.
     replacement_gift: str | None = None
+    # Anything settled after the honey was eaten (a gift, a drink, a color...).
+    decided_after_honey: bool = False
+
+    def story_complete(self) -> bool:
+        """Honey gone, then either the empty jar or something else to give.
+
+        Pooh need not say "instead of the jar": any detail settled after the
+        honey is gone counts as something else to give.
+        """
+        return self.honey_status == "empty" and (
+            self.jar_decision == GIVE_EMPTY_JAR or self.decided_after_honey
+        )
 
 
 class HoneyGiftEventController:
@@ -278,7 +299,7 @@ class HoneyGiftEventController:
                 delay_seconds=0.0,
                 waits_for_quiet=True,
                 prerequisite=lambda state: (
-                    state.replacement_gift is not None
+                    state.story_complete()
                 ),
                 fire=HoneyGiftEventController._fire_story_wrap_up,
             ),
@@ -339,6 +360,12 @@ class HoneyGiftEventController:
 
     def observe_actions(self, actions: list[str]) -> None:
         """Validate and apply LM-proposed actions without resetting equal decisions."""
+        if "give_empty_jar" in actions and "not_give_empty_jar" in actions:
+            # Contradictory in one turn: neither is trusted.
+            actions = [
+                action for action in actions
+                if action not in ("give_empty_jar", "not_give_empty_jar")
+            ]
         for action in actions:
             if action not in KNOWN_NARRATIVE_ACTIONS:
                 continue
@@ -351,6 +378,12 @@ class HoneyGiftEventController:
             elif action == "block_pooh_honey_access":
                 self.state.access_restriction = "blocked"
                 self._cancel_schedule()
+            elif action in ("give_empty_jar", "not_give_empty_jar"):
+                # The jar question only exists once the honey is gone.
+                if self.state.honey_status == "empty":
+                    self.state.jar_decision = (
+                        GIVE_EMPTY_JAR if action == "give_empty_jar" else NOT_GIVE_EMPTY_JAR
+                    )
         self._arm_required_events()
 
     def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
@@ -367,13 +400,15 @@ class HoneyGiftEventController:
             topic = detail.topic.strip()
             if not topic:
                 continue
-            # The empty jar question only exists once the honey is gone; an
-            # early signal must not pre-settle it and skip the wrap-up.
-            if topic == EMPTY_JAR_UNRESOLVED and self.state.honey_status != "empty":
+            # Whether the jar is given is an action Python validates; a free
+            # text value for it would contradict jar_decision.
+            if topic == EMPTY_JAR_UNRESOLVED:
                 continue
             self.state.settled_details[topic] = value
-            if topic in GIFT_TOPICS and self.state.honey_status == "empty":
-                self.state.replacement_gift = value
+            if self.state.honey_status == "empty":
+                self.state.decided_after_honey = True
+                if topic == GIFT_UNRESOLVED:
+                    self.state.replacement_gift = value
         self._arm_required_events()
 
     def _commit_gift(self) -> None:
@@ -387,6 +422,7 @@ class HoneyGiftEventController:
             return
         state.gift_status = "committed"
         state.completed_event_ids.add("honey_gift_committed")
+        state.settled_details[GIFT_UNRESOLVED] = HONEY_JAR_GIFT
         self._deadlines.pop("honey_gift_committed", None)
         self._arm_required_events()
 
@@ -394,6 +430,7 @@ class HoneyGiftEventController:
     def _fire_honey_gift_commitment(state: HoneyGiftState) -> WorldEvent:
         state.gift_status = "committed"
         state.completed_event_ids.add("honey_gift_committed")
+        state.settled_details[GIFT_UNRESOLVED] = HONEY_JAR_GIFT
         if state.honey_gift_proposed:
             response = HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE
             follow_up_response = HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE
@@ -433,6 +470,8 @@ class HoneyGiftEventController:
     def _fire_honey_eating(state: HoneyGiftState) -> WorldEvent:
         state.honey_status = "empty"
         state.completed_event_ids.add("pooh_ate_honey")
+        # The honey jar can no longer be the gift as decided.
+        state.settled_details.pop(GIFT_UNRESOLVED, None)
         return WorldEvent(
             event_id="pooh_ate_honey",
             description=HONEY_EATEN_DESCRIPTION,
@@ -531,14 +570,6 @@ class HoneyGiftEventController:
                     add_props=["空になった蜂蜜壺"],
                 ),
             )
-            if self.state.replacement_gift is None:
-                # Only a settled detail closes this item, which in turn
-                # triggers the wrap-up.  A reworded or dropped label in the
-                # model's own delta must not end the thread silently.
-                situation = apply_situation_update(
-                    situation,
-                    SituationUpdate(add_unresolved=[EMPTY_JAR_UNRESOLVED]),
-                )
         if "honey_gift_committed" in self.state.completed_event_ids:
             situation = apply_situation_update(
                 situation,
@@ -547,17 +578,33 @@ class HoneyGiftEventController:
                     remove_unresolved=list(GIFT_DECISION_UNRESOLVED),
                 ),
             )
+        if self.state.honey_status == "empty":
+            # These items close only through Python-validated decisions, which
+            # in turn trigger the wrap-up.  A reworded or dropped label in the
+            # model's own delta must not end the thread silently.
+            jar = self.state.jar_decision
+            complete = self.state.story_complete()
+            open_items = []
+            if jar is None and not complete:
+                open_items.append(EMPTY_JAR_UNRESOLVED)
+            if jar == NOT_GIVE_EMPTY_JAR and not complete:
+                open_items.append(GIFT_UNRESOLVED)
+            closed = [item for item in (EMPTY_JAR_UNRESOLVED, GIFT_UNRESOLVED)
+                      if item not in open_items]
+            situation = apply_situation_update(
+                situation,
+                SituationUpdate(add_unresolved=open_items, remove_unresolved=closed),
+            )
         if "pooh_tastes_honey" in self.state.completed_event_ids:
             situation = apply_situation_update(
                 situation,
                 SituationUpdate(add_events=[HONEY_TASTED_EVENT]),
             )
-        settled = self.state.settled_details
-        closed = list(settled)
-        if self.state.replacement_gift is not None:
-            closed += list(GIFT_TOPICS)
+        settled = dict(self.state.settled_details)
+        if self.state.jar_decision is not None:
+            settled = {EMPTY_JAR_UNRESOLVED: self.state.jar_decision, **settled}
         situation = apply_situation_update(
-            situation, SituationUpdate(remove_unresolved=closed),
+            situation, SituationUpdate(remove_unresolved=list(settled)),
         ).model_copy(
             update={"decided": [f"{topic}：{value}" for topic, value in settled.items()]}
         )

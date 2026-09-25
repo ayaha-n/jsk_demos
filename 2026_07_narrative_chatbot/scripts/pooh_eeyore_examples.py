@@ -24,6 +24,7 @@ from narrative_events import (
     STORY_WRAP_UP_RESPONSE,
     fixed_utterance,
     EMPTY_JAR_UNRESOLVED,
+    GIFT_UNRESOLVED,
     SettledDetail,
 )
 from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
@@ -427,7 +428,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="4a",
-        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺をそのまま贈る")],
+        narrative_actions=["give_empty_jar"],
         situation_update=SituationUpdate(
             purpose="プーが空になった蜂蜜壺をイーヨーへの贈り物にすることに決めた",
             add_events=[
@@ -467,7 +468,8 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="4a",
-        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="空の壺にクッキーを入れて贈る")],
+        narrative_actions=["give_empty_jar"],
+        settled_details=[SettledDetail(topic="壺に入れるもの", value="クッキー")],
         situation_update=SituationUpdate(
             remove_unresolved=["空になった壺をどうするか"],
         ),
@@ -502,7 +504,8 @@ EEYORE_BIRTHDAY_TRAINSET = [
         previous_bot_response="ううん、もう空っぽなんだ。ぼく、みんな食べちゃった。",
         interaction_mode="narrative",
         current_scene="4b",
-        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="風船を贈る")],
+        narrative_actions=["not_give_empty_jar"],
+        settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="風船")],
         situation_update=SituationUpdate(
             add_events=["参加者が風船を代わりの贈り物として提案した"],
             remove_unresolved=["空になった壺をどうするか"],
@@ -527,7 +530,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "プーは壺を贈ることに決めた",
                 ],
                 "relationship": "参加者はプーと一緒に贈り物を用意する仲間",
-                "decided": ["空になった壺をどうするか：空の壺をそのまま贈る"],
+                "decided": ["空になった壺をどうするか：あげる"],
                 "unresolved": [],
             },
             deep=True,
@@ -629,7 +632,11 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
-        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="風船を贈る"), SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
+        narrative_actions=["not_give_empty_jar"],
+        settled_details=[
+            SettledDetail(topic=GIFT_UNRESOLVED, value="風船"),
+            SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青"),
+        ],
         situation_update=SituationUpdate(
             add_events=["プーが自分の案として青い風船を提案した"],
             remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
@@ -662,7 +669,11 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="6",
-        settled_details=[SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="風船を贈る"), SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
+        narrative_actions=["not_give_empty_jar"],
+        settled_details=[
+            SettledDetail(topic=GIFT_UNRESOLVED, value="風船"),
+            SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青"),
+        ],
         situation_update=SituationUpdate(
             add_events=["プーが青い風船を選んだ"],
             remove_unresolved=[BALLOON_COLOR_UNRESOLVED],
@@ -684,7 +695,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "参加者が空の壺を贈り物にする案を出した",
                     "プーは壺を贈ることに決めた",
                 ],
-                "decided": ["空になった壺をどうするか：空の壺をそのまま贈る"],
+                "decided": ["空になった壺をどうするか：あげる"],
                 "unresolved": [],
             },
             deep=True,
@@ -719,7 +730,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
                     "プーは壺を贈ることに決めた",
                     "プーがリボンをかけることに決めた",
                 ],
-                "decided": ["空になった壺をどうするか：空の壺をそのまま贈る"],
+                "decided": ["空になった壺をどうするか：あげる"],
                 "unresolved": [RIBBON_COLOR_UNRESOLVED],
             },
             deep=True,
@@ -780,7 +791,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
     # 空の壺の決着は、そのまま贈る場合と別の贈り物に替える場合の両方がある。
     *example_variants(
         current_situation=_WRAPPED_UP_SITUATION.model_copy(
-            update={"decided": ["空になった壺をどうするか：空の壺をそのまま贈る"]},
+            update={"decided": ["空になった壺をどうするか：あげる"]},
         ),
         user_action=["ううん、もう大丈夫", "もういいかな", "そろそろ行くね", "バイバイ"],
         history=(
@@ -800,7 +811,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
     ),
     *example_variants(
         current_situation=_WRAPPED_UP_SITUATION.model_copy(
-            update={"decided": ["空になった壺をどうするか：風船を贈る"]},
+            update={"decided": ["空になった壺をどうするか：あげない", "イーヨーに何をあげるか：風船"]},
         ),
         user_action=["うん！", "まだ話したいな", "うん、もっとおはなししよう"],
         history=(
