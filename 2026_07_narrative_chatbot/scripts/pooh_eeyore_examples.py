@@ -19,6 +19,9 @@ from narrative_events import (
     HONEY_GIFT_COMMITTED_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
     RIBBON_COLOR_UNRESOLVED,
+    STORY_WRAP_UP_DESCRIPTION,
+    STORY_WRAP_UP_EVENT,
+    STORY_WRAP_UP_RESPONSE,
 )
 from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
 from pooh_examples import (
@@ -67,6 +70,22 @@ _TURN3_BOT_RESPONSE = (
 # 1c(無入力でのプー自発決定)と3(食べてしまう瞬間そのもの)は
 # scripts/narrative_events.py の必須auto-fireイベントがそのまま対応するため、
 # ここに手書きexampleは無い(場面3の直後の会話は残っている)。
+_WRAPPED_UP_SITUATION = EEYORE_BIRTHDAY_SITUATION.model_copy(
+    update={
+        "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
+        "events": [
+            *EEYORE_BIRTHDAY_SITUATION.events,
+            HONEY_GIFT_COMMITTED_EVENT,
+            "プーがイーヨーへの贈り物にする蜂蜜を全部食べてしまった",
+            "蜂蜜壺が空になった",
+            STORY_WRAP_UP_EVENT,
+        ],
+        "unresolved": [],
+    },
+    deep=True,
+)
+
+
 EEYORE_BIRTHDAY_TRAINSET = [
     # --- 場面1a：プーがハチミツを贈ると提案する ---------------------------
     # 迷いには具体案を示す。提案は参加者の決定として記録しない。
@@ -720,6 +739,47 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response=(
             "イーヨーの好きな色は、ぼくも知らないけれど、"
             "赤がいいと思うな。お祝いらしくて素敵だと思うから。"
+        ),
+    ),
+
+    # --- 締めのあと：「ほかにも、なにかぼくとおはなししたいこと、ある？」への答え ---
+    # 続けたい参加者とは会話を続け、終えたい参加者はexitで見送る。
+    # 空の壺の決着は、そのまま贈る場合と別の贈り物に替える場合の両方がある。
+    *example_variants(
+        current_situation=_WRAPPED_UP_SITUATION,
+        user_action=["ううん、もう大丈夫", "もういいかな", "そろそろ行くね", "バイバイ"],
+        history=(
+            "Turn 1\n参加者の生入力: からっぽでも、そのまま贈ろうよ\n応答モード: narrative\n"
+            "参考場面ID: 4a\n物語アクション: ['resolve_empty_jar_gift']\n"
+            "プーの応答: うん、そうしよう。からっぽでも、これはいいつぼだもの。\n\n"
+            f"Turn 2\n世界イベント: {STORY_WRAP_UP_DESCRIPTION}\n応答モード: narrative\n"
+            f"参考場面ID: 5\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"
+        ),
+        previous_bot_response=STORY_WRAP_UP_RESPONSE,
+        interaction_mode="exit",
+        current_scene="5",
+        situation_update=SituationUpdate(
+            add_events=["参加者がおはなしを終えることにし、プーが見送った"],
+        ),
+        bot_response="うん、わかった。いっしょに考えてくれて、ありがとう。またね。",
+    ),
+    *example_variants(
+        current_situation=_WRAPPED_UP_SITUATION,
+        user_action=["うん！", "まだ話したいな", "うん、もっとおはなししよう"],
+        history=(
+            "Turn 1\n参加者の生入力: 壺のかわりに風船をあげようよ\n応答モード: narrative\n"
+            "参考場面ID: 4b\n物語アクション: ['resolve_empty_jar_gift']\n"
+            "プーの応答: いいね、風船ならイーヨーもきっとうれしいよ。\n\n"
+            f"Turn 2\n世界イベント: {STORY_WRAP_UP_DESCRIPTION}\n応答モード: narrative\n"
+            f"参考場面ID: 5\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"
+        ),
+        previous_bot_response=STORY_WRAP_UP_RESPONSE,
+        interaction_mode="narrative",
+        current_scene="5",
+        situation_update=SituationUpdate(),
+        bot_response=(
+            "うれしいな。じゃあ、イーヨーのお祝いで何をするか考えようよ。"
+            "ぼくは、みんなで歌をうたいたいな。"
         ),
     ),
 ]

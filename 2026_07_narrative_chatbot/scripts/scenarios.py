@@ -25,6 +25,9 @@ EEYORE_HONEY_EATING_DELAY_SECONDS = 10.0
 # 場面の始まりになるイベント（贈る決定・持ち出し）は、期限を過ぎても最後の
 # やり取りからこの秒数の沈黙を待つ。会話が続く場合は、次の返事に続けて発火する。
 EEYORE_EVENT_QUIET_SECONDS = 12.0
+# 贈り物が決まった締めのあと、この秒数の沈黙が続いたら終わりのセリフで終える。
+# 参加者が話し続けている間は終えない。
+EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,7 @@ class Scenario:
     honey_tasting_delay_seconds: float | None = None
     honey_eating_delay_seconds: float | None = None
     event_quiet_seconds: float = 0.0
+    idle_close_after_wrap_up_seconds: float | None = None
     # Keyed by the unresolved-item label the preference answers (e.g. the
     # balloon-color unresolved text); only entries matching the CURRENT
     # unresolved list are ever surfaced to the model (see
@@ -136,6 +140,7 @@ def _eeyore_birthday() -> Scenario:
         honey_tasting_delay_seconds=EEYORE_HONEY_TASTING_DELAY_SECONDS,
         honey_eating_delay_seconds=EEYORE_HONEY_EATING_DELAY_SECONDS,
         event_quiet_seconds=EEYORE_EVENT_QUIET_SECONDS,
+        idle_close_after_wrap_up_seconds=EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS,
         pooh_preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
     )
 

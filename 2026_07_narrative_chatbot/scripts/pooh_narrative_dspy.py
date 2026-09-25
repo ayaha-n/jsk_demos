@@ -194,8 +194,8 @@ class GeneratePoohResponse(dspy.Signature):
             "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
             "プーまたは参加者が提案したが、まだ決まっていない場合)、"
             "commit_honey_jar_gift、block_pooh_honey_access、"
-            "resolve_empty_jar_gift(空になった壺を"
-            "どう贈るか、具体的な内容によらず決着した場合)、"
+            "resolve_empty_jar_gift(空になった壺をどうするか(そのまま贈る、"
+            "別の贈り物に替えるなど)が、具体的な内容によらず決着した場合)、"
             "resolve_balloon_color(贈り物にする風船の色が、誰の案によるかに"
             "関わらず決着した場合)、"
             "resolve_ribbon_color(リボンの色が、誰の案によるかに関わらず"
@@ -892,6 +892,7 @@ def create_event_controller(
         scenario.honey_eating_delay_seconds,
         clock=clock,
         quiet_seconds=scenario.event_quiet_seconds,
+        idle_close_seconds=scenario.idle_close_after_wrap_up_seconds,
     )
 
 
@@ -1052,6 +1053,8 @@ class NarrativeSession:
         event = self.controller.pop_due_event(follow_up=follow_up)
         if event is None:
             return None
+        if event.ends_session:
+            return self.close(event.event_id)
 
         previous_situation = self.current_situation
         self.current_situation = apply_situation_update(
@@ -1251,6 +1254,9 @@ def run_chat(
     while not session.ended:
         situation_before_event = session.current_situation
         event_output = session.poll()
+        if event_output is not None and event_output.source == "session_close":
+            print(pooh_line(event_output.bot_response))
+            break
         if event_output is not None:
             print_result("Timed Event", event_output, scenario, situation_before_event)
             continue

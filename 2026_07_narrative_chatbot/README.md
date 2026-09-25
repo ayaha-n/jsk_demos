@@ -139,6 +139,7 @@ EEYORE_GIFT_DECISION_DELAY_SECONDS = 30.0
 EEYORE_HONEY_TASTING_DELAY_SECONDS = 30.0
 EEYORE_HONEY_EATING_DELAY_SECONDS = 10.0
 EEYORE_EVENT_QUIET_SECONDS = 12.0
+EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS = 30.0
 ```
 
 The first value is the time from the session start until Pooh decides on the
@@ -148,7 +149,13 @@ The decision and the taking-out open new story beats, so they do not interrupt
 an ongoing exchange: once due, each fires alone after `EEYORE_EVENT_QUIET_SECONDS`
 of silence, or right after Pooh's next answer (introduced with a fixed
 "あ、そうだ！" / "あ、そういえば。" line), whichever comes first. Eating follows
-taking-out without waiting for silence. Changing only these runtime values
+taking-out without waiting for silence. Once the participant and Pooh settle
+what to do about the empty jar (give it as is, switch to another gift, and so
+on), Pooh wraps up with a fixed line that reflects on
+the gift and asks whether to keep talking; the session does not end there.
+It ends when the participant leaves (or ends it explicitly), or after
+`EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS` of silence following the wrap-up.
+Changing only these runtime values
 requires restarting chat mode but does not require DSPy recompilation.
 
 Each scenario is compiled and cached separately, so compile the scenario you

@@ -85,6 +85,8 @@ from narrative_events import (
     HONEY_TASTED_EVENT,
     HONEY_TASTED_FOLLOW_UP_RESPONSE,
     RIBBON_COLOR_UNRESOLVED,
+    STORY_WRAP_UP_EVENT,
+    STORY_WRAP_UP_RESPONSE,
     HoneyGiftEventController,
     RequiredNarrativeEvent,
     WorldEvent,
@@ -1085,6 +1087,79 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("propose_honey_jar_gift", output.narrative_actions)
         self.assertTrue(controller.state.honey_gift_proposed)
         self.assertEqual(controller.state.gift_status, "undecided")
+
+    def _controller_with_empty_jar(self, now):
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0],
+            quiet_seconds=12.0, idle_close_seconds=30.0,
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+        start = now[0]
+        now[0] = start + 42.0
+        self.assertEqual(controller.pop_due_event().event_id, "pooh_tastes_honey")
+        now[0] = start + 52.0
+        self.assertEqual(controller.pop_due_event().event_id, "pooh_ate_honey")
+        controller.observe_activity()
+        return controller
+
+    def test_wrap_up_follows_the_answer_that_resolves_the_empty_jar(self):
+        now = [100.0]
+        controller = self._controller_with_empty_jar(now)
+        controller.observe_activity()
+        self.assertIsNone(controller.pop_due_event(follow_up=True))
+
+        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.observe_activity()
+        event = controller.pop_due_event(follow_up=True)
+        self.assertEqual(event.event_id, "story_wrap_up")
+        self.assertEqual(event.fallback_response, STORY_WRAP_UP_RESPONSE)
+        self.assertFalse(event.ends_session)
+        updated = controller.synchronize_situation(
+            pooh.get_scenario("eeyore_birthday").initial_situation
+        )
+        self.assertIn(STORY_WRAP_UP_EVENT, updated.events)
+
+    def test_idle_close_needs_silence_and_never_follows_an_answer(self):
+        now = [100.0]
+        controller = self._controller_with_empty_jar(now)
+        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.pop_due_event(follow_up=True)
+        controller.observe_activity()
+
+        # The participant keeps talking: the story continues.
+        for _ in range(3):
+            now[0] += 25.0
+            controller.observe_activity()
+            self.assertIsNone(controller.pop_due_event(follow_up=True))
+            self.assertIsNone(controller.pop_due_event())
+
+        self.assertEqual(controller.seconds_until_due(), 30.0)
+        now[0] += 30.0
+        event = controller.pop_due_event()
+        self.assertEqual(event.event_id, "idle_close_after_wrap_up")
+        self.assertTrue(event.ends_session)
+
+    def test_session_idle_close_plays_the_ending_line(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        now = [100.0]
+        controller = self._controller_with_empty_jar(now)
+        controller.observe_actions(["resolve_empty_jar_gift"])
+        controller.pop_due_event(follow_up=True)
+        publisher = Mock()
+        session = pooh.NarrativeSession(
+            Mock(), "model", "program", scenario,
+            event_controller=controller, ros_publisher=publisher,
+        )
+        session.start()
+        now[0] += 30.0
+        output = session.poll()
+
+        self.assertTrue(session.ended)
+        self.assertEqual(output.source, "session_close")
+        self.assertEqual(output.bot_response, scenario.ending_line)
+        self.assertEqual(output.performance_cue, "ending")
+        self.assertIsNone(session.close())
+        self.assertEqual(publisher.publish.call_count, 2)
 
     def test_participant_input_does_not_reset_eating_timer(self):
         now = [0.0]

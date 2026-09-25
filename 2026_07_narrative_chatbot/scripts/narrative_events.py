@@ -72,6 +72,18 @@ EMPTY_JAR_UNRESOLVED = "空になった壺をどうするか"
 BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
 RIBBON_COLOR_UNRESOLVED = "リボンの色"
 BLOCKED_ACCESS_EVENT = "参加者が贈り物の蜂蜜を食べないよう明確に制止した"
+STORY_WRAP_UP_EVENT = "イーヨーへの贈り物が決まった"
+STORY_WRAP_UP_DESCRIPTION = (
+    "空になった壺をどうするか（そのまま贈る、別の贈り物に替えるなど）が決まり、"
+    "イーヨーへの贈り物が決まった。"
+    "これは既に起きた出来事。"
+)
+# Pooh cannot move, so the wrap-up only reflects on the gift and leaves the
+# choice to keep talking with the participant.
+STORY_WRAP_UP_RESPONSE = (
+    "よかった。これでイーヨーも、きっとにっこりしてくれるよ。"
+    "ほかにも、なにかぼくとおはなししたいこと、ある？"
+)
 
 
 @dataclass(frozen=True)
@@ -85,6 +97,8 @@ class WorldEvent:
     # Fixed line used when the event follows Pooh's answer to the participant
     # instead of filling a silence; None reuses fallback_response.
     follow_up_response: str | None = None
+    # The session closes with the scenario's ending line instead of speaking.
+    ends_session: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +115,10 @@ class RequiredNarrativeEvent:
     waits_for_quiet: bool
     prerequisite: Callable[["HoneyGiftState"], bool]
     fire: Callable[["HoneyGiftState"], WorldEvent]
+    # Overrides the controller's quiet_seconds for this event.
+    quiet_seconds: float | None = None
+    # False for events that must only fill a silence, never follow an answer.
+    follow_up_allowed: bool = True
 
 
 @dataclass
@@ -123,6 +141,7 @@ class HoneyGiftEventController:
         clock: Callable[[], float] = time.monotonic,
         required_events: tuple[RequiredNarrativeEvent, ...] | None = None,
         quiet_seconds: float = 0.0,
+        idle_close_seconds: float | None = None,
     ) -> None:
         if gift_decision_delay_seconds < 0:
             raise ValueError("gift_decision_delay_seconds must be non-negative")
@@ -132,6 +151,8 @@ class HoneyGiftEventController:
             raise ValueError("eating_delay_seconds must be non-negative")
         if quiet_seconds < 0:
             raise ValueError("quiet_seconds must be non-negative")
+        if idle_close_seconds is not None and idle_close_seconds < 0:
+            raise ValueError("idle_close_seconds must be non-negative")
         self.gift_decision_delay_seconds = gift_decision_delay_seconds
         self.tasting_delay_seconds = tasting_delay_seconds
         self.eating_delay_seconds = eating_delay_seconds
@@ -142,6 +163,7 @@ class HoneyGiftEventController:
             gift_decision_delay_seconds,
             tasting_delay_seconds,
             eating_delay_seconds,
+            idle_close_seconds,
         )
         self._deadlines: dict[str, float] = {}
         self._last_activity = clock()
@@ -152,8 +174,9 @@ class HoneyGiftEventController:
         gift_decision_delay_seconds: float,
         tasting_delay_seconds: float,
         eating_delay_seconds: float,
+        idle_close_seconds: float | None = None,
     ) -> tuple[RequiredNarrativeEvent, ...]:
-        return (
+        events = (
             RequiredNarrativeEvent(
                 event_id="honey_gift_committed",
                 delay_seconds=gift_decision_delay_seconds,
@@ -186,6 +209,29 @@ class HoneyGiftEventController:
                 ),
                 fire=HoneyGiftEventController._fire_honey_eating,
             ),
+            RequiredNarrativeEvent(
+                event_id="story_wrap_up",
+                delay_seconds=0.0,
+                waits_for_quiet=True,
+                prerequisite=lambda state: (
+                    "empty_jar_gift_resolved" in state.completed_event_ids
+                ),
+                fire=HoneyGiftEventController._fire_story_wrap_up,
+            ),
+        )
+        if idle_close_seconds is None:
+            return events
+        return events + (
+            RequiredNarrativeEvent(
+                event_id="idle_close_after_wrap_up",
+                delay_seconds=0.0,
+                waits_for_quiet=True,
+                prerequisite=lambda state: "story_wrap_up" in state.completed_event_ids,
+                fire=HoneyGiftEventController._fire_idle_close,
+                quiet_seconds=idle_close_seconds,
+                # A participant who keeps talking wants to continue.
+                follow_up_allowed=False,
+            ),
         )
 
     def _arm_required_events(self) -> None:
@@ -204,8 +250,11 @@ class HoneyGiftEventController:
 
     def _ready_at(self, event: RequiredNarrativeEvent, follow_up: bool) -> float:
         deadline = self._deadlines[event.event_id]
+        if follow_up and not event.follow_up_allowed:
+            return float("inf")
         if event.waits_for_quiet and not follow_up:
-            return max(deadline, self._last_activity + self.quiet_seconds)
+            quiet = self.quiet_seconds if event.quiet_seconds is None else event.quiet_seconds
+            return max(deadline, self._last_activity + quiet)
         return deadline
 
     def observe_actions(self, actions: list[str]) -> None:
@@ -326,6 +375,31 @@ class HoneyGiftEventController:
             fixed_response=True,
         )
 
+    @staticmethod
+    def _fire_story_wrap_up(state: HoneyGiftState) -> WorldEvent:
+        state.completed_event_ids.add("story_wrap_up")
+        return WorldEvent(
+            event_id="story_wrap_up",
+            description=STORY_WRAP_UP_DESCRIPTION,
+            scene_id="5",
+            fallback_response=STORY_WRAP_UP_RESPONSE,
+            situation_update=SituationUpdate(add_events=[STORY_WRAP_UP_EVENT]),
+            fixed_response=True,
+        )
+
+    @staticmethod
+    def _fire_idle_close(state: HoneyGiftState) -> WorldEvent:
+        state.completed_event_ids.add("idle_close_after_wrap_up")
+        return WorldEvent(
+            event_id="idle_close_after_wrap_up",
+            description="締めのあと、参加者の沈黙が続いた。",
+            scene_id="none",
+            fallback_response="",
+            situation_update=SituationUpdate(),
+            fixed_response=True,
+            ends_session=True,
+        )
+
     def _cancel_schedule(self) -> None:
         state = self.state
         self._deadlines.clear()
@@ -402,6 +476,11 @@ class HoneyGiftEventController:
             situation = apply_situation_update(
                 situation,
                 SituationUpdate(remove_unresolved=[RIBBON_COLOR_UNRESOLVED]),
+            )
+        if "story_wrap_up" in self.state.completed_event_ids:
+            situation = apply_situation_update(
+                situation,
+                SituationUpdate(add_events=[STORY_WRAP_UP_EVENT]),
             )
         if self.state.access_restriction == "blocked":
             situation = apply_situation_update(
