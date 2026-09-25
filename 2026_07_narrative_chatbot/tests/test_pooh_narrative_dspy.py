@@ -489,6 +489,20 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(output.bot_response, "そうだね、ケーキだけにしよう！")
             self.assertIsNone(output.fixed_utterance_id)
 
+    def test_generated_fixed_line_carries_its_utterance_id(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="narrative", current_scene="1b", narrative_actions=[],
+            settled_details=[], bot_response=pooh.HONEY_GIFT_KEPT_RESPONSE,
+            awaiting_reply=False, updated_situation=scenario.initial_situation,
+        ))
+        session = pooh.NarrativeSession(agent, "model", "program", scenario)
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("ハチミツはいらないよ")
+
+        self.assertEqual(output.fixed_utterance_id, "eeyore_birthday.honey_gift_kept")
+
     def test_runtime_replacement_is_not_awaiting_a_reply(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         agent = Mock(return_value=SimpleNamespace(

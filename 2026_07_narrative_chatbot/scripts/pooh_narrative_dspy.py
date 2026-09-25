@@ -1448,7 +1448,8 @@ class NarrativeSession:
         output = SessionOutput(
             source="participant",
             bot_response=turn.bot_response,
-            fixed_utterance_id=fixed_utterance_id(turn.bot_response) if response_replaced else None,
+            # A generated line that happens to be a fixed one can reuse its WAV too.
+            fixed_utterance_id=fixed_utterance_id(turn.bot_response),
             interaction_mode=turn.interaction_mode,
             scene_id=turn.scene_id,
             updated_situation=turn.updated_situation,
