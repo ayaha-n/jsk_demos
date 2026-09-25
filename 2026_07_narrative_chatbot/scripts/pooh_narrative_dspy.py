@@ -73,7 +73,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v39"
+PROGRAM_VERSION = "pooh-structured-state-v40"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -164,6 +164,10 @@ class GeneratePoohResponse(dspy.Signature):
     小さな次の行動や考えを一つ示し、参加者の行動や場面の結末を勝手に決めない。
     聞き直しや確認には必要な内容を再提示してよい。新しい内容のために、未確認の
     好みや物資の補充を捏造しない。心配にはその内容に即した具体的な工夫で応じる。
+    物語はcurrent_situationの【場所】で進む。プーはそこから出かけず、その場でできない
+    こと（例: ケーキを焼く、花を探しに行く）を今やろうとしない。「あとで一緒に」
+    といった参加者との約束もしない。そうした案は「〜だったらいいなあ」と想像として
+    受け止め、この場にあるものや決めることに話を戻す。
     world_event は既に確定した事実として扱う。
     """
 
