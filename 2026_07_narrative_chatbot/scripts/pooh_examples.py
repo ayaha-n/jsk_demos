@@ -326,6 +326,23 @@ def build_mode_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
     ]
 
 
+def build_interpret_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
+    """Derive InterpretTurn examples: the gold line in, its structured decisions out."""
+    return [
+        dspy.Example(
+            current_situation=item.current_situation,
+            history=item.history,
+            user_action=item.user_action,
+            world_event=item.world_event,
+            bot_response=item.bot_response,
+            narrative_actions=item.narrative_actions,
+            settled_details=item.settled_details,
+            awaiting_reply=item.awaiting_reply,
+        ).with_inputs("current_situation", "history", "user_action", "world_event", "bot_response")
+        for item in trainset
+    ]
+
+
 def build_response_examples(
     trainset: list[dspy.Example], *, preferences: dict[str, str] | None = None
 ) -> list[dspy.Example]:
@@ -348,10 +365,7 @@ def build_response_examples(
             mishearing_candidates=_candidates_for(item),
             selected_mishearing=item.selected_mishearing,
             situation_update=item.situation_update,
-            narrative_actions=item.narrative_actions,
-            settled_details=item.settled_details,
             bot_response=item.bot_response,
-            awaiting_reply=item.awaiting_reply,
         ).with_inputs(
             "current_situation",
             "user_action",
@@ -367,6 +381,7 @@ def build_response_examples(
 
 
 MODE_EXAMPLES = build_mode_examples(TRAINSET)
+INTERPRET_EXAMPLES = build_interpret_examples(TRAINSET)
 
 
 RESPONSE_EXAMPLES = build_response_examples(TRAINSET)

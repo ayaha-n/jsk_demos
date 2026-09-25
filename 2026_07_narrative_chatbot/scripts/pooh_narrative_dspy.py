@@ -200,6 +200,34 @@ class GeneratePoohResponse(dspy.Signature):
             "現在状態の保持と差分の適用はPythonが行う。"
         )
     )
+    bot_response: str = dspy.OutputField(
+        desc=(
+            "参加者に提示する短く自然で穏やかなセリフ。一人称は常に「ぼく」。"
+            "物語世界外の技術語全体を直接出さず、技術語を直接説明せず、"
+            "利用可能な聞き違い候補があれば、その音を使って不理解を示す。"
+            "理解したような肯定、説明、自己同定をしない。"
+            "プー自身の好み・考え・次にしたいことを参加者に決めさせない。"
+            "参加者の質問を答えずにそのまま聞き返さない。"
+            "毎回問いかけで終える必要はない。previous_bot_responseと同じ・"
+            "意味的に同じ内容を繰り返さない。"
+        )
+    )
+
+
+class InterpretTurn(dspy.Signature):
+    """確定したこのターンのやり取りから、物語上の判断だけを構造化する。セリフは書かない。
+
+    参加者の入力とプーの応答の両方を踏まえ、実際に起きたことだけを返す。
+    提案・候補・質問の段階と、決まったことを区別する。迷ったら何も返さない。
+    """
+
+    current_situation: NarrativeSituation = dspy.InputField()
+    history: str = dspy.InputField()
+    user_action: str = dspy.InputField()
+    world_event: str = dspy.InputField(
+        desc="参加者の入力とは別に、既に確定・適用された世界の出来事。通常ターンは空文字列。"
+    )
+    bot_response: str = dspy.InputField(desc="このターンのプーの応答。確定済み。")
     narrative_actions: list[NarrativeAction] = dspy.OutputField(
         desc=(
             "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
@@ -222,18 +250,6 @@ class GeneratePoohResponse(dspy.Signature):
             "誰の案かは問わない。候補を挙げただけ、質問しただけなら含めない。"
             "current_situationの【決まったこと】にある内容を同じ値で繰り返さない。"
             "該当しなければ空リスト。"
-        )
-    )
-    bot_response: str = dspy.OutputField(
-        desc=(
-            "参加者に提示する短く自然で穏やかなセリフ。一人称は常に「ぼく」。"
-            "物語世界外の技術語全体を直接出さず、技術語を直接説明せず、"
-            "利用可能な聞き違い候補があれば、その音を使って不理解を示す。"
-            "理解したような肯定、説明、自己同定をしない。"
-            "プー自身の好み・考え・次にしたいことを参加者に決めさせない。"
-            "参加者の質問を答えずにそのまま聞き返さない。"
-            "毎回問いかけで終える必要はない。previous_bot_responseと同じ・"
-            "意味的に同じ内容を繰り返さない。"
         )
     )
     awaiting_reply: bool = dspy.OutputField(
@@ -385,6 +401,9 @@ class PoohNarrativeAgent(dspy.Module):
         self.classify = predictor_factory(AnalyzeInteraction)
         self.plan = predictor_factory(PlanMishearing)
         self.respond = predictor_factory(GeneratePoohResponse)
+        # Structured decisions are judged separately from writing the line, so
+        # this stage's demos are all about decisions and it reads the final text.
+        self.interpret = predictor_factory(InterpretTurn)
 
     def forward(
         self,
@@ -450,10 +469,6 @@ class PoohNarrativeAgent(dspy.Module):
         # failures so BootstrapFewShot can learn from them; the optional
         # runtime guard is applied only by the interactive chat loop.
         bot_response = str(response.bot_response)
-        narrative_actions = [str(action) for action in response.narrative_actions]
-        settled_details = [
-            SettledDetail.model_validate(detail) for detail in response.settled_details
-        ]
         uses_uncertain_candidate = any(
             candidate.narrative_link.startswith("技術語を理解できず")
             and candidate.heard_as in bot_response
@@ -469,6 +484,17 @@ class PoohNarrativeAgent(dspy.Module):
                 "ぼくにはよくわからないけれど、"
                 "いま、きみとお茶会をしているのはわかるよ。"
             )
+        interpretation = self.interpret(
+            current_situation=current_situation,
+            history=history,
+            user_action=user_action,
+            world_event=world_event,
+            bot_response=bot_response,
+        )
+        narrative_actions = [str(action) for action in interpretation.narrative_actions]
+        settled_details = [
+            SettledDetail.model_validate(detail) for detail in interpretation.settled_details
+        ]
         return dspy.Prediction(
             interaction_mode=mode,
             current_scene=current_scene,
@@ -478,7 +504,7 @@ class PoohNarrativeAgent(dspy.Module):
             narrative_actions=narrative_actions,
             settled_details=settled_details,
             bot_response=bot_response,
-            awaiting_reply=bool(response.awaiting_reply),
+            awaiting_reply=bool(interpretation.awaiting_reply),
         )
 
 
@@ -616,6 +642,7 @@ def cache_hash(train_model: str, judge_model: str, scenario: Scenario | None = N
         "mode_examples": [item.toDict() for item in scenario.mode_examples],
         "mishearing_examples": [item.toDict() for item in scenario.mishearing_examples],
         "response_examples": [item.toDict() for item in scenario.response_examples],
+        "interpret_examples": [item.toDict() for item in scenario.interpret_examples],
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()[:20]
@@ -646,6 +673,7 @@ def set_agent_demos(agent: Any, scenario: Scenario) -> None:
     set_module_demos(agent.classify, scenario.mode_examples)
     set_module_demos(agent.plan, scenario.mishearing_examples)
     set_module_demos(agent.respond, scenario.response_examples)
+    set_module_demos(agent.interpret, scenario.interpret_examples)
 
 
 def select_labeled_demos(labeled_demos: list[Any], count: int) -> list[Any]:
@@ -737,6 +765,7 @@ def merge_agent_demos(agent: Any, scenario: Scenario) -> None:
     merge_module_demos(
         agent.respond, scenario.response_examples, RESPOND_DEMO_IDENTITY, RESPOND_DEMO_INPUTS,
     )
+    merge_module_demos(agent.interpret, scenario.interpret_examples, RESPOND_DEMO_INPUTS)
 
 
 def bootstrap_order(trainset: list[Any]) -> list[Any]:

@@ -55,6 +55,7 @@ class Scenario:
     mode_examples: list[dspy.Example]
     mishearing_examples: list[dspy.Example]
     response_examples: list[dspy.Example]
+    interpret_examples: list[dspy.Example]
     scenes: tuple[SceneDefinition, ...] = ()
     gift_decision_delay_seconds: float | None = None
     honey_tasting_delay_seconds: float | None = None
@@ -78,6 +79,7 @@ class Scenario:
 def _tea_party() -> Scenario:
     from pooh_examples import (
         INITIAL_SITUATION,
+        INTERPRET_EXAMPLES,
         MISHEARING_EXAMPLES,
         MODE_EXAMPLES,
         RESPONSE_EXAMPLES,
@@ -100,11 +102,13 @@ def _tea_party() -> Scenario:
         mode_examples=MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,
         response_examples=RESPONSE_EXAMPLES,
+        interpret_examples=INTERPRET_EXAMPLES,
     )
 
 
 def _eeyore_birthday() -> Scenario:
     from pooh_eeyore_examples import (
+        EEYORE_BIRTHDAY_INTERPRET_EXAMPLES,
         EEYORE_BIRTHDAY_MODE_EXAMPLES,
         EEYORE_BIRTHDAY_OPENING_LINE,
         EEYORE_BIRTHDAY_POOH_PREFERENCES,
@@ -129,6 +133,7 @@ def _eeyore_birthday() -> Scenario:
         mode_examples=EEYORE_BIRTHDAY_MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,
         response_examples=EEYORE_BIRTHDAY_RESPONSE_EXAMPLES,
+        interpret_examples=EEYORE_BIRTHDAY_INTERPRET_EXAMPLES,
         scenes=(
             SceneDefinition("1a", "場面1a：プーがハチミツを贈ると提案する"),
             SceneDefinition("1b", "場面1b：参加者が別の贈り物を提案する"),

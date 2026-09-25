@@ -30,6 +30,7 @@ from narrative_events import (
 from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
 from pooh_examples import (
     build_mode_examples,
+    build_interpret_examples,
     build_response_examples,
     example,
     example_variants,
@@ -850,6 +851,7 @@ EEYORE_BIRTHDAY_POOH_PREFERENCES = {
 
 
 EEYORE_BIRTHDAY_MODE_EXAMPLES = build_mode_examples(EEYORE_BIRTHDAY_TRAINSET)
+EEYORE_BIRTHDAY_INTERPRET_EXAMPLES = build_interpret_examples(EEYORE_BIRTHDAY_TRAINSET)
 
 
 EEYORE_BIRTHDAY_RESPONSE_EXAMPLES = build_response_examples(
@@ -883,10 +885,7 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         mishearing_candidates=[],
         selected_mishearing="none",
         situation_update=SituationUpdate(),
-        narrative_actions=[],
-        settled_details=[],
         bot_response=HONEY_EATEN_RESPONSE,
-        awaiting_reply=False,
     ).with_inputs(
         "current_situation",
         "user_action",
@@ -924,10 +923,7 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         mishearing_candidates=[],
         selected_mishearing="none",
         situation_update=SituationUpdate(),
-        narrative_actions=[],
-        settled_details=[],
         bot_response=HONEY_GIFT_COMMITTED_RESPONSE,
-        awaiting_reply=False,
     ).with_inputs(
         "current_situation",
         "user_action",

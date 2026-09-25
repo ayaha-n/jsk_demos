@@ -20,6 +20,7 @@
 | `MODE_EXAMPLES` | `TRAINSET`から分類項目を抽出 | `AnalyzeInteraction` |
 | `MISHEARING_EXAMPLES` | `scripts/mishearing_cases.py`の代表例から構成 | `PlanMishearing` |
 | `RESPONSE_EXAMPLES` | `TRAINSET`から返答・状態差分を抽出 | `GeneratePoohResponse` |
+| `INTERPRET_EXAMPLES` | `TRAINSET`の正解の返答を入力に、物語アクション・決まったこと・答え待ちを抽出 | `InterpretTurn` |
 
 モードが正解と一致しない結果はPythonのhard gateで不採用になる。`meta`の場合はさらに`MetaPolicyEvaluator`が、技術語を直接発話せず物語世界へ接続できているかを評価する。合格後、`NarrativeQualityJudge`が応答方針、物語の一貫性、参加者の主体性、状態更新などを評価する。
 
@@ -37,7 +38,8 @@
 4. 初出の登録済み語には固定候補を使う。初出の未登録語では`PlanMishearing`が聞き間違い候補を生成する。自然な候補がない場合や訂正時には、Python処理が不確かな短い音または不理解表現を用意する。
 5. `GeneratePoohResponse`がプーの返答と、このターンで生じた`SituationUpdate`を生成する。
 6. Python処理が技術語の漏出を最終確認し、`SituationUpdate`を現在状態のコピーへ適用する。
-7. 完成した`NarrativeSituation`を次ターンへ渡し、会話履歴とJSON Linesログへ保存する。
+7. `InterpretTurn`が確定した返答とやり取りから、物語アクション（`narrative_actions`）、決まったこと（`settled_details`）、参加者の答えを待っているか（`awaiting_reply`）を判断する。セリフは書かない。返答の生成と分けることで、この段のデモをすべて判断の例に使い、完成した文章を見て判断できる。Python処理がこれらを検証し、時間イベントと状態へ反映する。
+8. 完成した`NarrativeSituation`を次ターンへ渡し、会話履歴とJSON Linesログへ保存する。
 
 ### 物語状態
 

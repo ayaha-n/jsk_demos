@@ -540,6 +540,49 @@ class RegressionTests(unittest.TestCase):
             self.assertTrue(item.technical_terms)
             self.assertTrue(item.candidates)
 
+    def test_interpret_stage_reads_the_final_line_and_owns_decisions(self):
+        calls = {}
+
+        def factory(signature):
+            name = signature.__name__
+
+            def predictor(**kwargs):
+                calls[name] = kwargs
+                if name == "AnalyzeInteraction":
+                    return SimpleNamespace(
+                        interaction_mode="narrative", current_scene="6", technical_terms=[],
+                    )
+                if name == "GeneratePoohResponse":
+                    return SimpleNamespace(
+                        selected_mishearing="none", situation_update=SituationUpdate(),
+                        bot_response="青にしよう！",
+                    )
+                return SimpleNamespace(
+                    narrative_actions=["not_give_empty_jar"],
+                    settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="青い風船")],
+                    awaiting_reply=False,
+                )
+            return predictor
+
+        agent = pooh.PoohNarrativeAgent(factory)
+        result = agent.forward(
+            current_situation=pooh.get_scenario("eeyore_birthday").initial_situation,
+            user_action="青い風船にしよう", history="",
+        )
+
+        self.assertEqual(calls["InterpretTurn"]["bot_response"], "青にしよう！")
+        self.assertEqual(result.narrative_actions, ["not_give_empty_jar"])
+        self.assertEqual(result.settled_details[0].value, "青い風船")
+        self.assertFalse(result.awaiting_reply)
+
+    def test_interpret_examples_take_the_gold_line_as_input(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        self.assertEqual(len(scenario.interpret_examples), len(scenario.trainset))
+        example = scenario.interpret_examples[0]
+        self.assertIn("bot_response", example.inputs)
+        self.assertTrue(hasattr(example, "awaiting_reply"))
+        self.assertFalse(hasattr(scenario.response_examples[0], "narrative_actions"))
+
     def test_examples_cover_all_interaction_modes(self):
         self.assertEqual(
             {item.interaction_mode for item in pooh.TRAINSET},
