@@ -79,6 +79,8 @@ EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o-mini at similar latency; the judge stays on the cheaper model.
 DEFAULT_MODEL = "openai/gpt-4o"
 DEFAULT_JUDGE_MODEL = "openai/gpt-4o-mini"
+LM_TIMEOUT_SECONDS = 20.0
+LM_NUM_RETRIES = 1
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
 CACHE_DIR = Path(os.getenv("POOH_CACHE_DIR", str(PROJECT_ROOT / ".dspy_cache")))
 BOOTSTRAP_METRIC_THRESHOLD = 0.8
@@ -670,8 +672,11 @@ def configure_models() -> tuple[Any, Any, str, str]:
     api_key = os.environ["OPENAI_API_KEY"]
     train_model = os.getenv("DSPY_TRAIN_MODEL", os.getenv("DSPY_MODEL", DEFAULT_MODEL))
     judge_model = os.getenv("DSPY_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
-    train_lm = dspy.LM(train_model, api_key=api_key)
-    judge_lm = dspy.LM(judge_model, api_key=api_key)
+    # A stalled request once left Pooh silent for ten minutes; give up and
+    # retry instead, and let the caller report a failed turn.
+    request_limits = {"timeout": LM_TIMEOUT_SECONDS, "num_retries": LM_NUM_RETRIES}
+    train_lm = dspy.LM(train_model, api_key=api_key, **request_limits)
+    judge_lm = dspy.LM(judge_model, api_key=api_key, **request_limits)
     dspy.configure(lm=train_lm)
     return train_lm, judge_lm, train_model, judge_model
 

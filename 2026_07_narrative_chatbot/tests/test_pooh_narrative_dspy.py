@@ -610,6 +610,16 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(example.question_kind, "none")
         self.assertFalse(hasattr(scenario.response_examples[0], "narrative_actions"))
 
+    def test_language_models_time_out_and_retry_once(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}), \
+                patch.object(pooh.dspy, "LM") as lm, patch.object(pooh.dspy, "configure"):
+            pooh.configure_models()
+
+        self.assertEqual(lm.call_count, 2)
+        for call in lm.call_args_list:
+            self.assertEqual(call.kwargs["timeout"], pooh.LM_TIMEOUT_SECONDS)
+            self.assertEqual(call.kwargs["num_retries"], 1)
+
     def test_examples_cover_all_interaction_modes(self):
         self.assertEqual(
             {item.interaction_mode for item in pooh.TRAINSET},
