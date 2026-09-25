@@ -53,7 +53,12 @@ from narrative_state import (
     coerce_situation,
     relevant_preferences,
 )
-from narrative_events import HoneyGiftEventController, NarrativeAction, WorldEvent
+from narrative_events import (
+    HoneyGiftEventController,
+    NarrativeAction,
+    WorldEvent,
+    fixed_utterance_id,
+)
 from pooh_examples import (
     INITIAL_SITUATION,
     MISHEARING_EXAMPLES,
@@ -787,6 +792,7 @@ class SessionOutput:
     situation_diff: str = "(変化なし)"
     narrative_actions: list[str] = field(default_factory=list)
     performance_cue: str | None = None
+    fixed_utterance_id: str | None = None
     world_event_id: str | None = None
     latency_ms: float = 0.0
     generation_fallback: bool = False
@@ -809,6 +815,7 @@ class SessionOutput:
             "situation_diff": self.situation_diff,
             "narrative_actions": list(self.narrative_actions),
             "performance_cue": self.performance_cue,
+            "fixed_utterance_id": self.fixed_utterance_id,
             "world_event_id": self.world_event_id,
             "latency_ms": round(self.latency_ms, 1),
             "generation_fallback": self.generation_fallback,
@@ -1070,6 +1077,7 @@ class NarrativeSession:
             source=output.source,
             world_event_id=output.world_event_id,
             performance_cue=output.performance_cue,
+            fixed_utterance_id=output.fixed_utterance_id,
         )
 
     def start(self) -> SessionOutput | None:
@@ -1085,6 +1093,7 @@ class NarrativeSession:
             updated_situation=self.current_situation,
             situation_diff=format_situation_diff(None, self.current_situation),
             performance_cue="opening",
+            fixed_utterance_id=fixed_utterance_id(self.scenario.opening_line),
         )
         if self.controller is not None:
             self.controller.observe_activity()
@@ -1103,6 +1112,7 @@ class NarrativeSession:
             scene_id="none",
             updated_situation=self.current_situation,
             performance_cue="ending",
+            fixed_utterance_id=fixed_utterance_id(self.scenario.ending_line),
         )
         self._publish(output)
         return output
@@ -1192,6 +1202,9 @@ class NarrativeSession:
                 previous_situation, turn.updated_situation
             ),
             narrative_actions=actions,
+            fixed_utterance_id=(
+                fixed_utterance_id(turn.bot_response) if event.fixed_response else None
+            ),
             world_event_id=event.event_id,
             latency_ms=latency_ms,
             generation_fallback=used_fallback,

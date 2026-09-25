@@ -1,0 +1,50 @@
+{
+  "tea_party.opening": {
+    "text": "今日は来てくれて、ありがとう。今からお茶会をするところなんだ。",
+    "wav": "tea_party.opening.wav"
+  },
+  "tea_party.ending": {
+    "text": "またね。いっしょに過ごせて、うれしかったよ。",
+    "wav": "tea_party.ending.wav"
+  },
+  "eeyore_birthday.opening": {
+    "text": "いまね、イーヨーにあってきたんだけど、かわいそうに、ひどいことになってるのさ。今日はイーヨーのお誕生日だったんだよ。それなのに、誰も気が付かなかったってんで、とてもふさいじゃってるんだ。ぼくたち、なにか用意しなきゃ。きみは、なにかいい考えある？",
+    "wav": "eeyore_birthday.opening.wav"
+  },
+  "eeyore_birthday.ending": {
+    "text": "またね。イーヨーのお祝いをいっしょに考えてくれて、ありがとう。",
+    "wav": "eeyore_birthday.ending.wav"
+  },
+  "eeyore_birthday.honey_gift_committed": {
+    "text": "そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。きっと喜ぶね。",
+    "wav": "eeyore_birthday.honey_gift_committed.wav"
+  },
+  "eeyore_birthday.honey_gift_committed.follow_up": {
+    "text": "あ、そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。きっと喜ぶね。",
+    "wav": "eeyore_birthday.honey_gift_committed.follow_up.wav"
+  },
+  "eeyore_birthday.honey_gift_committed.after_proposal": {
+    "text": "やっぱり、ハチミツの壺にしよう。イーヨー、きっと喜ぶね。",
+    "wav": "eeyore_birthday.honey_gift_committed.after_proposal.wav"
+  },
+  "eeyore_birthday.honey_gift_committed.after_proposal.follow_up": {
+    "text": "あ、そうそう。やっぱり、ハチミツの壺をあげよう。イーヨー、きっと喜ぶね。",
+    "wav": "eeyore_birthday.honey_gift_committed.after_proposal.follow_up.wav"
+  },
+  "eeyore_birthday.honey_tasted": {
+    "text": "みつのツボを持ってるなんて、運が良かったなあ。ちょっと一口やるものを持ってるなんて。…さあて、ぼくはなにをするんだっけ？",
+    "wav": "eeyore_birthday.honey_tasted.wav"
+  },
+  "eeyore_birthday.honey_tasted.follow_up": {
+    "text": "あ、そういえば。みつのツボを持ってるなんて、運が良かったなあ。ちょっと一口やるものを持ってるなんて。…さあて、ぼくはなにをするんだっけ？",
+    "wav": "eeyore_birthday.honey_tasted.follow_up.wav"
+  },
+  "eeyore_birthday.honey_eaten": {
+    "text": "いやんなっちゃう！味見してたら、はちみつ、なくなっちゃった。どうしよう？だってぼく、なにかやらなくちゃならないもの。",
+    "wav": "eeyore_birthday.honey_eaten.wav"
+  },
+  "eeyore_birthday.story_wrap_up": {
+    "text": "よかった。これでイーヨーも、きっとにっこりしてくれるよ。ほかにも、なにかぼくとおはなししたいこと、ある？",
+    "wav": "eeyore_birthday.story_wrap_up.wav"
+  }
+}

@@ -311,6 +311,11 @@ rostopic pub -1 /speech_to_text_final std_msgs/String "data: '青い風船がい
 See the [pooh_body operation guide](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/blob/add-pooh-model/pooh_body/README.md)
 for the robot-side setup and motion configuration.
 
+Scripted opening, ending, and fixed-event lines carry a stable
+`fixed_utterance_id`. The robot-side TTS node first looks for the corresponding
+WAV and generates it only when it is missing. Every fixed line, its ID, and
+expected WAV filename are listed in `config/fixed_utterances.json`.
+
 ### Compare implementation variants
 
 ```bash

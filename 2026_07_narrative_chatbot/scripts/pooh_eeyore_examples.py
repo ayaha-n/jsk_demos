@@ -22,6 +22,7 @@ from narrative_events import (
     STORY_WRAP_UP_DESCRIPTION,
     STORY_WRAP_UP_EVENT,
     STORY_WRAP_UP_RESPONSE,
+    fixed_utterance,
 )
 from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
 from pooh_examples import (
@@ -32,11 +33,7 @@ from pooh_examples import (
 )
 
 
-_TURN1_BOT_RESPONSE = (
-    "いまね、イーヨーにあってきたんだけど、かわいそうに、ひどいことになってるのさ。"
-    "今日はイーヨーのお誕生日だったんだよ。それなのに、誰も気が付かなかったってんで、"
-    "とてもふさいじゃってるんだ。ぼくたち、なにか用意しなきゃ。きみは、なにかいい考えある？"
-)
+_TURN1_BOT_RESPONSE = fixed_utterance("eeyore_birthday.opening")
 
 # _TURN1_BOT_RESPONSE is spoken as the fixed opening line (see
 # EEYORE_BIRTHDAY_OPENING_LINE below) before the participant says anything, so

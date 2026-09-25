@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 import dspy
 
+from narrative_events import fixed_utterance
 from narrative_state import NarrativeSituation
 
 
@@ -91,7 +92,7 @@ def _tea_party() -> Scenario:
         ),
         initial_situation=INITIAL_SITUATION,
         opening_line=TEA_PARTY_OPENING_LINE,
-        ending_line="またね。いっしょに過ごせて、うれしかったよ。",
+        ending_line=fixed_utterance("tea_party.ending"),
         trainset=TRAINSET,
         mode_examples=MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,
@@ -120,7 +121,7 @@ def _eeyore_birthday() -> Scenario:
         ),
         initial_situation=EEYORE_BIRTHDAY_SITUATION,
         opening_line=EEYORE_BIRTHDAY_OPENING_LINE,
-        ending_line="またね。イーヨーのお祝いをいっしょに考えてくれて、ありがとう。",
+        ending_line=fixed_utterance("eeyore_birthday.ending"),
         trainset=EEYORE_BIRTHDAY_TRAINSET,
         mode_examples=EEYORE_BIRTHDAY_MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,

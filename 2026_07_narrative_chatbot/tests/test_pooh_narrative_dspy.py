@@ -87,9 +87,11 @@ from narrative_events import (
     RIBBON_COLOR_UNRESOLVED,
     STORY_WRAP_UP_EVENT,
     STORY_WRAP_UP_RESPONSE,
+    FIXED_UTTERANCES,
     HoneyGiftEventController,
     RequiredNarrativeEvent,
     WorldEvent,
+    fixed_utterance_id,
 )
 
 
@@ -230,11 +232,22 @@ class RegressionTests(unittest.TestCase):
             scene_id="none",
             source="session_close",
             performance_cue="ending",
+            fixed_utterance_id="eeyore_birthday.ending",
         )
 
         payload = json.loads(sent[0].decode("utf-8"))
         self.assertEqual(payload["source"], "session_close")
         self.assertEqual(payload["performance_cue"], "ending")
+        self.assertEqual(payload["fixed_utterance_id"], "eeyore_birthday.ending")
+
+    def test_fixed_utterance_registry_has_unique_ids_text_and_wav_names(self):
+        self.assertEqual(
+            len({spec["text"] for spec in FIXED_UTTERANCES.values()}),
+            len(FIXED_UTTERANCES),
+        )
+        for utterance_id, spec in FIXED_UTTERANCES.items():
+            self.assertEqual(spec["wav"], utterance_id + ".wav")
+            self.assertEqual(fixed_utterance_id(spec["text"]), utterance_id)
 
     def test_session_publishes_opening_and_ending_once(self):
         scenario = pooh.get_scenario("eeyore_birthday")
@@ -251,11 +264,13 @@ class RegressionTests(unittest.TestCase):
         opening = session.start()
         self.assertEqual(opening.bot_response, scenario.opening_line)
         self.assertEqual(opening.performance_cue, "opening")
+        self.assertEqual(opening.fixed_utterance_id, "eeyore_birthday.opening")
         self.assertIsNone(session.start())
 
         ending = session.close()
         self.assertEqual(ending.bot_response, scenario.ending_line)
         self.assertEqual(ending.performance_cue, "ending")
+        self.assertEqual(ending.fixed_utterance_id, "eeyore_birthday.ending")
         self.assertIsNone(session.close())
         self.assertEqual(publisher.publish.call_count, 2)
         self.assertEqual(
@@ -265,6 +280,10 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(
             publisher.publish.call_args_list[1].kwargs["performance_cue"],
             "ending",
+        )
+        self.assertEqual(
+            publisher.publish.call_args_list[0].kwargs["fixed_utterance_id"],
+            "eeyore_birthday.opening",
         )
         public = opening.to_dict()
         self.assertEqual(public["source"], "session_open")
@@ -348,6 +367,10 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(answer.source, "participant")
         self.assertEqual(event.world_event_id, "honey_gift_committed")
+        self.assertEqual(
+            event.fixed_utterance_id,
+            "eeyore_birthday.honey_gift_committed.follow_up",
+        )
         self.assertNotEqual(event.bot_response, HONEY_GIFT_COMMITTED_RESPONSE)
         self.assertTrue(event.bot_response.endswith("贈ることにしよう。きっと喜ぶね。"))
         self.assertTrue(log.call_args_list[-1].args[2]["event_follow_up"])

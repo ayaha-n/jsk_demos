@@ -2,11 +2,54 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Literal
 
 from narrative_state import NarrativeSituation, SituationUpdate, apply_situation_update
+
+
+FIXED_UTTERANCES_PATH = Path(__file__).resolve().parents[1] / "config" / "fixed_utterances.json"
+
+
+def _load_fixed_utterances() -> dict[str, dict[str, str]]:
+    with FIXED_UTTERANCES_PATH.open(encoding="utf-8") as stream:
+        data = json.load(stream)
+    if not isinstance(data, dict):
+        raise ValueError("fixed_utterances.json must contain an object")
+    result: dict[str, dict[str, str]] = {}
+    texts: set[str] = set()
+    for utterance_id, spec in data.items():
+        if not isinstance(utterance_id, str) or not isinstance(spec, dict):
+            raise ValueError("fixed utterance entries must map IDs to objects")
+        text = spec.get("text")
+        wav = spec.get("wav")
+        if not isinstance(text, str) or not text:
+            raise ValueError(f"fixed utterance {utterance_id!r} has no text")
+        if wav != f"{utterance_id}.wav":
+            raise ValueError(f"fixed utterance {utterance_id!r} has an unexpected wav name")
+        if text in texts:
+            raise ValueError(f"fixed utterance text is duplicated: {text!r}")
+        texts.add(text)
+        result[utterance_id] = {"text": text, "wav": wav}
+    return result
+
+
+FIXED_UTTERANCES = _load_fixed_utterances()
+
+
+def fixed_utterance(utterance_id: str) -> str:
+    return FIXED_UTTERANCES[utterance_id]["text"]
+
+
+def fixed_utterance_id(text: str) -> str | None:
+    return next(
+        (utterance_id for utterance_id, spec in FIXED_UTTERANCES.items()
+         if spec["text"] == text),
+        None,
+    )
 
 
 NarrativeAction = Literal[
@@ -27,10 +70,7 @@ KNOWN_NARRATIVE_ACTIONS = {
     "resolve_ribbon_color",
 }
 
-HONEY_EATEN_RESPONSE = (
-    "いやんなっちゃう！味見してたら、はちみつ、なくなっちゃった。どうしよう？"
-    "だってぼく、なにかやらなくちゃならないもの。"
-)
+HONEY_EATEN_RESPONSE = fixed_utterance("eeyore_birthday.honey_eaten")
 HONEY_EATEN_DESCRIPTION = (
     "イーヨーへの贈り物にすると決めた蜂蜜を、待っている間に"
     "プーが全部食べてしまい、壺が空になった。これは既に起きた出来事。"
@@ -39,30 +79,27 @@ HONEY_GIFT_COMMITTED_DESCRIPTION = (
     "プーがイーヨーに蜂蜜の入った壺を贈ることに決めた。これは既に起きた出来事。"
 )
 HONEY_GIFT_COMMITTED_EVENT = "プーがハチミツの入った壺をイーヨーに贈ることに決めた"
-HONEY_GIFT_COMMITTED_RESPONSE = (
-    "そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。きっと喜ぶね。"
-)
-HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE = (
-    "あ、そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。きっと喜ぶね。"
+HONEY_GIFT_COMMITTED_RESPONSE = fixed_utterance("eeyore_birthday.honey_gift_committed")
+HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE = fixed_utterance(
+    "eeyore_birthday.honey_gift_committed.follow_up"
 )
 # Once the honey jar has already been proposed, a sudden "そうだ！" would sound
 # like a new idea, so the decision is voiced as settling on that proposal.
-HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE = (
-    "やっぱり、ハチミツの壺にしよう。イーヨー、きっと喜ぶね。"
+HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE = fixed_utterance(
+    "eeyore_birthday.honey_gift_committed.after_proposal"
 )
 HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE = (
-    f"あ、そうそう。{HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE}"
+    fixed_utterance("eeyore_birthday.honey_gift_committed.after_proposal.follow_up")
 )
 HONEY_TASTED_EVENT = "プーがハチミツを一口だけのつもりで持ち出した"
 HONEY_TASTED_DESCRIPTION = (
     "イーヨーへの贈り物にすると決めた蜂蜜を、プーが待っている間に一口だけの"
     "つもりで持ち出した。まだ食べ切ってはいない。これは既に起きた出来事。"
 )
-HONEY_TASTED_RESPONSE = (
-    "みつのツボを持ってるなんて、運が良かったなあ。ちょっと一口やるものを持ってるなんて。"
-    "…さあて、ぼくはなにをするんだっけ？"
+HONEY_TASTED_RESPONSE = fixed_utterance("eeyore_birthday.honey_tasted")
+HONEY_TASTED_FOLLOW_UP_RESPONSE = fixed_utterance(
+    "eeyore_birthday.honey_tasted.follow_up"
 )
-HONEY_TASTED_FOLLOW_UP_RESPONSE = f"あ、そういえば。{HONEY_TASTED_RESPONSE}"
 GIFT_DECISION_UNRESOLVED = (
     "イーヨーに何をあげるか",
     "プレゼントの準備がまだできていない",
@@ -80,10 +117,7 @@ STORY_WRAP_UP_DESCRIPTION = (
 )
 # Pooh cannot move, so the wrap-up only reflects on the gift and leaves the
 # choice to keep talking with the participant.
-STORY_WRAP_UP_RESPONSE = (
-    "よかった。これでイーヨーも、きっとにっこりしてくれるよ。"
-    "ほかにも、なにかぼくとおはなししたいこと、ある？"
-)
+STORY_WRAP_UP_RESPONSE = fixed_utterance("eeyore_birthday.story_wrap_up")
 
 
 @dataclass(frozen=True)

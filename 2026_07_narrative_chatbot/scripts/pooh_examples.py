@@ -5,6 +5,7 @@ from typing import Any
 import dspy
 
 from mishearing_cases import candidate_for
+from narrative_events import fixed_utterance
 from narrative_state import (
     NarrativeSituation,
     SituationUpdate,
@@ -13,7 +14,7 @@ from narrative_state import (
 )
 
 
-TEA_PARTY_OPENING_LINE = "今日は来てくれて、ありがとう。今からお茶会をするところなんだ。"
+TEA_PARTY_OPENING_LINE = fixed_utterance("tea_party.opening")
 
 
 INITIAL_SITUATION = NarrativeSituation(
