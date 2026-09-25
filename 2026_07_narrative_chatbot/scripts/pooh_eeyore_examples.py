@@ -17,6 +17,7 @@ from narrative_events import (
     HONEY_GIFT_COMMITTED_DESCRIPTION,
     HONEY_GIFT_COMMITTED_EVENT,
     HONEY_GIFT_COMMITTED_RESPONSE,
+    HONEY_GIFT_KEPT_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
     RIBBON_COLOR_UNRESOLVED,
     STORY_WRAP_UP_DESCRIPTION,
@@ -127,6 +128,41 @@ EEYORE_BIRTHDAY_TRAINSET = [
             add_events=["プーが蜂蜜の入った壺を贈り物の候補として提案した"],
         ),
         bot_response="ぼくは、このハチミツの入っているつぼがいいと思うな。お誕生日に甘いものがあると、うれしいもの。",
+    ),
+    # プー自身の贈り物はプーが決める。断られても取り消さず、固定のセリフで
+    # 参加者の案に添える(実行時は decline_honey_jar_gift で固定セリフに差し替える)。
+    *example_variants(
+        current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
+            update={
+                "events": [*EEYORE_BIRTHDAY_SITUATION.events, HONEY_GIFT_COMMITTED_EVENT],
+                "unresolved": [],
+                "decided": ["プーがあげるもの：ハチミツの入った壺"],
+            },
+            deep=True,
+        ),
+        user_action=[
+            "ハチミツはいらないんじゃない？ケーキにしようよ",
+            "ケーキのほうがいいと思うな",
+            "ハチミツじゃなくて、ケーキを焼こうよ",
+        ],
+        history=(
+            "Turn 1\n参加者の生入力: うーん\n応答モード: narrative\n"
+            "参考場面ID: 1a\n物語アクション: ['propose_honey_jar_gift']\n"
+            "プーの応答: ぼくは、このハチミツの入っているつぼがいいと思うな。"
+            "お誕生日に甘いものがあると、うれしいもの。"
+        ),
+        previous_bot_response=(
+            "ぼくは、このハチミツの入っているつぼがいいと思うな。"
+            "お誕生日に甘いものがあると、うれしいもの。"
+        ),
+        interaction_mode="narrative",
+        current_scene="1b",
+        narrative_actions=["decline_honey_jar_gift"],
+        settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="ケーキ")],
+        situation_update=SituationUpdate(
+            add_events=["参加者がケーキを焼くことにした"],
+        ),
+        bot_response=HONEY_GIFT_KEPT_RESPONSE,
     ),
     # 蜂蜜の具体案への相づちには、参加者がまだ話していない贈り物を持ち出さない。
     example(

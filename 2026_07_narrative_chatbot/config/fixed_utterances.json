@@ -46,5 +46,9 @@
   "eeyore_birthday.story_wrap_up": {
     "text": "よかった。これでイーヨーも、きっとにっこりしてくれるよ。ほかにも、なにかぼくとおはなししたいこと、ある？",
     "wav": "eeyore_birthday.story_wrap_up.wav"
+  },
+  "eeyore_birthday.honey_gift_kept": {
+    "text": "そっか。でも、やっぱりぼくからは、ハチミツの壺もあげようかな。甘いものをたべると、しあわせな気持ちになるもの。",
+    "wav": "eeyore_birthday.honey_gift_kept.wav"
   }
 }

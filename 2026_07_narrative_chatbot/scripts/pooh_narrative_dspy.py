@@ -57,6 +57,7 @@ from narrative_events import (
     HoneyGiftEventController,
     NarrativeAction,
     SettledDetail,
+    HONEY_GIFT_KEPT_RESPONSE,
     WorldEvent,
     estimate_speech_seconds,
     fixed_utterance_id,
@@ -72,7 +73,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v36"
+PROGRAM_VERSION = "pooh-structured-state-v39"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -242,6 +243,8 @@ class InterpretTurn(dspy.Signature):
             "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
             "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
             "プーまたは参加者が提案したが、まだ決まっていない場合)、"
+            "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると言ったのに、参加者が"
+            "それをいらないと言った、または別の贈り物に置き換えようとした場合)、"
             "commit_honey_jar_gift、block_pooh_honey_access、"
             "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
             "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
@@ -1367,6 +1370,14 @@ class NarrativeSession:
                 else "undecided"
             ),
         )
+        if (
+            self.controller is not None
+            and "decline_honey_jar_gift" in getattr(result, "narrative_actions", [])
+            and self.controller.state.honey_jar_is_poohs_gift()
+        ):
+            # Pooh's own gift stays; a fixed line adds it beside the
+            # participant's idea instead of a generated line dropping it.
+            result.bot_response = HONEY_GIFT_KEPT_RESPONSE
         # The model's decisions and state delta describe the line it wrote;
         # once the runtime guard replaced that line, they no longer apply.
         response_replaced = result.bot_response != generated_response
@@ -1437,6 +1448,7 @@ class NarrativeSession:
         output = SessionOutput(
             source="participant",
             bot_response=turn.bot_response,
+            fixed_utterance_id=fixed_utterance_id(turn.bot_response) if response_replaced else None,
             interaction_mode=turn.interaction_mode,
             scene_id=turn.scene_id,
             updated_situation=turn.updated_situation,

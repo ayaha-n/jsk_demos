@@ -79,8 +79,6 @@ from narrative_events import (
     GIFT_DECISION_UNRESOLVED,
     GIFT_UNRESOLVED,
     HONEY_EATEN_RESPONSE,
-    HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE,
-    HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE,
     HONEY_GIFT_COMMITTED_EVENT,
     HONEY_GIFT_COMMITTED_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
@@ -91,6 +89,7 @@ from narrative_events import (
     STORY_WRAP_UP_EVENT,
     STORY_WRAP_UP_RESPONSE,
     FIXED_UTTERANCES,
+    POOH_GIFT_TOPIC,
     HoneyGiftEventController,
     SettledDetail,
     RequiredNarrativeEvent,
@@ -436,10 +435,59 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
         self.assertEqual(output.narrative_actions, ["propose_honey_jar_gift"])
-        self.assertEqual(controller.state.gift_status, "undecided")
+        # Only the guard's own proposal counts, not the dropped model commit.
         self.assertNotIn("飲み物", controller.state.settled_details)
         self.assertEqual(output.updated_situation.purpose, scenario.initial_situation.purpose)
         self.assertTrue(log.call_args.args[2]["response_replaced"])
+
+    def _decline_session(self, prepare):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        now = [0.0]
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        prepare(controller, now)
+        invented = scenario.initial_situation.model_copy(
+            update={"purpose": "ケーキと風船を用意することに決めた"},
+        )
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="narrative", current_scene="1b",
+            narrative_actions=["decline_honey_jar_gift", "not_give_empty_jar"],
+            settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="ケーキ")],
+            bot_response="そうだね、ケーキだけにしよう！", awaiting_reply=False,
+            updated_situation=invented,
+        ))
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, event_controller=controller,
+        )
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("ハチミツはいらないよ、ケーキにしよう")
+        return scenario, controller, output
+
+    def test_declined_honey_jar_is_kept_with_the_fixed_line(self):
+        scenario, controller, output = self._decline_session(
+            lambda controller, now: controller.observe_actions(["propose_honey_jar_gift"])
+        )
+
+        self.assertEqual(output.bot_response, pooh.HONEY_GIFT_KEPT_RESPONSE)
+        self.assertEqual(output.fixed_utterance_id, "eeyore_birthday.honey_gift_kept")
+        self.assertEqual(controller.state.gift_status, "committed")
+        self.assertIn("プーがあげるもの：ハチミツの入った壺", output.updated_situation.decided)
+        # The details were read from the discarded line, so none of them apply.
+        self.assertNotIn("イーヨーに何をあげるか：ケーキ", output.updated_situation.decided)
+        self.assertEqual(output.updated_situation.purpose, scenario.initial_situation.purpose)
+
+    def test_decline_is_ignored_when_the_honey_jar_is_not_pooh_gift(self):
+        def eaten(controller, now):
+            controller.observe_actions(["commit_honey_jar_gift"])
+            now[0] = 30.0
+            controller.pop_due_event()
+            now[0] = 40.0
+            controller.pop_due_event()
+
+        for prepare in (lambda controller, now: None, eaten):
+            _, _, output = self._decline_session(prepare)
+            self.assertEqual(output.bot_response, "そうだね、ケーキだけにしよう！")
+            self.assertIsNone(output.fixed_utterance_id)
 
     def test_runtime_replacement_is_not_awaiting_a_reply(self):
         scenario = pooh.get_scenario("eeyore_birthday")
@@ -1263,25 +1311,36 @@ class RegressionTests(unittest.TestCase):
                 seen.append((now[0], event.event_id))
         self.assertEqual(seen, [(30.0, "honey_gift_committed")])
 
-    def test_gift_decision_line_depends_on_prior_proposal(self):
+    def test_pooh_proposing_the_honey_jar_decides_it_without_another_line(self):
         now = [0.0]
         unproposed = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
         proposed = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        proposed.observe_activity(8.0)  # the proposal line being spoken
         proposed.observe_actions(["propose_honey_jar_gift"])
-        # A proposal alone is not a decision and does not start the honey beat.
-        self.assertEqual(proposed.state.gift_status, "undecided")
-        self.assertNotIn("pooh_tastes_honey", proposed._deadlines)
 
+        self.assertEqual(proposed.state.gift_status, "committed")
+        self.assertEqual(proposed.state.settled_details[POOH_GIFT_TOPIC], "ハチミツの入った壺")
+        # Tasting counts from the end of the proposal line.
+        self.assertEqual(proposed._deadlines["pooh_tastes_honey"], 38.0)
         now[0] = 30.0
         self.assertEqual(unproposed.pop_due_event().fallback_response,
                          HONEY_GIFT_COMMITTED_RESPONSE)
-        event = proposed.pop_due_event()
-        self.assertEqual(event.event_id, "honey_gift_committed")
-        self.assertEqual(event.fallback_response, HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE)
-        self.assertEqual(
-            event.follow_up_response,
-            HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE,
+        self.assertIsNone(proposed.pop_due_event())
+
+    def test_pooh_gift_does_not_overwrite_the_participant_gift(self):
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        controller.observe_settled_details([SettledDetail(topic=GIFT_UNRESOLVED, value="ケーキ")])
+        controller.observe_actions(["propose_honey_jar_gift"])
+        # The model cannot rewrite Pooh's own gift either.
+        controller.observe_settled_details(
+            [SettledDetail(topic=POOH_GIFT_TOPIC, value="風船")]
         )
+
+        updated = controller.synchronize_situation(
+            pooh.get_scenario("eeyore_birthday").initial_situation
+        )
+        self.assertIn("イーヨーに何をあげるか：ケーキ", updated.decided)
+        self.assertIn("プーがあげるもの：ハチミツの入った壺", updated.decided)
 
     def test_runtime_honey_proposal_fallback_is_recorded_as_proposal(self):
         scenario = pooh.get_scenario("eeyore_birthday")
@@ -1302,8 +1361,8 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
         self.assertIn("propose_honey_jar_gift", output.narrative_actions)
-        self.assertTrue(controller.state.honey_gift_proposed)
-        self.assertEqual(controller.state.gift_status, "undecided")
+        # The guard voiced Pooh's own proposal, which decides his gift.
+        self.assertEqual(controller.state.gift_status, "committed")
 
     def _controller_with_empty_jar(self, now):
         controller = HoneyGiftEventController(
@@ -1513,14 +1572,15 @@ class RegressionTests(unittest.TestCase):
         controller.observe_actions(["not_give_empty_jar", "give_empty_jar"])
         self.assertIsNone(controller.state.jar_decision)
         controller.observe_actions(["commit_honey_jar_gift"])
-        # The honey commitment replaces the earlier gift choice.
-        self.assertEqual(controller.state.settled_details[GIFT_UNRESOLVED], "ハチミツの入った壺")
+        # Pooh's honey jar is recorded apart from the participant's choice.
+        self.assertEqual(controller.state.settled_details[POOH_GIFT_TOPIC], "ハチミツの入った壺")
+        self.assertEqual(controller.state.settled_details[GIFT_UNRESOLVED], "風船")
         now[0] = 30.0
         controller.pop_due_event()
         now[0] = 40.0
         controller.pop_due_event()
 
-        self.assertNotIn(GIFT_UNRESOLVED, controller.state.settled_details)
+        self.assertNotIn(POOH_GIFT_TOPIC, controller.state.settled_details)
         self.assertIsNone(controller.pop_due_event(follow_up=True))
 
     def test_contradictory_jar_actions_in_one_turn_are_both_ignored(self):

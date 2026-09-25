@@ -56,6 +56,7 @@ def fixed_utterance_id(text: str) -> str | None:
 
 NarrativeAction = Literal[
     "propose_honey_jar_gift",
+    "decline_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
     "give_empty_jar",
@@ -64,6 +65,7 @@ NarrativeAction = Literal[
 
 KNOWN_NARRATIVE_ACTIONS = {
     "propose_honey_jar_gift",
+    "decline_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
     "give_empty_jar",
@@ -95,14 +97,9 @@ HONEY_GIFT_COMMITTED_RESPONSE = fixed_utterance("eeyore_birthday.honey_gift_comm
 HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE = fixed_utterance(
     "eeyore_birthday.honey_gift_committed.follow_up"
 )
-# Once the honey jar has already been proposed, a sudden "そうだ！" would sound
-# like a new idea, so the decision is voiced as settling on that proposal.
-HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE = fixed_utterance(
-    "eeyore_birthday.honey_gift_committed.after_proposal"
-)
-HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE = (
-    fixed_utterance("eeyore_birthday.honey_gift_committed.after_proposal.follow_up")
-)
+# Pooh keeps his own gift when the participant declines it, adding it next
+# to their idea instead of dropping it.
+HONEY_GIFT_KEPT_RESPONSE = fixed_utterance("eeyore_birthday.honey_gift_kept")
 HONEY_TASTED_EVENT = "プーがハチミツを一口だけのつもりで持ち出した"
 HONEY_TASTED_DESCRIPTION = (
     "イーヨーへの贈り物にすると決めた蜂蜜を、プーが待っている間に一口だけの"
@@ -120,6 +117,9 @@ GIFT_DECISION_UNRESOLVED = (
 # the jar) when the participant and Pooh decide not to give the empty jar.
 GIFT_UNRESOLVED = GIFT_DECISION_UNRESOLVED[0]
 HONEY_JAR_GIFT = "ハチミツの入った壺"
+# Pooh's own gift is Python-owned and kept apart from what the participant
+# gives, so deciding it never overwrites the participant's idea.
+POOH_GIFT_TOPIC = "プーがあげるもの"
 HONEY_PREPARATION_UNRESOLVED = "ハチミツの準備をどう進めるか"
 EMPTY_JAR_UNRESOLVED = "空になった壺をどうするか"
 GIVE_EMPTY_JAR = "あげる"
@@ -186,7 +186,6 @@ class RequiredNarrativeEvent:
 @dataclass
 class HoneyGiftState:
     gift_status: str = "undecided"
-    honey_gift_proposed: bool = False
     honey_status: str = "full"
     access_restriction: str = "none"
     completed_event_ids: set[str] = field(default_factory=set)
@@ -198,6 +197,10 @@ class HoneyGiftState:
     replacement_gift: str | None = None
     # Anything settled after the honey was eaten (a gift, a drink, a color...).
     decided_after_honey: bool = False
+
+    def honey_jar_is_poohs_gift(self) -> bool:
+        """Pooh has decided on the honey jar and still has the honey."""
+        return self.gift_status == "committed" and self.honey_status == "full"
 
     def story_complete(self) -> bool:
         """Honey gone, then either the empty jar or something else to give.
@@ -380,11 +383,10 @@ class HoneyGiftEventController:
         for action in actions:
             if action not in KNOWN_NARRATIVE_ACTIONS:
                 continue
-            if action == "propose_honey_jar_gift":
-                # A proposal is not a decision; it only changes how Pooh later
-                # voices his own decision.
-                self.state.honey_gift_proposed = True
-            elif action == "commit_honey_jar_gift":
+            if action in ("propose_honey_jar_gift", "commit_honey_jar_gift"):
+                # Pooh decides his own gift; proposing it is deciding it, so no
+                # separate decision line has to follow.  A participant who
+                # declines gets Pooh adding it alongside their idea instead.
                 self._commit_gift()
             elif action == "block_pooh_honey_access":
                 self.state.access_restriction = "blocked"
@@ -413,7 +415,7 @@ class HoneyGiftEventController:
                 continue
             # Whether the jar is given is an action Python validates; a free
             # text value for it would contradict jar_decision.
-            if topic == EMPTY_JAR_UNRESOLVED:
+            if topic in (EMPTY_JAR_UNRESOLVED, POOH_GIFT_TOPIC):
                 continue
             self.state.settled_details[topic] = value
             if self.state.honey_status == "empty":
@@ -433,7 +435,7 @@ class HoneyGiftEventController:
             return
         state.gift_status = "committed"
         state.completed_event_ids.add("honey_gift_committed")
-        state.settled_details[GIFT_UNRESOLVED] = HONEY_JAR_GIFT
+        state.settled_details[POOH_GIFT_TOPIC] = HONEY_JAR_GIFT
         self._deadlines.pop("honey_gift_committed", None)
         self._arm_required_events()
 
@@ -441,25 +443,19 @@ class HoneyGiftEventController:
     def _fire_honey_gift_commitment(state: HoneyGiftState) -> WorldEvent:
         state.gift_status = "committed"
         state.completed_event_ids.add("honey_gift_committed")
-        state.settled_details[GIFT_UNRESOLVED] = HONEY_JAR_GIFT
-        if state.honey_gift_proposed:
-            response = HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE
-            follow_up_response = HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE
-        else:
-            response = HONEY_GIFT_COMMITTED_RESPONSE
-            follow_up_response = HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE
+        state.settled_details[POOH_GIFT_TOPIC] = HONEY_JAR_GIFT
         return WorldEvent(
             event_id="honey_gift_committed",
             description=HONEY_GIFT_COMMITTED_DESCRIPTION,
             scene_id="1c",
-            fallback_response=response,
+            fallback_response=HONEY_GIFT_COMMITTED_RESPONSE,
             situation_update=SituationUpdate(
                 add_events=[HONEY_GIFT_COMMITTED_EVENT],
                 remove_unresolved=["イーヨーに何をあげるか"],
                 add_unresolved=[HONEY_PREPARATION_UNRESOLVED],
             ),
             fixed_response=True,
-            follow_up_response=follow_up_response,
+            follow_up_response=HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE,
         )
 
     @staticmethod
@@ -481,8 +477,8 @@ class HoneyGiftEventController:
     def _fire_honey_eating(state: HoneyGiftState) -> WorldEvent:
         state.honey_status = "empty"
         state.completed_event_ids.add("pooh_ate_honey")
-        # The honey jar can no longer be the gift as decided.
-        state.settled_details.pop(GIFT_UNRESOLVED, None)
+        # The honey jar can no longer be Pooh's gift as decided.
+        state.settled_details.pop(POOH_GIFT_TOPIC, None)
         return WorldEvent(
             event_id="pooh_ate_honey",
             description=HONEY_EATEN_DESCRIPTION,
