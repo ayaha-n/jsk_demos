@@ -874,16 +874,17 @@ def create_event_controller(
     clock: Callable[[], float] = time.monotonic,
 ) -> HoneyGiftEventController | None:
     if (
-        scenario.event_inactivity_delay_seconds is None
+        scenario.gift_decision_delay_seconds is None
         or scenario.honey_tasting_delay_seconds is None
         or scenario.honey_eating_delay_seconds is None
     ):
         return None
     return HoneyGiftEventController(
-        scenario.event_inactivity_delay_seconds,
+        scenario.gift_decision_delay_seconds,
         scenario.honey_tasting_delay_seconds,
         scenario.honey_eating_delay_seconds,
         clock=clock,
+        quiet_seconds=scenario.event_quiet_seconds,
     )
 
 
@@ -894,8 +895,12 @@ def _event_result(
     history: str,
     previous_bot_response: str = "",
     pooh_preferences: str = "",
+    follow_up: bool = False,
 ) -> tuple[Any, float, bool]:
     if event.fixed_response:
+        line = event.fallback_response
+        if follow_up and event.follow_up_response is not None:
+            line = event.follow_up_response
         return dspy.Prediction(
             interaction_mode="narrative",
             current_scene=event.scene_id,
@@ -903,7 +908,7 @@ def _event_result(
             situation_update=SituationUpdate(),
             updated_situation=current_situation,
             narrative_actions=[],
-            bot_response=event.fallback_response,
+            bot_response=line,
         ), 0.0, False
     try:
         result, latency_ms = invoke(
@@ -996,6 +1001,8 @@ class NarrativeSession:
             situation_diff=format_situation_diff(None, self.current_situation),
             performance_cue="opening",
         )
+        if self.controller is not None:
+            self.controller.observe_activity()
         self._publish(output)
         return output
 
@@ -1022,9 +1029,20 @@ class NarrativeSession:
 
     def poll(self) -> SessionOutput | None:
         """Return one due world event without waiting, if any."""
+        return self._fire_event(follow_up=False)
+
+    def follow_up(self) -> SessionOutput | None:
+        """Right after answering the participant, fire an overdue event.
+
+        Events that wait for a quiet moment would otherwise never fire while
+        the participant keeps talking; this lets them follow Pooh's answer.
+        """
+        return self._fire_event(follow_up=True)
+
+    def _fire_event(self, follow_up: bool) -> SessionOutput | None:
         if not self.started or self.ended or self.controller is None:
             return None
-        event = self.controller.pop_due_event()
+        event = self.controller.pop_due_event(follow_up=follow_up)
         if event is None:
             return None
 
@@ -1042,6 +1060,7 @@ class NarrativeSession:
             pooh_preferences=relevant_preferences(
                 self.current_situation, self.scenario.pooh_preferences
             ),
+            follow_up=follow_up,
         )
         actions = list(getattr(result, "narrative_actions", []))
         self.controller.observe_actions(actions)
@@ -1070,6 +1089,7 @@ class NarrativeSession:
                 "scenario": self.scenario.key,
                 "session_id": self.session_id,
                 "world_event_id": event.event_id,
+                "event_follow_up": follow_up,
                 "generation_fallback": used_fallback,
                 "latency_ms": round(latency_ms, 1),
             },
@@ -1090,6 +1110,7 @@ class NarrativeSession:
             generation_fallback=used_fallback,
             turn=turn,
         )
+        self.controller.observe_activity()
         self._publish(output)
         return output
 
@@ -1106,7 +1127,7 @@ class NarrativeSession:
             return self.close("exit_command")
 
         if self.controller is not None:
-            self.controller.observe_user_input()
+            self.controller.observe_activity()
         previous_situation = self.current_situation
         history = self._history()
         result, latency_ms = invoke(
@@ -1182,6 +1203,10 @@ class NarrativeSession:
             latency_ms=latency_ms,
             turn=turn,
         )
+        if self.controller is not None:
+            # Quiet time counts from when Pooh finishes answering, not from
+            # the input, so slow generation does not eat into it.
+            self.controller.observe_activity()
         self._publish(output)
         return output
 
@@ -1245,6 +1270,10 @@ def run_chat(
             print(pooh_line(output.bot_response))
             break
         print_result("Compiled", output, scenario, situation_before_turn)
+        situation_before_event = session.current_situation
+        follow_up = session.follow_up()
+        if follow_up is not None:
+            print_result("Timed Event", follow_up, scenario, situation_before_event)
 
 
 def run_comparison(compiled: Any, scenario: Scenario) -> None:

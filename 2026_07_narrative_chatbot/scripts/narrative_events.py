@@ -40,6 +40,9 @@ HONEY_GIFT_COMMITTED_EVENT = "プーがハチミツの入った壺をイーヨ�
 HONEY_GIFT_COMMITTED_RESPONSE = (
     "そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。きっと喜ぶね。"
 )
+HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE = (
+    "あ、そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。きっと喜ぶね。"
+)
 HONEY_TASTED_EVENT = "プーがハチミツを一口だけのつもりで持ち出した"
 HONEY_TASTED_DESCRIPTION = (
     "イーヨーへの贈り物にすると決めた蜂蜜を、プーが待っている間に一口だけの"
@@ -49,6 +52,7 @@ HONEY_TASTED_RESPONSE = (
     "みつのツボを持ってるなんて、運が良かったなあ。ちょっと一口やるものを持ってるなんて。"
     "…さあて、ぼくはなにをするんだっけ？"
 )
+HONEY_TASTED_FOLLOW_UP_RESPONSE = f"あ、そういえば。{HONEY_TASTED_RESPONSE}"
 GIFT_DECISION_UNRESOLVED = (
     "イーヨーに何をあげるか",
     "プレゼントの準備がまだできていない",
@@ -68,15 +72,23 @@ class WorldEvent:
     fallback_response: str
     situation_update: SituationUpdate
     fixed_response: bool = False
+    # Fixed line used when the event follows Pooh's answer to the participant
+    # instead of filling a silence; None reuses fallback_response.
+    follow_up_response: str | None = None
 
 
 @dataclass(frozen=True)
 class RequiredNarrativeEvent:
-    """A named event that may fire after inactivity when its prerequisite holds."""
+    """A named event that fires once its delay has passed and its prerequisite holds.
+
+    An event that ``waits_for_quiet`` opens a new story beat, so it does not
+    interrupt an ongoing exchange: it fires alone after ``quiet_seconds`` of
+    silence, or right after Pooh's next answer, whichever comes first.
+    """
 
     event_id: str
     delay_seconds: float
-    resets_on_input: bool
+    waits_for_quiet: bool
     prerequisite: Callable[["HoneyGiftState"], bool]
     fire: Callable[["HoneyGiftState"], WorldEvent]
 
@@ -94,49 +106,54 @@ class HoneyGiftEventController:
 
     def __init__(
         self,
-        inactivity_delay_seconds: float,
+        gift_decision_delay_seconds: float,
         tasting_delay_seconds: float,
         eating_delay_seconds: float,
         clock: Callable[[], float] = time.monotonic,
         required_events: tuple[RequiredNarrativeEvent, ...] | None = None,
+        quiet_seconds: float = 0.0,
     ) -> None:
-        if inactivity_delay_seconds < 0:
-            raise ValueError("inactivity_delay_seconds must be non-negative")
+        if gift_decision_delay_seconds < 0:
+            raise ValueError("gift_decision_delay_seconds must be non-negative")
         if tasting_delay_seconds < 0:
             raise ValueError("tasting_delay_seconds must be non-negative")
         if eating_delay_seconds < 0:
             raise ValueError("eating_delay_seconds must be non-negative")
-        self.inactivity_delay_seconds = inactivity_delay_seconds
+        if quiet_seconds < 0:
+            raise ValueError("quiet_seconds must be non-negative")
+        self.gift_decision_delay_seconds = gift_decision_delay_seconds
         self.tasting_delay_seconds = tasting_delay_seconds
         self.eating_delay_seconds = eating_delay_seconds
+        self.quiet_seconds = quiet_seconds
         self.clock = clock
         self.state = HoneyGiftState()
         self.required_events = required_events or self._default_required_events(
-            inactivity_delay_seconds,
+            gift_decision_delay_seconds,
             tasting_delay_seconds,
             eating_delay_seconds,
         )
         self._deadlines: dict[str, float] = {}
+        self._last_activity = clock()
         self._arm_required_events()
 
     @staticmethod
     def _default_required_events(
-        inactivity_delay_seconds: float,
+        gift_decision_delay_seconds: float,
         tasting_delay_seconds: float,
         eating_delay_seconds: float,
     ) -> tuple[RequiredNarrativeEvent, ...]:
         return (
             RequiredNarrativeEvent(
                 event_id="honey_gift_committed",
-                delay_seconds=inactivity_delay_seconds,
-                resets_on_input=True,
+                delay_seconds=gift_decision_delay_seconds,
+                waits_for_quiet=True,
                 prerequisite=lambda state: state.gift_status == "undecided",
                 fire=HoneyGiftEventController._fire_honey_gift_commitment,
             ),
             RequiredNarrativeEvent(
                 event_id="pooh_tastes_honey",
                 delay_seconds=tasting_delay_seconds,
-                resets_on_input=False,
+                waits_for_quiet=True,
                 prerequisite=lambda state: (
                     state.gift_status == "committed"
                     and state.honey_status == "full"
@@ -147,7 +164,9 @@ class HoneyGiftEventController:
             RequiredNarrativeEvent(
                 event_id="pooh_ate_honey",
                 delay_seconds=eating_delay_seconds,
-                resets_on_input=False,
+                # Tasting and eating are one beat; the participant's chance to
+                # intervene is this short window, so it must not be deferred.
+                waits_for_quiet=False,
                 prerequisite=lambda state: (
                     state.gift_status == "committed"
                     and state.honey_status == "full"
@@ -168,16 +187,15 @@ class HoneyGiftEventController:
             ):
                 self._deadlines[event.event_id] = now + event.delay_seconds
 
-    def observe_user_input(self) -> None:
-        """Reset only pending inactivity timers; completed events never rewind."""
-        now = self.clock()
-        for event in self.required_events:
-            if (
-                event.event_id not in self.state.completed_event_ids
-                and event.prerequisite(self.state)
-                and event.resets_on_input
-            ):
-                self._deadlines[event.event_id] = now + event.delay_seconds
+    def observe_activity(self) -> None:
+        """Record participant input or delivered Pooh output; deadlines never move."""
+        self._last_activity = self.clock()
+
+    def _ready_at(self, event: RequiredNarrativeEvent, follow_up: bool) -> float:
+        deadline = self._deadlines[event.event_id]
+        if event.waits_for_quiet and not follow_up:
+            return max(deadline, self._last_activity + self.quiet_seconds)
+        return deadline
 
     def observe_actions(self, actions: list[str]) -> None:
         """Validate and apply LM-proposed actions without resetting equal decisions."""
@@ -247,6 +265,7 @@ class HoneyGiftEventController:
                 add_unresolved=[HONEY_PREPARATION_UNRESOLVED],
             ),
             fixed_response=True,
+            follow_up_response=HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE,
         )
 
     @staticmethod
@@ -261,6 +280,7 @@ class HoneyGiftEventController:
                 add_events=[HONEY_TASTED_EVENT],
             ),
             fixed_response=True,
+            follow_up_response=HONEY_TASTED_FOLLOW_UP_RESPONSE,
         )
 
     @staticmethod
@@ -291,18 +311,27 @@ class HoneyGiftEventController:
 
     def seconds_until_due(self) -> float | None:
         self._arm_required_events()
-        deadlines = list(self._deadlines.values())
-        if not deadlines:
+        ready_times = [
+            self._ready_at(event, follow_up=False)
+            for event in self.required_events
+            if event.event_id in self._deadlines
+        ]
+        if not ready_times:
             return None
-        return max(0.0, min(deadlines) - self.clock())
+        return max(0.0, min(ready_times) - self.clock())
 
-    def pop_due_event(self) -> WorldEvent | None:
+    def pop_due_event(self, follow_up: bool = False) -> WorldEvent | None:
+        """Fire one ready event.
+
+        ``follow_up`` is used right after Pooh answers the participant: an
+        overdue event then fires without waiting for silence.
+        """
         self._arm_required_events()
         now = self.clock()
         due = next(
             (event for event in self.required_events
              if event.event_id in self._deadlines
-             and now >= self._deadlines[event.event_id]
+             and now >= self._ready_at(event, follow_up)
              and event.prerequisite(self.state)),
             None,
         )

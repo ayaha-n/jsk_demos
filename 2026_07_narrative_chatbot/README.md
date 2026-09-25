@@ -135,16 +135,21 @@ participant input. The chat output shows the DSPy-inferred scene as
 The delays are configured in one place near the top of `scripts/scenarios.py`:
 
 ```python
-EEYORE_EVENT_INACTIVITY_DELAY_SECONDS = 30.0
+EEYORE_GIFT_DECISION_DELAY_SECONDS = 30.0
 EEYORE_HONEY_TASTING_DELAY_SECONDS = 30.0
 EEYORE_HONEY_EATING_DELAY_SECONDS = 10.0
+EEYORE_EVENT_QUIET_SECONDS = 12.0
 ```
 
-The first value controls how long Pooh waits for participant input before
-deciding on the honey jar himself. The second controls how long he waits before
-taking out the jar, and the third controls how long he waits before eating its
-honey. Changing only these runtime values requires restarting chat mode but
-does not require DSPy recompilation.
+The first value is the time from the session start until Pooh decides on the
+honey jar himself. The second controls how long he waits before taking out the
+jar, and the third controls how long he waits before eating its honey.
+The decision and the taking-out open new story beats, so they do not interrupt
+an ongoing exchange: once due, each fires alone after `EEYORE_EVENT_QUIET_SECONDS`
+of silence, or right after Pooh's next answer (introduced with a fixed
+"あ、そうだ！" / "あ、そういえば。" line), whichever comes first. Eating follows
+taking-out without waiting for silence. Changing only these runtime values
+requires restarting chat mode but does not require DSPy recompilation.
 
 Each scenario is compiled and cached separately, so compile the scenario you
 intend to chat with before starting a session:

@@ -42,6 +42,7 @@ class FakeSession:
     due_at: float | None = None
     ended: bool = False
     fail_next: bool = False
+    follow_up_pending: bool = False
     submit_delay: float = 0.0
     inputs: list[str] = field(default_factory=list)
     closed_reasons: list[str] = field(default_factory=list)
@@ -87,6 +88,12 @@ class FakeSession:
             return FakeOutput("world_event", "ハチミツをなめちゃった")
         finally:
             self._leave()
+
+    def follow_up(self):
+        if not self.follow_up_pending:
+            return None
+        self.follow_up_pending = False
+        return FakeOutput("world_event", "あ、そういえば。ハチミツをなめちゃった")
 
     def close(self, reason: str = "requested"):
         if self.ended:
@@ -167,6 +174,18 @@ class WebServerTests(AioHTTPTestCase):
             await self.receive_until(ws, "transcript")
             output = await self.receive_until(ws, "output")
         self.assertEqual(output["output"]["source"], "world_event")
+
+    async def test_overdue_event_follows_the_answer(self):
+        session_id = await self.new_session()
+        self.sessions[session_id].follow_up_pending = True
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            await self.receive_until(ws, "transcript")
+            await ws.send_json({"type": "user_input", "text": "ねえ"})
+            answer = await self.receive_until(ws, "output")
+            follow_up = await self.receive_until(ws, "output")
+        self.assertEqual(answer["output"]["source"], "participant")
+        self.assertEqual(follow_up["output"]["source"], "world_event")
+        self.assertFalse(self.sessions[session_id].follow_up_pending)
 
     async def test_calls_for_one_session_are_serialized(self):
         session_id = await self.new_session()

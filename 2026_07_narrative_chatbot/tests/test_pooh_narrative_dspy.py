@@ -78,8 +78,10 @@ from narrative_events import (
     GIFT_DECISION_UNRESOLVED,
     HONEY_EATEN_RESPONSE,
     HONEY_GIFT_COMMITTED_EVENT,
+    HONEY_GIFT_COMMITTED_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
     HONEY_TASTED_EVENT,
+    HONEY_TASTED_FOLLOW_UP_RESPONSE,
     RIBBON_COLOR_UNRESOLVED,
     HoneyGiftEventController,
     RequiredNarrativeEvent,
@@ -308,6 +310,47 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(output.bot_response, "うん、わかったよ。またね。")
         self.assertIsNone(session.close())
         self.assertEqual(publisher.publish.call_count, 2)
+
+    def test_session_follow_up_uses_follow_up_line_after_answer(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        agent = Mock(side_effect=[
+            SimpleNamespace(
+                interaction_mode="narrative",
+                current_scene="none",
+                narrative_actions=[],
+                bot_response=line,
+                updated_situation=scenario.initial_situation,
+            )
+            for line in ("ケーキ、いいね。", "アザミのケーキ、すてきだね。")
+        ])
+        publisher = Mock()
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario,
+            event_controller=controller, ros_publisher=publisher,
+        )
+        session.start()
+        now[0] = 29.0
+        with patch.object(pooh, "append_log") as log:
+            session.submit("ケーキを作るよ")
+            self.assertIsNone(session.follow_up())
+            now[0] = 35.0
+            answer = session.submit("アザミのケーキにする")
+            self.assertIsNone(session.poll())
+            event = session.follow_up()
+
+        self.assertEqual(answer.source, "participant")
+        self.assertEqual(event.world_event_id, "honey_gift_committed")
+        self.assertNotEqual(event.bot_response, HONEY_GIFT_COMMITTED_RESPONSE)
+        self.assertTrue(event.bot_response.endswith("贈ることにしよう。きっと喜ぶね。"))
+        self.assertTrue(log.call_args_list[-1].args[2]["event_follow_up"])
+        self.assertEqual(
+            publisher.publish.call_args_list[-1].kwargs["world_event_id"],
+            "honey_gift_committed",
+        )
 
     def test_narrative_relay_publisher_does_not_raise_when_relay_is_unreachable(self):
         scenario = pooh.get_scenario("eeyore_birthday")
@@ -874,9 +917,10 @@ class RegressionTests(unittest.TestCase):
         scenario = pooh.get_scenario("eeyore_birthday")
         changed_delay = replace(
             scenario,
-            event_inactivity_delay_seconds=scenario.event_inactivity_delay_seconds + 10,
+            gift_decision_delay_seconds=scenario.gift_decision_delay_seconds + 10,
             honey_tasting_delay_seconds=scenario.honey_tasting_delay_seconds + 5,
             honey_eating_delay_seconds=scenario.honey_eating_delay_seconds + 5,
+            event_quiet_seconds=scenario.event_quiet_seconds + 5,
         )
         self.assertEqual(
             pooh.cache_hash("model", "judge", scenario),
@@ -948,15 +992,67 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(eat_event.event_id, "pooh_ate_honey")
         self.assertEqual(eat_event.scene_id, "3")
 
+    def test_scene_opening_event_waits_for_quiet_after_deadline(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+
+        # Pooh just asked something; the deadline passes mid-exchange.
+        now[0] = 25.0
+        controller.observe_activity()
+        now[0] = 31.0
+        self.assertIsNone(controller.pop_due_event())
+        self.assertEqual(controller.seconds_until_due(), 6.0)
+
+        now[0] = 37.0
+        event = controller.pop_due_event()
+        self.assertEqual(event.event_id, "pooh_tastes_honey")
+
+    def test_overdue_event_follows_the_answer_without_waiting_for_quiet(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+
+        now[0] = 20.0
+        controller.observe_activity()
+        self.assertIsNone(controller.pop_due_event(follow_up=True))
+
+        now[0] = 31.0
+        controller.observe_activity()
+        event = controller.pop_due_event(follow_up=True)
+        self.assertEqual(event.event_id, "pooh_tastes_honey")
+        self.assertEqual(event.follow_up_response, HONEY_TASTED_FOLLOW_UP_RESPONSE)
+
+    def test_gift_decision_fires_even_when_participant_keeps_talking(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        seen = []
+        for _ in range(4):
+            now[0] += 10.0
+            controller.observe_activity()
+            self.assertIsNone(controller.pop_due_event())
+            event = controller.pop_due_event(follow_up=True)
+            if event is not None:
+                seen.append((now[0], event.event_id))
+        self.assertEqual(seen, [(30.0, "honey_gift_committed")])
+
     def test_participant_input_does_not_reset_eating_timer(self):
         now = [0.0]
-        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
         controller.observe_actions(["commit_honey_jar_gift"])
         seen_event_ids = []
-        for _ in range(5):
+        for _ in range(8):
             now[0] += 10.0
-            controller.observe_user_input()
-            event = controller.pop_due_event()
+            controller.observe_activity()
+            event = controller.pop_due_event(follow_up=True)
             if event is not None:
                 seen_event_ids.append(event.event_id)
                 if event.event_id == "pooh_ate_honey":
@@ -1139,7 +1235,7 @@ class RegressionTests(unittest.TestCase):
         custom_event = RequiredNarrativeEvent(
             event_id="custom_event",
             delay_seconds=0.0,
-            resets_on_input=False,
+            waits_for_quiet=False,
             prerequisite=lambda state: "custom_event" not in state.completed_event_ids,
             fire=fire_custom_event,
         )
