@@ -17,7 +17,7 @@ from narrative_events import fixed_utterance
 from narrative_state import NarrativeSituation
 
 
-# セッション開始から、プーが蜂蜜壺を贈ると決めるまでの秒数。
+# オープニングを話し終えてから、プーが蜂蜜壺を贈ると決めるまでの秒数。
 EEYORE_GIFT_DECISION_DELAY_SECONDS = 30.0
 # 贈ると決めてから、蜂蜜壺を持ち出すまでの秒数。
 EEYORE_HONEY_TASTING_DELAY_SECONDS = 30.0

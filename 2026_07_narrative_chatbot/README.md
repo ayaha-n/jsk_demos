@@ -142,9 +142,12 @@ EEYORE_EVENT_QUIET_SECONDS = 12.0
 EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS = 30.0
 ```
 
-The first value is the time from the session start until Pooh decides on the
-honey jar himself. The second controls how long he waits before taking out the
-jar, and the third controls how long he waits before eating its honey.
+The first value is the time from the end of the spoken opening until Pooh
+decides on the honey jar himself. The second controls how long he waits before
+taking out the jar, and the third controls how long he waits before eating its
+honey. Every delay and quiet period counts from when Pooh's latest line is
+expected to finish playing, estimated at `SPEECH_CHARS_PER_SECOND` (4.3,
+measured from the fixed-utterance WAVs) in `scripts/narrative_events.py`.
 The decision and the taking-out open new story beats, so they do not interrupt
 an ongoing exchange: once due, each fires alone after `EEYORE_EVENT_QUIET_SECONDS`
 of silence, or right after Pooh's next answer (introduced with a fixed

@@ -120,6 +120,16 @@ STORY_WRAP_UP_DESCRIPTION = (
 STORY_WRAP_UP_RESPONSE = fixed_utterance("eeyore_birthday.story_wrap_up")
 
 
+# Measured from the pre-generated fixed-utterance WAVs (about 4.3 characters
+# per second across all of them); used to wait for Pooh to finish speaking.
+SPEECH_CHARS_PER_SECOND = 4.3
+
+
+def estimate_speech_seconds(text: str) -> float:
+    """Rough playback length of a Japanese line spoken by Pooh."""
+    return len(text.strip()) / SPEECH_CHARS_PER_SECOND
+
+
 @dataclass(frozen=True)
 class WorldEvent:
     event_id: str
@@ -176,6 +186,7 @@ class HoneyGiftEventController:
         required_events: tuple[RequiredNarrativeEvent, ...] | None = None,
         quiet_seconds: float = 0.0,
         idle_close_seconds: float | None = None,
+        speech_seconds: Callable[[str], float] = lambda text: 0.0,
     ) -> None:
         if gift_decision_delay_seconds < 0:
             raise ValueError("gift_decision_delay_seconds must be non-negative")
@@ -200,7 +211,11 @@ class HoneyGiftEventController:
             idle_close_seconds,
         )
         self._deadlines: dict[str, float] = {}
+        self.speech_seconds = speech_seconds
         self._last_activity = clock()
+        # When Pooh's latest line is expected to finish playing.  Delays and
+        # quiet time count from here, not from when the text was generated.
+        self._speech_end = self._last_activity
         self._arm_required_events()
 
     @staticmethod
@@ -269,18 +284,30 @@ class HoneyGiftEventController:
         )
 
     def _arm_required_events(self) -> None:
-        now = self.clock()
+        start = max(self.clock(), self._speech_end)
         for event in self.required_events:
             if (
                 event.event_id not in self.state.completed_event_ids
                 and event.prerequisite(self.state)
                 and event.event_id not in self._deadlines
             ):
-                self._deadlines[event.event_id] = now + event.delay_seconds
+                self._deadlines[event.event_id] = start + event.delay_seconds
 
-    def observe_activity(self) -> None:
-        """Record participant input or delivered Pooh output; deadlines never move."""
-        self._last_activity = self.clock()
+    def observe_activity(self, speech_seconds: float = 0.0) -> None:
+        """Record participant input, or Pooh's line with its playback length.
+
+        Deadlines already set never move; events armed afterwards, and quiet
+        time, count from the end of that speech.
+        """
+        now = self.clock()
+        self._speech_end = max(self._speech_end, now + speech_seconds)
+        self._last_activity = max(now, self._speech_end)
+
+    def begin(self, opening_speech_seconds: float) -> None:
+        """Start the story clock once the scripted opening has been spoken."""
+        self._deadlines.clear()
+        self.observe_activity(opening_speech_seconds)
+        self._arm_required_events()
 
     def _ready_at(self, event: RequiredNarrativeEvent, follow_up: bool) -> float:
         deadline = self._deadlines[event.event_id]
@@ -468,6 +495,12 @@ class HoneyGiftEventController:
             return None
         self._deadlines.pop(due.event_id, None)
         result = due.fire(self.state)
+        if result.fixed_response:
+            line = result.fallback_response
+            if follow_up and result.follow_up_response is not None:
+                line = result.follow_up_response
+            # The next beat (e.g. eating after tasting) waits for this line.
+            self.observe_activity(self.speech_seconds(line))
         self._arm_required_events()
         return result
 

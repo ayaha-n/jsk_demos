@@ -57,6 +57,7 @@ from narrative_events import (
     HoneyGiftEventController,
     NarrativeAction,
     WorldEvent,
+    estimate_speech_seconds,
     fixed_utterance_id,
 )
 from pooh_examples import (
@@ -977,6 +978,7 @@ def create_event_controller(
         clock=clock,
         quiet_seconds=scenario.event_quiet_seconds,
         idle_close_seconds=scenario.idle_close_after_wrap_up_seconds,
+        speech_seconds=estimate_speech_seconds,
     )
 
 
@@ -1096,7 +1098,7 @@ class NarrativeSession:
             fixed_utterance_id=fixed_utterance_id(self.scenario.opening_line),
         )
         if self.controller is not None:
-            self.controller.observe_activity()
+            self.controller.begin(self.controller.speech_seconds(output.bot_response))
         self._publish(output)
         return output
 
@@ -1210,7 +1212,7 @@ class NarrativeSession:
             generation_fallback=used_fallback,
             turn=turn,
         )
-        self.controller.observe_activity()
+        self.controller.observe_activity(self.controller.speech_seconds(turn.bot_response))
         self._publish(output)
         return output
 
@@ -1250,6 +1252,12 @@ class NarrativeSession:
                 else "undecided"
             ),
         )
+        if self.controller is not None:
+            # Quiet time and newly armed events count from when Pooh finishes
+            # speaking this answer, not from the input or generation.
+            self.controller.observe_activity(
+                self.controller.speech_seconds(str(result.bot_response))
+            )
         actions = list(getattr(result, "narrative_actions", []))
         if (
             result.bot_response == HONEY_PROPOSAL_FALLBACK_RESPONSE
@@ -1309,10 +1317,6 @@ class NarrativeSession:
             latency_ms=latency_ms,
             turn=turn,
         )
-        if self.controller is not None:
-            # Quiet time counts from when Pooh finishes answering, not from
-            # the input, so slow generation does not eat into it.
-            self.controller.observe_activity()
         self._publish(output)
         return output
 

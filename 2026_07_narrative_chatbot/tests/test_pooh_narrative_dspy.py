@@ -84,6 +84,7 @@ from narrative_events import (
     HONEY_PREPARATION_UNRESOLVED,
     HONEY_TASTED_EVENT,
     HONEY_TASTED_FOLLOW_UP_RESPONSE,
+    HONEY_TASTED_RESPONSE,
     RIBBON_COLOR_UNRESOLVED,
     STORY_WRAP_UP_EVENT,
     STORY_WRAP_UP_RESPONSE,
@@ -1183,6 +1184,56 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(output.performance_cue, "ending")
         self.assertIsNone(session.close())
         self.assertEqual(publisher.publish.call_count, 2)
+
+    def test_story_clock_starts_after_the_opening_is_spoken(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        controller.begin(27.0)
+
+        now[0] = 30.0
+        self.assertIsNone(controller.pop_due_event())
+        self.assertEqual(controller.seconds_until_due(), 27.0)
+        now[0] = 57.0
+        self.assertEqual(controller.pop_due_event().event_id, "honey_gift_committed")
+
+    def test_eating_waits_for_the_tasting_line_to_finish(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0],
+            speech_seconds=lambda text: 13.0 if text == HONEY_TASTED_RESPONSE else 0.0,
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+        now[0] = 30.0
+        self.assertEqual(controller.pop_due_event().event_id, "pooh_tastes_honey")
+
+        now[0] = 40.0
+        self.assertIsNone(controller.pop_due_event())
+        now[0] = 53.0
+        self.assertEqual(controller.pop_due_event().event_id, "pooh_ate_honey")
+
+    def test_quiet_time_counts_from_the_end_of_pooh_speech(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+        now[0] = 25.0
+        controller.observe_activity(8.0)
+
+        now[0] = 40.0
+        self.assertIsNone(controller.pop_due_event())
+        now[0] = 45.0
+        self.assertEqual(controller.pop_due_event().event_id, "pooh_tastes_honey")
+
+    def test_speech_estimate_matches_measured_fixed_utterance_rate(self):
+        # The eeyore opening WAV is 26.9 s long.
+        self.assertAlmostEqual(
+            pooh.estimate_speech_seconds(pooh.get_scenario("eeyore_birthday").opening_line),
+            26.9,
+            delta=3.0,
+        )
 
     def test_participant_input_does_not_reset_eating_timer(self):
         now = [0.0]
