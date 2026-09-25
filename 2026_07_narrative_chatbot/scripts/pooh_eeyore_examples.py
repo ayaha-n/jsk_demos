@@ -744,6 +744,37 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
     ),
 
+    # 物語の途中でも、参加者が立ち去る・別れる意思を示したらexitで見送る。
+    *example_variants(
+        current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
+            update={
+                "props": ["テーブル", "カップ", "皿", "空になった蜂蜜壺", "いろいろな色の風船", "リボン"],
+                "events": [
+                    *EEYORE_BIRTHDAY_SITUATION.events,
+                    HONEY_GIFT_COMMITTED_EVENT,
+                    "プーがイーヨーへの贈り物にする蜂蜜を全部食べてしまった",
+                    "蜂蜜壺が空になった",
+                ],
+                "unresolved": [EMPTY_JAR_UNRESOLVED],
+                "decided": ["贈り物にする風船の色：青"],
+            },
+            deep=True,
+        ),
+        user_action=["わたしそろそろいかなきゃ", "もう帰らなきゃ", "じゃあ、またね"],
+        history=(
+            "Turn 7\n参加者の生入力: いいとおもう\n応答モード: narrative\n"
+            "参考場面ID: 6\n物語アクション: []\n"
+            "プーの応答: うん、それなら青い風船にしよう！きっとイーヨーは喜んでくれるね。"
+        ),
+        previous_bot_response="うん、それなら青い風船にしよう！きっとイーヨーは喜んでくれるね。",
+        interaction_mode="exit",
+        current_scene="none",
+        situation_update=SituationUpdate(
+            add_events=["参加者が帰ることにし、プーが見送った"],
+        ),
+        bot_response="そっか、もう行くんだね。いっしょに考えてくれて、ありがとう。またね。",
+    ),
+
     # --- 締めのあと：「ほかにも、なにかぼくとおはなししたいこと、ある？」への答え ---
     # 続けたい参加者とは会話を続け、終えたい参加者はexitで見送る。
     # 空の壺の決着は、そのまま贈る場合と別の贈り物に替える場合の両方がある。
