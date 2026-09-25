@@ -10,6 +10,7 @@ from narrative_state import NarrativeSituation, SituationUpdate, apply_situation
 
 
 NarrativeAction = Literal[
+    "propose_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
@@ -18,6 +19,7 @@ NarrativeAction = Literal[
 ]
 
 KNOWN_NARRATIVE_ACTIONS = {
+    "propose_honey_jar_gift",
     "commit_honey_jar_gift",
     "block_pooh_honey_access",
     "resolve_empty_jar_gift",
@@ -42,6 +44,14 @@ HONEY_GIFT_COMMITTED_RESPONSE = (
 )
 HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE = (
     "あ、そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。きっと喜ぶね。"
+)
+# Once the honey jar has already been proposed, a sudden "そうだ！" would sound
+# like a new idea, so the decision is voiced as settling on that proposal.
+HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE = (
+    "やっぱり、ハチミツの壺にしよう。イーヨー、きっと喜ぶね。"
+)
+HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE = (
+    f"あ、そうそう。{HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE}"
 )
 HONEY_TASTED_EVENT = "プーがハチミツを一口だけのつもりで持ち出した"
 HONEY_TASTED_DESCRIPTION = (
@@ -96,6 +106,7 @@ class RequiredNarrativeEvent:
 @dataclass
 class HoneyGiftState:
     gift_status: str = "undecided"
+    honey_gift_proposed: bool = False
     honey_status: str = "full"
     access_restriction: str = "none"
     completed_event_ids: set[str] = field(default_factory=set)
@@ -202,7 +213,11 @@ class HoneyGiftEventController:
         for action in actions:
             if action not in KNOWN_NARRATIVE_ACTIONS:
                 continue
-            if action == "commit_honey_jar_gift":
+            if action == "propose_honey_jar_gift":
+                # A proposal is not a decision; it only changes how Pooh later
+                # voices his own decision.
+                self.state.honey_gift_proposed = True
+            elif action == "commit_honey_jar_gift":
                 self._commit_gift()
             elif action == "block_pooh_honey_access":
                 self.state.access_restriction = "blocked"
@@ -254,18 +269,24 @@ class HoneyGiftEventController:
     def _fire_honey_gift_commitment(state: HoneyGiftState) -> WorldEvent:
         state.gift_status = "committed"
         state.completed_event_ids.add("honey_gift_committed")
+        if state.honey_gift_proposed:
+            response = HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE
+            follow_up_response = HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE
+        else:
+            response = HONEY_GIFT_COMMITTED_RESPONSE
+            follow_up_response = HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE
         return WorldEvent(
             event_id="honey_gift_committed",
             description=HONEY_GIFT_COMMITTED_DESCRIPTION,
             scene_id="1c",
-            fallback_response=HONEY_GIFT_COMMITTED_RESPONSE,
+            fallback_response=response,
             situation_update=SituationUpdate(
                 add_events=[HONEY_GIFT_COMMITTED_EVENT],
                 remove_unresolved=["イーヨーに何をあげるか"],
                 add_unresolved=[HONEY_PREPARATION_UNRESOLVED],
             ),
             fixed_response=True,
-            follow_up_response=HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE,
+            follow_up_response=follow_up_response,
         )
 
     @staticmethod

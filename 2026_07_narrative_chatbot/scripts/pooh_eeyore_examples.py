@@ -82,6 +82,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         history=f"会話の冒頭\nプーの応答: {_TURN1_BOT_RESPONSE}",
         interaction_mode="narrative",
         current_scene="1a",
+        narrative_actions=["propose_honey_jar_gift"],
         situation_update=SituationUpdate(
             add_events=["プーが蜂蜜の入った壺を贈り物の候補として提案した"],
         ),

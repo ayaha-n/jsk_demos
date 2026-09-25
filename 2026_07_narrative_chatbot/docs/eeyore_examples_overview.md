@@ -66,4 +66,4 @@ trainsetとは別に、`fixed_response=True`のauto-fireイベント用に2件�
 | イベント | 内容 | bot_response |
 |---|---|---|
 | `pooh_ate_honey` | 蜂蜜を全部食べてしまった直後 | `HONEY_EATEN_RESPONSE`(いやんなっちゃう！味見してたら…) |
-| `honey_gift_committed` | 時間経過でハチミツの贈り物を自発的に決めた直後 | `HONEY_GIFT_COMMITTED_RESPONSE`(そうだ！ぼくは…) |
+| `honey_gift_committed` | 時間経過でハチミツの贈り物を自発的に決めた直後 | `HONEY_GIFT_COMMITTED_RESPONSE`(そうだ！ぼくは…)。提案済み(`propose_honey_jar_gift`)なら実行時は `HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE`(やっぱり…) |

@@ -191,6 +191,8 @@ class GeneratePoohResponse(dspy.Signature):
     narrative_actions: list[NarrativeAction] = dspy.OutputField(
         desc=(
             "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
+            "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
+            "プーまたは参加者が提案したが、まだ決まっていない場合)、"
             "commit_honey_jar_gift、block_pooh_honey_access、"
             "resolve_empty_jar_gift(空になった壺を"
             "どう贈るか、具体的な内容によらず決着した場合)、"
@@ -300,6 +302,11 @@ def count_prior_technical_mentions(history: str, technical_terms: list[str]) -> 
     )
 
 
+HONEY_PROPOSAL_FALLBACK_RESPONSE = (
+    "ぼくは、ハチミツの入った壺を贈るのがいいと思うな。甘いものがあると、イーヨーもきっと喜ぶもの。"
+)
+
+
 def enforce_response_invariants(
     user_action: str,
     history: str,
@@ -319,7 +326,7 @@ def enforce_response_invariants(
     # sympathizing that the honey is gone), and re-injecting this text would
     # contradict what has already happened in the story.
     if gift_status == "undecided" and hesitation and asks_back:
-        return "ぼくは、ハチミツの入った壺を贈るのがいいと思うな。甘いものがあると、イーヨーもきっと喜ぶもの。"
+        return HONEY_PROPOSAL_FALLBACK_RESPONSE
 
     # Do not let the model introduce a prop the participant has not mentioned.
     if user_action.strip() == "いいね" and "風船" not in history and "風船" in bot_response:
@@ -1151,6 +1158,12 @@ class NarrativeSession:
             ),
         )
         actions = list(getattr(result, "narrative_actions", []))
+        if (
+            result.bot_response == HONEY_PROPOSAL_FALLBACK_RESPONSE
+            and "propose_honey_jar_gift" not in actions
+        ):
+            # The runtime guard itself voiced the proposal; record it as such.
+            actions.append("propose_honey_jar_gift")
         if self.controller is not None:
             self.controller.observe_actions(actions)
             result.updated_situation = self.controller.synchronize_situation(

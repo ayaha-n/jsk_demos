@@ -70,6 +70,9 @@ DSPy の再コンパイルを不要にする。どちらも実験条件に応じ
 自然言語の場面説明に加え、安定した ID を持つシナリオ固有の状態を管理する。
 
 - `gift_status`: `undecided / committed`
+- `honey_gift_proposed`: 蜂蜜壺が贈り物として提案済みか（`propose_honey_jar_gift`）。
+  決定ではなく、プーが自分で決めるときの言い方（提案前「そうだ！…」／
+  提案後「やっぱり…」）の選択だけに使う
 - `honey_status`: `full / empty`
 - `access_restriction`: `none / blocked`
 - イベントIDごとの期限: 内部スケジューラがイベント定義ごとに保持する

@@ -77,6 +77,8 @@ from narrative_events import (
     EMPTY_JAR_UNRESOLVED,
     GIFT_DECISION_UNRESOLVED,
     HONEY_EATEN_RESPONSE,
+    HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE,
+    HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE,
     HONEY_GIFT_COMMITTED_EVENT,
     HONEY_GIFT_COMMITTED_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
@@ -1041,6 +1043,48 @@ class RegressionTests(unittest.TestCase):
             if event is not None:
                 seen.append((now[0], event.event_id))
         self.assertEqual(seen, [(30.0, "honey_gift_committed")])
+
+    def test_gift_decision_line_depends_on_prior_proposal(self):
+        now = [0.0]
+        unproposed = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        proposed = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        proposed.observe_actions(["propose_honey_jar_gift"])
+        # A proposal alone is not a decision and does not start the honey beat.
+        self.assertEqual(proposed.state.gift_status, "undecided")
+        self.assertNotIn("pooh_tastes_honey", proposed._deadlines)
+
+        now[0] = 30.0
+        self.assertEqual(unproposed.pop_due_event().fallback_response,
+                         HONEY_GIFT_COMMITTED_RESPONSE)
+        event = proposed.pop_due_event()
+        self.assertEqual(event.event_id, "honey_gift_committed")
+        self.assertEqual(event.fallback_response, HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_RESPONSE)
+        self.assertEqual(
+            event.follow_up_response,
+            HONEY_GIFT_COMMITTED_AFTER_PROPOSAL_FOLLOW_UP_RESPONSE,
+        )
+
+    def test_runtime_honey_proposal_fallback_is_recorded_as_proposal(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="narrative",
+            current_scene="1a",
+            narrative_actions=[],
+            bot_response="きみはどう思う？",
+            updated_situation=scenario.initial_situation,
+        ))
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, event_controller=controller,
+        )
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("うーん、わからないな")
+
+        self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
+        self.assertIn("propose_honey_jar_gift", output.narrative_actions)
+        self.assertTrue(controller.state.honey_gift_proposed)
+        self.assertEqual(controller.state.gift_status, "undecided")
 
     def test_participant_input_does_not_reset_eating_timer(self):
         now = [0.0]
