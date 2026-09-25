@@ -603,6 +603,23 @@ class RegressionTests(unittest.TestCase):
         )
         self.assertEqual(metric(gold, pred), 0.0)
 
+    def test_unneeded_question_to_the_participant_is_a_hard_gate(self):
+        def unexpected(**kwargs):
+            self.fail("semantic evaluator called after an unneeded question")
+        metric = pooh.make_metric(unexpected, unexpected, object())
+        gold = SimpleNamespace(
+            current_situation=pooh.INITIAL_SITUATION, user_action="風船は？", history="",
+            interaction_mode="narrative", selected_mishearing="none",
+            updated_situation=pooh.INITIAL_SITUATION, bot_response="風船、いいね！",
+            narrative_actions=[], settled_details=[], awaiting_reply=False,
+        )
+        pred = SimpleNamespace(
+            interaction_mode="narrative", selected_mishearing="none",
+            updated_situation=pooh.INITIAL_SITUATION, bot_response="風船？何色がいい？",
+            narrative_actions=[], settled_details=[], awaiting_reply=True,
+        )
+        self.assertEqual(metric(gold, pred), 0.0)
+
     def test_response_invariants_prevent_repeated_question_on_hesitation(self):
         response = pooh.enforce_response_invariants(
             user_action="うーん，どうしよう",

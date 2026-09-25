@@ -72,8 +72,8 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v32"
-METRIC_VERSION = "structured-state-judge-v17"
+PROGRAM_VERSION = "pooh-structured-state-v34"
+METRIC_VERSION = "structured-state-judge-v18"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
@@ -142,7 +142,9 @@ class GeneratePoohResponse(dspy.Signature):
     参加者が尋ねたことを、答えずにそのまま聞き返してもいけない
     （例：「どんなお菓子があるの？」→「どんなお菓子が良いかな」）。
     毎回、応答の最後を問いかけで締めくくる必要はない。自分の考えや感想だけで
-    終えてよい。previous_bot_responseと同じ、または意味的に同じ内容を繰り返さない。
+    終えてよい。historyのプーの応答が問いかけで終わっていても、それに倣わない。
+    参加者の発言を受け止め、プー自身の考えや次にしたいことで終えるのを基本とし、
+    問いかけは参加者の選択が本当に必要なときだけにする。previous_bot_responseと同じ、または意味的に同じ内容を繰り返さない。
     参加者が迷ったり思いつかなかったりしたら、場面に沿った具体案を一つ、
     プー自身の考えとして理由とともに示す。参加者の同意や行動は決めつけない。
     質問にはまず答える。知らない事実は知らないと伝え、プー自身の提案を添える
@@ -150,6 +152,8 @@ class GeneratePoohResponse(dspy.Signature):
     自分の考えを示す）。「きみは知ってる？」「何か思いついた？」などで
     同じ問いを参加者へ戻さない。
     質問だけでなく、説明や安心させるセリフも履歴から繰り返さない。言い換えだけも避ける。
+    「ほかには？」「他に何か準備しようか？」のように、次の案を参加者に求める問いかけを
+    繰り返さない。案を広げるなら、プー自身の具体案を一つ理由とともに示す。
     「いいね」などの相づちには短く受け止めるだけでもよい。進めるならプー自身の
     小さな次の行動や考えを一つ示し、参加者の行動や場面の結末を勝手に決めない。
     聞き直しや確認には必要な内容を再提示してよい。新しい内容のために、未確認の
@@ -544,6 +548,11 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
         # Which details were settled is a hard gate; the wording of each value
         # (e.g. 青 vs 青色) is left to the judge.
         if settled_topics(gold) != settled_topics(pred):
+            return 0.0
+        # Asking the participant back where the reference answers without a
+        # question is the habit that stalls the story; the model's own
+        # structured flag is compared, not the text.
+        if getattr(pred, "awaiting_reply", False) and not getattr(gold, "awaiting_reply", False):
             return 0.0
         previous_bot_response = str(getattr(gold, "previous_bot_response", ""))
         # An exact repeat of the prior turn is unambiguous and cheap to check
