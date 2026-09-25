@@ -1359,10 +1359,16 @@ class NarrativeSession:
                 else "undecided"
             ),
         )
+        # The model's decisions and state delta describe the line it wrote;
+        # once the runtime guard replaced that line, they no longer apply.
+        response_replaced = result.bot_response != generated_response
+        if response_replaced:
+            result.narrative_actions = []
+            result.settled_details = []
+            result.updated_situation = self.current_situation
         # A runtime replacement is a statement, not a question to the participant.
         self.awaiting_reply = (
-            bool(getattr(result, "awaiting_reply", False))
-            and result.bot_response == generated_response
+            bool(getattr(result, "awaiting_reply", False)) and not response_replaced
         )
         if self.controller is not None:
             # Quiet time and newly armed events count from when Pooh finishes
@@ -1414,6 +1420,7 @@ class NarrativeSession:
                 "scenario": self.scenario.key,
                 "session_id": self.session_id,
                 "latency_ms": round(latency_ms, 1),
+                "response_replaced": response_replaced,
                 "question_kind": str(getattr(result, "question_kind", "none")),
             },
         )

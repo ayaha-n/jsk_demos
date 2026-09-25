@@ -416,6 +416,31 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(event.world_event_id, "honey_gift_committed")
 
+    def test_runtime_replacement_drops_decisions_made_for_the_original_line(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        changed = scenario.initial_situation.model_copy(update={"purpose": "別の目的"})
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="narrative", current_scene="1a",
+            narrative_actions=["commit_honey_jar_gift"],
+            settled_details=[SettledDetail(topic="飲み物", value="お茶")],
+            bot_response="お茶にしようか。きみはどう思う？", awaiting_reply=True,
+            updated_situation=changed,
+        ))
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, event_controller=controller,
+        )
+        session.start()
+        with patch.object(pooh, "append_log") as log:
+            output = session.submit("うーん、わからないな")
+
+        self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
+        self.assertEqual(output.narrative_actions, ["propose_honey_jar_gift"])
+        self.assertEqual(controller.state.gift_status, "undecided")
+        self.assertNotIn("飲み物", controller.state.settled_details)
+        self.assertEqual(output.updated_situation.purpose, scenario.initial_situation.purpose)
+        self.assertTrue(log.call_args.args[2]["response_replaced"])
+
     def test_runtime_replacement_is_not_awaiting_a_reply(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         agent = Mock(return_value=SimpleNamespace(
