@@ -58,6 +58,7 @@ sys.modules.setdefault("dspy", fake)
 sys.modules.setdefault("dspy.teleprompt", teleprompt)
 
 import pooh_narrative_dspy as pooh
+import pooh_examples
 from mishearing_cases import (
     MISHEARING_CASES,
     UNCERTAIN_RESPONSE_TEMPLATES,
@@ -560,7 +561,7 @@ class RegressionTests(unittest.TestCase):
                 return SimpleNamespace(
                     narrative_actions=["not_give_empty_jar"],
                     settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="青い風船")],
-                    awaiting_reply=False,
+                    question_kind="deepen",
                 )
             return predictor
 
@@ -573,14 +574,15 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(calls["InterpretTurn"]["bot_response"], "青にしよう！")
         self.assertEqual(result.narrative_actions, ["not_give_empty_jar"])
         self.assertEqual(result.settled_details[0].value, "青い風船")
-        self.assertFalse(result.awaiting_reply)
+        self.assertEqual(result.question_kind, "deepen")
+        self.assertTrue(result.awaiting_reply)
 
     def test_interpret_examples_take_the_gold_line_as_input(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         self.assertEqual(len(scenario.interpret_examples), len(scenario.trainset))
         example = scenario.interpret_examples[0]
         self.assertIn("bot_response", example.inputs)
-        self.assertTrue(hasattr(example, "awaiting_reply"))
+        self.assertEqual(example.question_kind, "none")
         self.assertFalse(hasattr(scenario.response_examples[0], "narrative_actions"))
 
     def test_examples_cover_all_interaction_modes(self):
@@ -646,22 +648,50 @@ class RegressionTests(unittest.TestCase):
         )
         self.assertEqual(metric(gold, pred), 0.0)
 
-    def test_unneeded_question_to_the_participant_is_a_hard_gate(self):
-        def unexpected(**kwargs):
-            self.fail("semantic evaluator called after an unneeded question")
-        metric = pooh.make_metric(unexpected, unexpected, object())
+    def test_asking_for_new_ideas_is_a_hard_gate_but_deepening_is_judged(self):
+        judged = []
+
+        def judge(**kwargs):
+            judged.append(kwargs)
+            return SimpleNamespace(**{
+                name: 5 for name in (
+                    "mode_accuracy", "response_fit", "narrative_coherence",
+                    "participant_agency", "pooh_agency", "conversational_progress",
+                    "state_quality",
+                )
+            })
+        metric = pooh.make_metric(judge, judge, object())
         gold = SimpleNamespace(
             current_situation=pooh.INITIAL_SITUATION, user_action="風船は？", history="",
             interaction_mode="narrative", selected_mishearing="none",
             updated_situation=pooh.INITIAL_SITUATION, bot_response="風船、いいね！",
-            narrative_actions=[], settled_details=[], awaiting_reply=False,
+            narrative_actions=[], settled_details=[], question_kind="none",
         )
-        pred = SimpleNamespace(
-            interaction_mode="narrative", selected_mishearing="none",
-            updated_situation=pooh.INITIAL_SITUATION, bot_response="風船？何色がいい？",
-            narrative_actions=[], settled_details=[], awaiting_reply=True,
+
+        def pred(kind):
+            return SimpleNamespace(
+                interaction_mode="narrative", selected_mishearing="none",
+                updated_situation=pooh.INITIAL_SITUATION, bot_response="風船、いいね！",
+                narrative_actions=[], settled_details=[], question_kind=kind,
+            )
+        self.assertEqual(metric(gold, pred("new_idea")), 0.0)
+        self.assertEqual(metric(gold, pred("delegate")), 0.0)
+        self.assertEqual(judged, [])
+        metric(gold, pred("deepen"))
+        self.assertTrue(judged)
+
+    def test_example_ending_in_a_question_must_name_its_kind(self):
+        with self.assertRaises(ValueError):
+            pooh_examples.example(
+                current_situation=pooh.INITIAL_SITUATION, user_action="風船は？",
+                history="", interaction_mode="narrative", bot_response="何色にする？",
+            )
+        labeled = pooh_examples.example(
+            current_situation=pooh.INITIAL_SITUATION, user_action="風船は？",
+            history="", interaction_mode="narrative", bot_response="何色にする？",
+            question_kind="deepen",
         )
-        self.assertEqual(metric(gold, pred), 0.0)
+        self.assertEqual(labeled.question_kind, "deepen")
 
     def test_response_invariants_prevent_repeated_question_on_hesitation(self):
         response = pooh.enforce_response_invariants(

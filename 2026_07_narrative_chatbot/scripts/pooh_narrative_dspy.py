@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -72,8 +72,8 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v35"
-METRIC_VERSION = "structured-state-judge-v18"
+PROGRAM_VERSION = "pooh-structured-state-v36"
+METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 LOG_DIR = Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
@@ -136,25 +136,20 @@ class PlanMishearing(dspy.Signature):
 class GeneratePoohResponse(dspy.Signature):
     """分類結果と候補を参考に、プーとして短く自然に応答する。
 
-    プー自身の好み・考え・次にしたいことは、プー自身が決める。参加者自身の考えや行動を
-    尋ねるのは良い（例:「きみは何をあげる？」）が、
-    プー自身が決めるべきことについて参加者に委ねてはいけない（例:「きみはどう思う？」）。
-    参加者が尋ねたことを、答えずにそのまま聞き返してもいけない
-    （例：「どんなお菓子があるの？」→「どんなお菓子が良いかな」）。
-    毎回、応答の最後を問いかけで締めくくる必要はない。自分の考えや感想だけで
-    終えてよい。historyのプーの応答が問いかけで終わっていても、それに倣わない。
-    参加者の発言を受け止め、プー自身の考えや次にしたいことで終えるのを基本とし、
-    問いかけは参加者の選択が本当に必要なときだけにする。previous_bot_responseと同じ、または意味的に同じ内容を繰り返さない。
+    プー自身の好み・考え・次にしたいことは、プー自身が決める。
+    問いかけ: 参加者の質問にはまず答える。知らない事実は知らないと伝え、プー自身の
+    考えを添える（例: 好きな色を知らなくても「青が好きそうだと思うよ」）。応答は
+    問いかけで終える必要はなく、プー自身の考えや次にしたいことで終えるのを基本とする。
+    historyのプーの問いかけに倣わない。問いかけてよいのは、すでに出た案を深めるとき
+    （例: 風船が出たら「何色にする？」）、参加者自身の考えや行動を尋ねるとき
+    （例:「きみは何をあげる？」）、聞き違いを確かめるときだけ。新しい案を参加者に
+    求める問いかけ（例:「ほかには？」）や、プーが決めるべきことを委ねたり、尋ねられた
+    ことを答えずに返したりする問いかけ（例:「きみはどう思う？」「きみは知ってる？」）は
+    しない。案を広げるなら、プー自身の具体案を一つ理由とともに示す。
     参加者が迷ったり思いつかなかったりしたら、場面に沿った具体案を一つ、
     プー自身の考えとして理由とともに示す。参加者の同意や行動は決めつけない。
-    質問にはまず答える。知らない事実は知らないと伝え、プー自身の提案を添える
-    （例：相手の好みの色を知らなくても、「青が好きそうだと思うよ」のように
-    自分の考えを示す）。「きみは知ってる？」「何か思いついた？」などで
-    同じ問いを参加者へ戻さない。
-    質問だけでなく、説明や安心させるセリフも履歴から繰り返さない。言い換えだけも避ける。
-    すでに出た案を深める問いかけ（例: 風船が出たら「何色にする？」）はよいが、
-    「ほかには？」「他に何か準備しようか？」のように、新しい案を参加者に求める
-    問いかけを繰り返さない。案を広げるなら、プー自身の具体案を一つ理由とともに示す。
+    previous_bot_responseや履歴と同じ・意味的に同じ内容（質問、説明、安心させる
+    セリフ）を繰り返さない。言い換えだけも避ける。
     current_situationの【未解決・未確定】は、プーが物語を進めるために気にかけている
     目標である。参加者が出した案にプーも賛成なら、「じゃあ、〇〇にしよう」のように
     決まったことをはっきり言葉にする。話がそれて一段落したら、未解決の項目に戻るよう
@@ -211,12 +206,16 @@ class GeneratePoohResponse(dspy.Signature):
             "物語世界外の技術語全体を直接出さず、技術語を直接説明せず、"
             "利用可能な聞き違い候補があれば、その音を使って不理解を示す。"
             "理解したような肯定、説明、自己同定をしない。"
-            "プー自身の好み・考え・次にしたいことを参加者に決めさせない。"
-            "参加者の質問を答えずにそのまま聞き返さない。"
-            "毎回問いかけで終える必要はない。previous_bot_responseと同じ・"
-            "意味的に同じ内容を繰り返さない。"
+            "問いかけの方針は上の説明に従う。"
         )
     )
+
+
+QuestionKind = Literal[
+    "none", "deepen", "participant_own", "clarify", "new_idea", "delegate",
+]
+# Questions that stall the story instead of moving it; see GeneratePoohResponse.
+DISALLOWED_QUESTION_KINDS = {"new_idea", "delegate"}
 
 
 class InterpretTurn(dspy.Signature):
@@ -257,10 +256,16 @@ class InterpretTurn(dspy.Signature):
             "該当しなければ空リスト。"
         )
     )
-    awaiting_reply: bool = dspy.OutputField(
+    question_kind: QuestionKind = dspy.OutputField(
         desc=(
-            "bot_responseが参加者への問いかけで終わり、その答えを待っているならtrue。"
-            "自分の考えや感想で終えた場合、独り言の問いかけの場合はfalse。"
+            "bot_responseの最後が参加者への問いかけかどうかと、その種類。"
+            "none: 問いかけで終わらない(独り言の問いかけを含む)。"
+            "deepen: すでに出た案を深める(例: 何色にする？)。"
+            "participant_own: 参加者自身の考えや行動を尋ねる(例: きみは何をあげる？)。"
+            "clarify: 聞き違いや聞き直しを確かめる。"
+            "new_idea: 新しい案を参加者に求める(例: ほかには？)。"
+            "delegate: プーが決めるべきことを委ねる、尋ねられたことを答えずに返す"
+            "(例: きみはどう思う？)。"
         )
     )
 
@@ -497,6 +502,7 @@ class PoohNarrativeAgent(dspy.Module):
             bot_response=bot_response,
         )
         narrative_actions = [str(action) for action in interpretation.narrative_actions]
+        question_kind = str(interpretation.question_kind)
         settled_details = [
             SettledDetail.model_validate(detail) for detail in interpretation.settled_details
         ]
@@ -509,7 +515,8 @@ class PoohNarrativeAgent(dspy.Module):
             narrative_actions=narrative_actions,
             settled_details=settled_details,
             bot_response=bot_response,
-            awaiting_reply=bool(interpretation.awaiting_reply),
+            question_kind=question_kind,
+            awaiting_reply=question_kind != "none",
         )
 
 
@@ -539,7 +546,7 @@ def serialize_prediction(value: Any) -> str:
         "narrative_actions",
         "settled_details",
         "bot_response",
-        "awaiting_reply",
+        "question_kind",
     )
     payload = {}
     for field in fields:
@@ -580,10 +587,9 @@ def make_metric(judge: Any, meta_evaluator: Any, judge_lm: Any):
         # (e.g. 青 vs 青色) is left to the judge.
         if settled_topics(gold) != settled_topics(pred):
             return 0.0
-        # Asking the participant back where the reference answers without a
-        # question is the habit that stalls the story; the model's own
-        # structured flag is compared, not the text.
-        if getattr(pred, "awaiting_reply", False) and not getattr(gold, "awaiting_reply", False):
+        # Asking for new ideas or handing Pooh's own decision back stalls the
+        # story; the interpretation stage's structured label is used, not text.
+        if str(getattr(pred, "question_kind", "none")) in DISALLOWED_QUESTION_KINDS:
             return 0.0
         previous_bot_response = str(getattr(gold, "previous_bot_response", ""))
         # An exact repeat of the prior turn is unambiguous and cheap to check
@@ -1408,6 +1414,7 @@ class NarrativeSession:
                 "scenario": self.scenario.key,
                 "session_id": self.session_id,
                 "latency_ms": round(latency_ms, 1),
+                "question_kind": str(getattr(result, "question_kind", "none")),
             },
         )
         if is_exit:

@@ -61,7 +61,7 @@ _TURN2_BOT_RESPONSE = "ぼくね、このハチミツの入っているつぼ、
 
 _TURN3_BOT_RESPONSE = (
     "そりゃ、とっても良い思いつきだよ。イーヨーを元気づけるのには、もってこいだよ。"
-    "誰だって、風船もらって、不元気になる人なんていないもの。"
+    "誰だって、風船もらって、不元気になる人なんていないもの。何色の風船にする？"
 )
 
 # 「一口だけのつもりで持ち出す」伏線は narrative_events.HONEY_TASTED_RESPONSE の
@@ -216,6 +216,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             add_unresolved=["参加者が何をあげるか"],
         ),
         bot_response=_TURN2_BOT_RESPONSE,
+        question_kind="participant_own",
     ),
     # 場面1a(代替)：ハチミツの話が出る前に、参加者の提案(風船)だけで贈り物が決まった場合
     # （場面の順序は可変。この場合もプー自身の意見を求められたら聞き返さず自分の考えで答える。
@@ -278,6 +279,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             add_unresolved=[HONEY_PREPARATION_UNRESOLVED],
         ),
         bot_response=_TURN3_BOT_RESPONSE,
+        question_kind="deepen",
     ),
 
     # --- 場面2：贈り物決定後〜実食までの準備待ち -----------------------------

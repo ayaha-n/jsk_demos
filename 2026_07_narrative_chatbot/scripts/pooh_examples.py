@@ -36,11 +36,12 @@ def example(*, situation_update: SituationUpdate | None = None, **values: Any) -
     values.setdefault("previous_bot_response", "")
     values.setdefault("narrative_actions", [])
     values.setdefault("settled_details", [])
-    # Dataset labeling only: an example line ending in a question to the
-    # participant awaits a reply.  Runtime never parses text for this.
-    values.setdefault(
-        "awaiting_reply", str(values.get("bot_response", "")).rstrip().endswith(("？", "?"))
-    )
+    # Dataset authoring check only (runtime never parses text): a line that
+    # ends in a question must say which kind of question it is.
+    ends_with_question = str(values.get("bot_response", "")).rstrip().endswith(("？", "?"))
+    if ends_with_question and "question_kind" not in values:
+        raise ValueError(f"question_kind is required for: {values.get('bot_response')!r}")
+    values.setdefault("question_kind", "none")
     update = situation_update or SituationUpdate()
     values["situation_update"] = update
     values["updated_situation"] = apply_situation_update(
@@ -126,6 +127,7 @@ TRAINSET = [
             add_unresolved=["参加者が尋ねたプーの存在についての質問"],
         ),
         bot_response="ロバ？ イーヨーのこと？",
+        question_kind="clarify",
     ),
     example(
         current_situation=INITIAL_SITUATION,
@@ -337,7 +339,7 @@ def build_interpret_examples(trainset: list[dspy.Example]) -> list[dspy.Example]
             bot_response=item.bot_response,
             narrative_actions=item.narrative_actions,
             settled_details=item.settled_details,
-            awaiting_reply=item.awaiting_reply,
+            question_kind=item.question_kind,
         ).with_inputs("current_situation", "history", "user_action", "world_event", "bot_response")
         for item in trainset
     ]
