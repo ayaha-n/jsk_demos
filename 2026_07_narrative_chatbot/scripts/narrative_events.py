@@ -328,6 +328,10 @@ class HoneyGiftEventController:
         deadline = self._deadlines[event.event_id]
         if follow_up and not event.follow_up_allowed:
             return float("inf")
+        if follow_up:
+            # A follow-up is queued right behind the answer still being spoken,
+            # so the wait for that speech does not apply to it.
+            return deadline - max(0.0, self._speech_end - self.clock())
         if event.waits_for_quiet and not follow_up:
             quiet = self.quiet_seconds if event.quiet_seconds is None else event.quiet_seconds
             return max(deadline, self._last_activity + quiet)

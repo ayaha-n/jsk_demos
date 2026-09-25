@@ -1356,6 +1356,25 @@ class RegressionTests(unittest.TestCase):
             [{"topic": BALLOON_COLOR_UNRESOLVED, "value": "青"}],
         )
 
+    def test_wrap_up_follows_an_answer_that_is_still_being_spoken(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+        now[0] = 42.0
+        controller.pop_due_event()
+        now[0] = 52.0
+        controller.pop_due_event()
+        now[0] = 100.0
+        controller.observe_activity(10.0)  # the answer that settles the gift
+        controller.observe_settled_details(
+            [SettledDetail(topic=EMPTY_JAR_UNRESOLVED, value="風船を贈る")]
+        )
+
+        self.assertIsNone(controller.pop_due_event())
+        self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "story_wrap_up")
+
     def test_participant_input_does_not_reset_eating_timer(self):
         now = [0.0]
         controller = HoneyGiftEventController(
