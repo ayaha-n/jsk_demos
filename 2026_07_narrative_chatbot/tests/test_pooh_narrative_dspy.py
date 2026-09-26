@@ -314,7 +314,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(second.controller.state.gift_status, "undecided")
         self.assertIsNot(first.current_situation, second.current_situation)
 
-    def test_session_marks_generated_exit_response_as_the_ending_cue(self):
+    def test_session_ends_a_leaving_participant_with_the_fixed_ending_line(self):
         scenario = pooh.get_scenario("tea_party")
         agent = Mock(return_value=SimpleNamespace(
             interaction_mode="exit",
@@ -328,12 +328,16 @@ class RegressionTests(unittest.TestCase):
             agent, "model", "program", scenario, ros_publisher=publisher,
         )
         session.start()
-        with patch.object(pooh, "append_log"):
+        with patch.object(pooh, "append_log") as log:
             output = session.submit("もう終わりにしたい")
 
         self.assertTrue(session.ended)
         self.assertEqual(output.performance_cue, "ending")
-        self.assertEqual(output.bot_response, "うん、わかったよ。またね。")
+        self.assertEqual(output.bot_response, scenario.ending_line)
+        self.assertEqual(output.fixed_utterance_id, "tea_party.ending")
+        # The log records the line Pooh actually spoke.
+        self.assertEqual(log.call_args.args[1].bot_response, scenario.ending_line)
+        self.assertTrue(log.call_args.args[2]["response_replaced"])
         self.assertIsNone(session.close())
         self.assertEqual(publisher.publish.call_count, 2)
 

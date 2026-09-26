@@ -1382,6 +1382,10 @@ class NarrativeSession:
             # Pooh's own gift stays; a fixed line adds it beside the
             # participant's idea instead of a generated line dropping it.
             result.bot_response = HONEY_GIFT_KEPT_RESPONSE
+        if str(result.interaction_mode) == "exit":
+            # DSPy decides that the participant is leaving; the goodbye itself
+            # is the scenario's fixed ending line, as when the session closes.
+            result.bot_response = self.scenario.ending_line
         # The model's decisions and state delta describe the line it wrote;
         # once the runtime guard replaced that line, they no longer apply.
         response_replaced = result.bot_response != generated_response
