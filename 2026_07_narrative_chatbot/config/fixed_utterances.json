@@ -50,5 +50,13 @@
   "eeyore_birthday.honey_gift_kept": {
     "text": "そっか。でも、やっぱりぼくからは、ハチミツの壺もあげようかな。甘いものをたべると、しあわせな気持ちになるもの。",
     "wav": "eeyore_birthday.honey_gift_kept.wav"
+  },
+  "eeyore_birthday.no_promise": {
+    "text": "だいじょうぶ、だいじょうぶ。ちょっと味見するだけだもの。",
+    "wav": "eeyore_birthday.no_promise.wav"
+  },
+  "eeyore_birthday.no_promise.again": {
+    "text": "うーん……ハチミツって、とってもおいしいんだもの。",
+    "wav": "eeyore_birthday.no_promise.again.wav"
   }
 }

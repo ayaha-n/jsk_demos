@@ -57,8 +57,8 @@ def fixed_utterance_id(text: str) -> str | None:
 NarrativeAction = Literal[
     "propose_honey_jar_gift",
     "decline_honey_jar_gift",
+    "ask_pooh_not_to_eat_honey",
     "commit_honey_jar_gift",
-    "block_pooh_honey_access",
     "give_empty_jar",
     "not_give_empty_jar",
 ]
@@ -66,8 +66,8 @@ NarrativeAction = Literal[
 KNOWN_NARRATIVE_ACTIONS = {
     "propose_honey_jar_gift",
     "decline_honey_jar_gift",
+    "ask_pooh_not_to_eat_honey",
     "commit_honey_jar_gift",
-    "block_pooh_honey_access",
     "give_empty_jar",
     "not_give_empty_jar",
 }
@@ -100,6 +100,10 @@ HONEY_GIFT_COMMITTED_FOLLOW_UP_RESPONSE = fixed_utterance(
 # Pooh keeps his own gift when the participant declines it, adding it next
 # to their idea instead of dropping it.
 HONEY_GIFT_KEPT_RESPONSE = fixed_utterance("eeyore_birthday.honey_gift_kept")
+# The honey is always eaten, so Pooh must never promise not to eat it; asked
+# to, he sidesteps with a fixed line (research ethics: no broken promises).
+NO_PROMISE_RESPONSE = fixed_utterance("eeyore_birthday.no_promise")
+NO_PROMISE_AGAIN_RESPONSE = fixed_utterance("eeyore_birthday.no_promise.again")
 HONEY_TASTED_EVENT = "プーがハチミツを一口だけのつもりで持ち出した"
 HONEY_TASTED_DESCRIPTION = (
     "イーヨーへの贈り物にすると決めた蜂蜜を、プーが待っている間に一口だけの"
@@ -126,7 +130,6 @@ GIVE_EMPTY_JAR = "あげる"
 NOT_GIVE_EMPTY_JAR = "あげない"
 BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
 RIBBON_COLOR_UNRESOLVED = "リボンの色"
-BLOCKED_ACCESS_EVENT = "参加者が贈り物の蜂蜜を食べないよう明確に制止した"
 STORY_WRAP_UP_EVENT = "イーヨーへの贈り物が決まった"
 STORY_WRAP_UP_DESCRIPTION = (
     "蜂蜜がなくなった後で、空になった壺を贈るか、壺の代わりに贈るものが決まり、"
@@ -187,7 +190,8 @@ class RequiredNarrativeEvent:
 class HoneyGiftState:
     gift_status: str = "undecided"
     honey_status: str = "full"
-    access_restriction: str = "none"
+    # How often the participant asked Pooh to promise not to eat the honey.
+    promise_requests: int = 0
     completed_event_ids: set[str] = field(default_factory=set)
     # Settled gift details by topic (the unresolved label they answer).
     settled_details: dict[str, str] = field(default_factory=dict)
@@ -197,6 +201,14 @@ class HoneyGiftState:
     replacement_gift: str | None = None
     # Anything settled after the honey was eaten (a gift, a drink, a color...).
     decided_after_honey: bool = False
+
+    def sidestep_promise_request(self) -> str | None:
+        """Count a request and return Pooh's fixed sidestep, while the honey
+        is still there to be eaten; afterwards there is nothing to promise."""
+        if self.honey_status != "full":
+            return None
+        self.promise_requests += 1
+        return NO_PROMISE_RESPONSE if self.promise_requests == 1 else NO_PROMISE_AGAIN_RESPONSE
 
     def honey_jar_is_poohs_gift(self) -> bool:
         """Pooh has decided on the honey jar and still has the honey."""
@@ -286,7 +298,6 @@ class HoneyGiftEventController:
                 prerequisite=lambda state: (
                     state.gift_status == "committed"
                     and state.honey_status == "full"
-                    and state.access_restriction != "blocked"
                 ),
                 fire=HoneyGiftEventController._fire_honey_tasting,
             ),
@@ -299,7 +310,6 @@ class HoneyGiftEventController:
                 prerequisite=lambda state: (
                     state.gift_status == "committed"
                     and state.honey_status == "full"
-                    and state.access_restriction != "blocked"
                     and "pooh_tastes_honey" in state.completed_event_ids
                 ),
                 fire=HoneyGiftEventController._fire_honey_eating,
@@ -388,9 +398,6 @@ class HoneyGiftEventController:
                 # separate decision line has to follow.  A participant who
                 # declines gets Pooh adding it alongside their idea instead.
                 self._commit_gift()
-            elif action == "block_pooh_honey_access":
-                self.state.access_restriction = "blocked"
-                self._cancel_schedule()
             elif action in ("give_empty_jar", "not_give_empty_jar"):
                 # The jar question only exists once the honey is gone.
                 if self.state.honey_status == "empty":
@@ -428,10 +435,7 @@ class HoneyGiftEventController:
         state = self.state
         if state.gift_status == "committed":
             return
-        if (
-            state.honey_status != "full"
-            or state.access_restriction == "blocked"
-        ):
+        if state.honey_status != "full":
             return
         state.gift_status = "committed"
         state.completed_event_ids.add("honey_gift_committed")
@@ -521,10 +525,6 @@ class HoneyGiftEventController:
             fixed_response=True,
             ends_session=True,
         )
-
-    def _cancel_schedule(self) -> None:
-        state = self.state
-        self._deadlines.clear()
 
     def seconds_until_due(self) -> float | None:
         self._arm_required_events()
@@ -619,10 +619,5 @@ class HoneyGiftEventController:
             situation = apply_situation_update(
                 situation,
                 SituationUpdate(add_events=[STORY_WRAP_UP_EVENT]),
-            )
-        if self.state.access_restriction == "blocked":
-            situation = apply_situation_update(
-                situation,
-                SituationUpdate(add_events=[BLOCKED_ACCESS_EVENT]),
             )
         return situation

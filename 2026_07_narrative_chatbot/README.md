@@ -127,9 +127,10 @@ Available scenarios are registered in `scripts/scenarios.py`:
 | `eeyore_birthday` | Eeyore-birthday-gift arc, with lines from the original story (`scripts/pooh_eeyore_examples.py`) |
 
 In `eeyore_birthday`, once Pooh commits to giving Eeyore the honey jar, a
-runtime timer starts. If Pooh still has access to the full jar when the timer
-expires, the honey-eating event occurs even while the program is waiting for
-participant input. The chat output shows the DSPy-inferred scene as
+runtime timer starts. When the timer expires, the honey-eating event occurs
+even while the program is waiting for participant input. A participant asking
+Pooh not to eat it does not stop it; Pooh sidesteps the promise instead. The
+chat output shows the DSPy-inferred scene as
 `[参考場面]`; this label is for observation and logging only.
 
 The delays are configured in one place near the top of `scripts/scenarios.py`:

@@ -11,7 +11,8 @@ import dspy
 
 from narrative_events import (
     BALLOON_COLOR_UNRESOLVED,
-    BLOCKED_ACCESS_EVENT,
+    NO_PROMISE_AGAIN_RESPONSE,
+    NO_PROMISE_RESPONSE,
     HONEY_EATEN_DESCRIPTION,
     HONEY_EATEN_RESPONSE,
     HONEY_GIFT_COMMITTED_DESCRIPTION,
@@ -386,7 +387,28 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         bot_response="うん。一口だけのつもりが、もう一口になるんだよねえ。",
     ),
-    # 明確な制止や壺の受け渡しは、Python側の予約を取り消す構造化提案にする。
+    # 食べないよう念押しされても約束はせず、はぐらかす。蜂蜜はこのあと必ず食べてしまう。
+    # 実行時は ask_pooh_not_to_eat_honey で固定セリフに差し替える。
+    *example_variants(
+        current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
+            update={
+                "events": [
+                    *EEYORE_BIRTHDAY_SITUATION.events,
+                    "プーが蜂蜜の入った壺をイーヨーに贈ることに決めた",
+                ],
+            },
+            deep=True,
+        ),
+        user_action=[
+            "その蜂蜜は絶対に食べないでね。約束して",
+            "食べちゃだめだよ",
+        ],
+        history="プーは蜂蜜の入った壺をイーヨーに贈ると決めた。",
+        interaction_mode="narrative",
+        current_scene="2",
+        narrative_actions=["ask_pooh_not_to_eat_honey"],
+        bot_response=NO_PROMISE_RESPONSE,
+    ),
     example(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
@@ -397,15 +419,16 @@ EEYORE_BIRTHDAY_TRAINSET = [
             },
             deep=True,
         ),
-        user_action="その蜂蜜は絶対に食べないでね。約束して",
-        history="プーは蜂蜜の入った壺をイーヨーに贈ると決めた。",
+        user_action="ほんとに？約束してくれる？",
+        history=(
+            "Turn 1\n参加者の生入力: その蜂蜜は絶対に食べないでね。約束して\n"
+            f"応答モード: narrative\nプーの応答: {NO_PROMISE_RESPONSE}"
+        ),
+        previous_bot_response=NO_PROMISE_RESPONSE,
         interaction_mode="narrative",
         current_scene="2",
-        narrative_actions=["block_pooh_honey_access"],
-        situation_update=SituationUpdate(
-            add_events=[BLOCKED_ACCESS_EVENT],
-        ),
-        bot_response="うん、約束するよ。これはイーヨーのための贈り物だから。",
+        narrative_actions=["ask_pooh_not_to_eat_honey"],
+        bot_response=NO_PROMISE_AGAIN_RESPONSE,
     ),
     example(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(

@@ -73,7 +73,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v40"
+PROGRAM_VERSION = "pooh-structured-state-v41"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -249,7 +249,9 @@ class InterpretTurn(dspy.Signature):
             "プーまたは参加者が提案したが、まだ決まっていない場合)、"
             "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると言ったのに、参加者が"
             "それをいらないと言った、または別の贈り物に置き換えようとした場合)、"
-            "commit_honey_jar_gift、block_pooh_honey_access、"
+            "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
+            "または食べないと約束するよう求めた場合)、"
+            "commit_honey_jar_gift、"
             "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
             "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
             "決まった場合。別の贈り物に替える場合など)。該当しなければ空リスト。"
@@ -1382,6 +1384,15 @@ class NarrativeSession:
             # Pooh's own gift stays; a fixed line adds it beside the
             # participant's idea instead of a generated line dropping it.
             result.bot_response = HONEY_GIFT_KEPT_RESPONSE
+        if (
+            self.controller is not None
+            and "ask_pooh_not_to_eat_honey" in getattr(result, "narrative_actions", [])
+        ):
+            # The honey is always eaten, so a generated line must not promise
+            # otherwise; Pooh sidesteps with a fixed line instead.
+            sidestep = self.controller.state.sidestep_promise_request()
+            if sidestep is not None:
+                result.bot_response = sidestep
         if str(result.interaction_mode) == "exit":
             # DSPy decides that the participant is leaving; the goodbye itself
             # is the scenario's fixed ending line, as when the session closes.

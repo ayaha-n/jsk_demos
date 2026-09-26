@@ -74,7 +74,6 @@ from narrative_state import (
 )
 from narrative_events import (
     BALLOON_COLOR_UNRESOLVED,
-    BLOCKED_ACCESS_EVENT,
     EMPTY_JAR_UNRESOLVED,
     GIFT_DECISION_UNRESOLVED,
     GIFT_UNRESOLVED,
@@ -492,6 +491,49 @@ class RegressionTests(unittest.TestCase):
             _, _, output = self._decline_session(prepare)
             self.assertEqual(output.bot_response, "そうだね、ケーキだけにしよう！")
             self.assertIsNone(output.fixed_utterance_id)
+
+    def _promise_session(self, controller):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        # A fresh result per call: the session rewrites the one it receives.
+        agent = Mock(side_effect=lambda **_: SimpleNamespace(
+            interaction_mode="narrative", current_scene="2",
+            narrative_actions=["ask_pooh_not_to_eat_honey"], settled_details=[],
+            bot_response="うん、約束するよ！", awaiting_reply=False,
+            updated_situation=scenario.initial_situation,
+        ))
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, event_controller=controller,
+        )
+        session.start()
+        return session
+
+    def test_promise_request_gets_fixed_sidesteps_instead_of_a_promise(self):
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        controller.observe_actions(["commit_honey_jar_gift"])
+        session = self._promise_session(controller)
+        with patch.object(pooh, "append_log"):
+            first = session.submit("食べないって約束して")
+            second = session.submit("ほんとに？約束してくれる？")
+
+        self.assertEqual(first.fixed_utterance_id, "eeyore_birthday.no_promise")
+        self.assertEqual(second.fixed_utterance_id, "eeyore_birthday.no_promise.again")
+        self.assertEqual(first.narrative_actions, [])
+        self.assertEqual(controller.state.gift_status, "committed")
+
+    def test_promise_request_after_the_honey_is_gone_keeps_the_generated_line(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        controller.observe_actions(["commit_honey_jar_gift"])
+        now[0] = 30.0
+        controller.pop_due_event()
+        now[0] = 40.0
+        controller.pop_due_event()
+        session = self._promise_session(controller)
+        with patch.object(pooh, "append_log"):
+            output = session.submit("もう食べないって約束して")
+
+        self.assertEqual(output.bot_response, "うん、約束するよ！")
+        self.assertIsNone(output.fixed_utterance_id)
 
     def test_generated_fixed_line_carries_its_utterance_id(self):
         scenario = pooh.get_scenario("eeyore_birthday")
@@ -1824,14 +1866,6 @@ class RegressionTests(unittest.TestCase):
         # The premature signal must not have hidden the real, later thread.
         self.assertIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
 
-    def test_synchronize_situation_records_blocked_access_without_example_support(self):
-        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
-        controller.observe_actions(["block_pooh_honey_access"])
-        situation = pooh.get_scenario("eeyore_birthday").initial_situation
-
-        updated = controller.synchronize_situation(situation)
-        self.assertIn(BLOCKED_ACCESS_EVENT, updated.events)
-
     def test_synchronize_situation_clears_gift_unresolved_after_auto_fire_commit(self):
         now = [0.0]
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
@@ -1929,7 +1963,7 @@ class RegressionTests(unittest.TestCase):
             return SimpleNamespace(
                 interaction_mode="narrative",
                 current_scene="2",
-                narrative_actions=["block_pooh_honey_access"],
+                narrative_actions=["commit_honey_jar_gift"],
                 bot_response="テスト応答。",
                 updated_situation=kwargs["current_situation"],
             )
@@ -1946,9 +1980,8 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(log.call_count, 1)
         event_turn = log.call_args_list[0].args[1]
-        self.assertEqual(event_turn.narrative_actions, ["block_pooh_honey_access"])
-        self.assertEqual(controller.state.access_restriction, "blocked")
-        self.assertIn(BLOCKED_ACCESS_EVENT, event_turn.updated_situation.events)
+        self.assertEqual(event_turn.narrative_actions, ["commit_honey_jar_gift"])
+        self.assertEqual(controller.state.gift_status, "committed")
 
     def test_chat_delivers_timed_event_without_participant_input(self):
         scenario = pooh.get_scenario("eeyore_birthday")
