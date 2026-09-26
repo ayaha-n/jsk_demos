@@ -507,7 +507,7 @@ class HoneyGiftEventController:
         return WorldEvent(
             event_id="story_wrap_up",
             description=STORY_WRAP_UP_DESCRIPTION,
-            scene_id="5",
+            scene_id="6",
             fallback_response=STORY_WRAP_UP_RESPONSE,
             situation_update=SituationUpdate(add_events=[STORY_WRAP_UP_EVENT]),
             fixed_response=True,

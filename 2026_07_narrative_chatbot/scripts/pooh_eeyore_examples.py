@@ -69,7 +69,7 @@ _TURN3_BOT_RESPONSE = (
 # 「一口だけのつもりで持ち出す」伏線は narrative_events.HONEY_TASTED_RESPONSE の
 # 必須auto-fireイベントに一本化した。ここでの手書きexampleは重複防止のため削除済み。
 
-# 以下、current_scene の場面順(1a → 1b → 2 → 3 → 4a → 5 → 6)に並べている。
+# 以下は話題別の例。場面5は詳細相談、場面6は振り返りで、番号順の進行は必須ではない。
 # 1c(無入力でのプー自発決定)と3(食べてしまう瞬間そのもの)は
 # scripts/narrative_events.py の必須auto-fireイベントがそのまま対応するため、
 # ここに手書きexampleは無い(場面3の直後の会話は残っている)。
@@ -670,8 +670,8 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response="うん、それがいいね。壺のかわりに、風船を贈ろう！きっとイーヨーも喜んでくれるよ。",
     ),
 
-    # --- 場面5：決めた贈り物を振り返る --------------------------------------
-    # 場面5：プー自身の意見を求められても、聞き返さず自分の考えとして答える
+    # --- 場面6：決めた贈り物を振り返る --------------------------------------
+    # 場面6：プー自身の意見を求められても、聞き返さず自分の考えとして答える
     example(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
@@ -699,7 +699,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "プーの応答: …そうだね、からっぽでも、これはいいつぼだもの。うん、これにしよう。"
         ),
         interaction_mode="narrative",
-        current_scene="5",
+        current_scene="6",
         situation_update=SituationUpdate(),
         bot_response="ううん、ぼくはこのつぼで十分だと思うな。いろんなものをしまっとけるもの。",
     ),
@@ -722,13 +722,13 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "プーの応答: よかった！じゃあ、ハチミツの入ったつぼを用意しよう。他には何か必要かな？"
         ),
         interaction_mode="narrative",
-        current_scene="5",
+        current_scene="6",
         situation_update=SituationUpdate(),
         bot_response="うん、それで十分だね。ハチミツの準備を進めよう。",
     ),
 
-    # --- 場面6：贈り物の準備を詰める（色などの詳細を相談する） ----------------
-    # 場面6：贈り物(風船)がすでに決まっている状態で、色などの詳細を詰める。
+    # --- 場面5：贈り物の準備を詰める（色などの詳細を相談する） ----------------
+    # 場面5：贈り物(風船)がすでに決まっている状態で、色などの詳細を詰める。
     # 相手の好みを知らないときも質問を返さず、自分の案を添える。
     *example_variants(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
@@ -751,7 +751,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "プーの応答: そりゃ、とっても良い思いつきだよ。イーヨーを元気づけるのには、もってこいだよ。誰だって、風船もらって、不元気になる人なんていないもの。どんな色の風船がいいかな？"
         ),
         interaction_mode="narrative",
-        current_scene="6",
+        current_scene="5",
         settled_details=[SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
         situation_update=SituationUpdate(
             add_events=["プーが自分の案として青い風船を提案した"],
@@ -761,7 +761,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "イーヨーの好きな色は、ぼくも知らないけれど、青はきっと気にいると思うな。晴れた空みたいで、見ていると気持ちがいいもの。"
         ),
     ),
-    # 場面6：蜂蜜を食べてしまった後の代わりの案(風船)は決まっており、色などの詳細を詰める。
+    # 場面5：蜂蜜を食べてしまった後の代わりの案(風船)は決まっており、色などの詳細を詰める。
     # 色を聞き返さず自分の考えを答える。
     *example_variants(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
@@ -788,7 +788,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "プーの応答: そりゃ、とっても良い思いつきだよ。イーヨーを元気づけるのには、もってこいだよ。誰だって、風船もらって、不元気になる人なんていないもの。何色の風船がいいかな。"
         ),
         interaction_mode="narrative",
-        current_scene="6",
+        current_scene="5",
         narrative_actions=["not_give_empty_jar"],
         settled_details=[
             SettledDetail(topic=GIFT_UNRESOLVED, value="風船"),
@@ -825,7 +825,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "プーの応答: そりゃ、とっても良い思いつきだよ。イーヨーを元気づけるのには、もってこいだよ。誰だって、風船もらって、不元気になる人なんていないもの。何色の風船がいいかな。"
         ),
         interaction_mode="narrative",
-        current_scene="6",
+        current_scene="5",
         narrative_actions=["not_give_empty_jar"],
         settled_details=[
             SettledDetail(topic=GIFT_UNRESOLVED, value="風船"),
@@ -864,7 +864,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "プーの応答: …そうだね、からっぽでも、これはいいつぼだもの。うん、これにしよう。"
         ),
         interaction_mode="narrative",
-        current_scene="6",
+        current_scene="5",
         situation_update=SituationUpdate(
             add_events=["プーがリボンをかけることに決めた"],
             add_unresolved=[RIBBON_COLOR_UNRESOLVED],
@@ -900,7 +900,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         ),
         previous_bot_response="いいね！リボンをかけたら、もっとプレゼントらしくなるね。",
         interaction_mode="narrative",
-        current_scene="6",
+        current_scene="5",
         settled_details=[SettledDetail(topic=RIBBON_COLOR_UNRESOLVED, value="赤")],
         situation_update=SituationUpdate(
             add_events=["プーが赤いリボンを選んだ"],
@@ -931,7 +931,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         user_action=["わたしそろそろいかなきゃ", "もう帰らなきゃ", "じゃあ、またね"],
         history=(
             "Turn 7\n参加者の生入力: いいとおもう\n応答モード: narrative\n"
-            "参考場面ID: 6\n物語アクション: []\n"
+            "参考場面ID: 5\n物語アクション: []\n"
             "プーの応答: うん、それなら青い風船にしよう！きっとイーヨーは喜んでくれるね。"
         ),
         previous_bot_response="うん、それなら青い風船にしよう！きっとイーヨーは喜んでくれるね。",
@@ -956,11 +956,11 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "参考場面ID: 4a\n物語アクション: []\n"
             "プーの応答: うん、そうしよう。からっぽでも、これはいいつぼだもの。\n\n"
             f"Turn 2\n世界イベント: {STORY_WRAP_UP_DESCRIPTION}\n応答モード: narrative\n"
-            f"参考場面ID: 5\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"
+            f"参考場面ID: 6\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"
         ),
         previous_bot_response=STORY_WRAP_UP_RESPONSE,
         interaction_mode="exit",
-        current_scene="5",
+        current_scene="6",
         situation_update=SituationUpdate(
             add_events=["参加者がおはなしを終えることにし、プーが見送った"],
         ),
@@ -976,11 +976,11 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "参考場面ID: 4b\n物語アクション: []\n"
             "プーの応答: いいね、風船ならイーヨーもきっとうれしいよ。\n\n"
             f"Turn 2\n世界イベント: {STORY_WRAP_UP_DESCRIPTION}\n応答モード: narrative\n"
-            f"参考場面ID: 5\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"
+            f"参考場面ID: 6\n物語アクション: []\nプーの応答: {STORY_WRAP_UP_RESPONSE}"
         ),
         previous_bot_response=STORY_WRAP_UP_RESPONSE,
         interaction_mode="narrative",
-        current_scene="5",
+        current_scene="6",
         situation_update=SituationUpdate(),
         bot_response=(
             "うれしいな。じゃあ、イーヨーのお祝いで何をするか考えようよ。"

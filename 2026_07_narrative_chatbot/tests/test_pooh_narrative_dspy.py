@@ -684,7 +684,7 @@ class RegressionTests(unittest.TestCase):
                 calls[name] = kwargs
                 if name == "AnalyzeInteraction":
                     return SimpleNamespace(
-                        interaction_mode="narrative", current_scene="6", technical_terms=[],
+                        interaction_mode="narrative", current_scene="5", technical_terms=[],
                     )
                 if name == "GeneratePoohResponse":
                     return SimpleNamespace(
@@ -1727,7 +1727,7 @@ class RegressionTests(unittest.TestCase):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         agent = Mock(return_value=SimpleNamespace(
             interaction_mode="narrative",
-            current_scene="6",
+            current_scene="5",
             narrative_actions=[],
             settled_details=[SettledDetail(topic=BALLOON_COLOR_UNRESOLVED, value="青")],
             bot_response="青にしよう！晴れた空みたいだもの。",
