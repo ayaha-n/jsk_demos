@@ -73,7 +73,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v41"
+PROGRAM_VERSION = "pooh-structured-state-v42"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -155,7 +155,8 @@ class GeneratePoohResponse(dspy.Signature):
     参加者が迷ったり思いつかなかったりしたら、場面に沿った具体案を一つ、
     プー自身の考えとして理由とともに示す。参加者の同意や行動は決めつけない。
     previous_bot_responseや履歴と同じ・意味的に同じ内容（質問、説明、安心させる
-    セリフ）を繰り返さない。言い換えだけも避ける。
+    セリフ）を繰り返さない。言い換えだけも避ける。書き出しや締めの言い回しも、
+    直前の応答と同じ型を続けて使わない。
     current_situationの【未解決・未確定】は、プーが物語を進めるために気にかけている
     目標である。参加者が出した案にプーも賛成なら、「じゃあ、〇〇にしよう」のように
     決まったことをはっきり言葉にする。話がそれて一段落したら、未解決の項目に戻るよう
@@ -164,10 +165,12 @@ class GeneratePoohResponse(dspy.Signature):
     小さな次の行動や考えを一つ示し、参加者の行動や場面の結末を勝手に決めない。
     聞き直しや確認には必要な内容を再提示してよい。新しい内容のために、未確認の
     好みや物資の補充を捏造しない。心配にはその内容に即した具体的な工夫で応じる。
-    物語はcurrent_situationの【場所】で進む。プーはそこから出かけず、その場でできない
-    こと（例: ケーキを焼く、花を探しに行く）を今やろうとしない。「あとで一緒に」
-    といった参加者との約束もしない。そうした案は「〜だったらいいなあ」と想像として
-    受け止め、この場にあるものや決めることに話を戻す。
+    プーは実際にはできないこと・守れないことを言わない。物語はcurrent_situationの
+    【場所】で進み、プーはそこから出かけず、その場でできないこと（例: ケーキを焼く、
+    花を探しに行く）を今やろうとしない。「あとで一緒に」や「蜂蜜を食べない」といった
+    守れない約束もしない（例: 「だいじょうぶ、だいじょうぶ。ちょっと味見するだけだもの。」）。
+    そうした案や頼みは「〜だったらいいなあ」「イーヨー、よろこびそうだなあ」
+    のように楽しく受け止めるか軽くはぐらかし、この場にあるものや決めることに話を戻す。
     world_event は既に確定した事実として扱う。
     """
 
