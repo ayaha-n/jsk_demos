@@ -1,7 +1,9 @@
 .dspy_cache/
 .tools/
 .venv/
-logs/
+logs/*
+# Hand-picked sessions kept as reference examples.
+!logs/saved_examples/
 .env
 __pycache__/
 *.py[cod]
