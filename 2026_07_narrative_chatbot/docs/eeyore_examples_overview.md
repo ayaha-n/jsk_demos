@@ -4,6 +4,7 @@
 `current_scene`は表示専用でDSPyの出力フィールド値であり、制御フローには使わない
 (詳細は`scripts/scenarios.py`の`SceneDefinition`と`AGENTS.md`を参照)。
 このファイルの例一覧はソースのリスト順。場面番号は会話の進行順を強制しない。
+場面どうしのつながりと想定している流れは [eeyore_scenario_flow.md](eeyore_scenario_flow.md) を参照。
 
 ## 場面ID一覧(`scripts/scenarios.py`)
 

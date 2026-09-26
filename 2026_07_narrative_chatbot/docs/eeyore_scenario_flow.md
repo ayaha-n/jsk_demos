@@ -2,10 +2,8 @@
 
 `eeyore_birthday` シナリオで想定している流れ。四角は状態、角丸は場面・イベント（開始・終了を含む）、
 ひし形は Python が状態で判定する分岐を表す。青は物語の必須の場面・到達点を表す。
-場面1cは未提案の場合だけ通る経路であり、必須なのは「プーの贈り物がハチミツの壺に決まる」こと。
 場面ID（1a など）は表示とログ用の目安で、流れの制御には使わない。
 実線は主な進行、点線は任意の会話や途中終了を表す。
-秒数は `scripts/scenarios.py` の既定値で、発火には下記の会話待ちも適用される。
 
 ```mermaid
 flowchart TD
@@ -50,14 +48,6 @@ flowchart TD
     classDef required fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px;
     class start,talk1,talk2,talk3,committed,taste,ate,close required;
 ```
-
-場面5の詳細相談は蜂蜜を食べる前にも、締めの後にも起こる。必ず場面4→5→6と通るわけではない。
-締めの判定は `give_empty_jar` または蜂蜜が空になった後の `settled_details` の記録で成立し、
-`not_give_empty_jar` は必須条件ではない。`story_wrap_up` は一度だけ発火する。
-未提案時の自動決定の期限はオープニングの発話終了見込みから数え、会話のたびにはリセットしない。
-
-2026-09-26に旧場面6（詳細相談）を5、旧場面5（振り返り）を6へ変更した。
-過去ログの場面IDは書き換えていないため、古いログを読む際は旧番号として扱う。
 
 ## 時間イベントの割り込み方
 
