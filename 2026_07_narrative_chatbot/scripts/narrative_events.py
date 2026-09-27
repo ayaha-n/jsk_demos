@@ -6,7 +6,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -16,12 +16,12 @@ from narrative_state import NarrativeSituation, SituationUpdate, apply_situation
 FIXED_UTTERANCES_PATH = Path(__file__).resolve().parents[1] / "config" / "fixed_utterances.json"
 
 
-def _load_fixed_utterances() -> dict[str, dict[str, str]]:
+def _load_fixed_utterances() -> dict[str, dict[str, Any]]:
     with FIXED_UTTERANCES_PATH.open(encoding="utf-8") as stream:
         data = json.load(stream)
     if not isinstance(data, dict):
         raise ValueError("fixed_utterances.json must contain an object")
-    result: dict[str, dict[str, str]] = {}
+    result: dict[str, dict[str, Any]] = {}
     texts: set[str] = set()
     for utterance_id, spec in data.items():
         if not isinstance(utterance_id, str) or not isinstance(spec, dict):
@@ -35,7 +35,13 @@ def _load_fixed_utterances() -> dict[str, dict[str, str]]:
         if text in texts:
             raise ValueError(f"fixed utterance text is duplicated: {text!r}")
         texts.add(text)
-        result[utterance_id] = {"text": text, "wav": wav}
+        # Optional body motion played with the line, as {part: motion name}.
+        motion = spec.get("motion", {})
+        if not isinstance(motion, dict) or not all(
+            isinstance(part, str) and isinstance(name, str) for part, name in motion.items()
+        ):
+            raise ValueError(f"fixed utterance {utterance_id!r} has an invalid motion")
+        result[utterance_id] = {"text": text, "wav": wav, "motion": motion}
     return result
 
 
@@ -44,6 +50,11 @@ FIXED_UTTERANCES = _load_fixed_utterances()
 
 def fixed_utterance(utterance_id: str) -> str:
     return FIXED_UTTERANCES[utterance_id]["text"]
+
+
+def fixed_utterance_motion(utterance_id: str) -> dict[str, str]:
+    """The body motion registered for a fixed line; empty when it has none."""
+    return dict(FIXED_UTTERANCES.get(utterance_id, {}).get("motion", {}))
 
 
 def fixed_utterance_id(text: str) -> str | None:

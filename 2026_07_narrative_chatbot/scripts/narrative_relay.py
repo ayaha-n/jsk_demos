@@ -8,6 +8,8 @@ import socket
 import sys
 from typing import Any
 
+from narrative_events import fixed_utterance_motion
+
 
 RECEIVE_POLL_SECONDS = 0.2
 
@@ -61,6 +63,11 @@ class NarrativeRelayPublisher:
             payload["performance_cue"] = performance_cue
         if fixed_utterance_id is not None:
             payload["fixed_utterance_id"] = fixed_utterance_id
+            # The robot plays the motion registered with the fixed line, so
+            # config/fixed_utterances.json stays the one place to define it.
+            motion = fixed_utterance_motion(fixed_utterance_id)
+            if motion:
+                payload["motion"] = motion
         connection = self._connect()
         if connection is None:
             return

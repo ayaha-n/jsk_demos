@@ -318,8 +318,10 @@ for the robot-side setup and motion configuration.
 
 Scripted opening, ending, and fixed-event lines carry a stable
 `fixed_utterance_id`. The robot-side TTS node first looks for the corresponding
-WAV and generates it only when it is missing. Every fixed line, its ID, and
-expected WAV filename are listed in `config/fixed_utterances.json`.
+WAV and generates it only when it is missing. Every fixed line, its ID,
+expected WAV filename, and optional body `motion` (e.g. the opening and ending
+gestures) are listed in `config/fixed_utterances.json`; the relay sends that
+motion with the line, so the robot side needs no copy of it.
 
 ### Compare implementation variants
 

@@ -74,6 +74,7 @@ from narrative_state import (
 )
 from narrative_events import (
     BALLOON_COLOR_UNRESOLVED,
+    fixed_utterance_motion,
     EMPTY_JAR_UNRESOLVED,
     GIFT_DECISION_UNRESOLVED,
     GIFT_UNRESOLVED,
@@ -241,6 +242,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(payload["source"], "session_close")
         self.assertEqual(payload["performance_cue"], "ending")
         self.assertEqual(payload["fixed_utterance_id"], "eeyore_birthday.ending")
+        self.assertEqual(payload["motion"], fixed_utterance_motion("eeyore_birthday.ending"))
 
     def test_fixed_utterance_registry_has_unique_ids_text_and_wav_names(self):
         self.assertEqual(
