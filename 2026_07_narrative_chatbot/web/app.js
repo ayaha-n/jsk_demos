@@ -91,13 +91,19 @@ function appendUser(text) {
   scrollToBottom();
 }
 
+// Body parts named in config/fixed_utterances.json motions.
+const MOTION_PART_LABELS = { eyebrow: "眉", arm: "腕", neck: "首", nose: "鼻" };
+
 function detailsText(output) {
   const lines = [
     `応答モード: ${output.interaction_mode}`,
     `参考場面: ${output.scene_label || "該当なし"}`,
     `物語アクション: ${(output.narrative_actions || []).join(", ") || "なし"}`,
   ];
-  if (output.performance_cue) lines.push(`演出: ${output.performance_cue}`);
+  const motion = Object.entries(output.motion || {})
+    .filter(([, name]) => name)
+    .map(([part, name]) => `${MOTION_PART_LABELS[part] || part} ${name}`);
+  if (motion.length) lines.push(`動作: ${motion.join("・")}`);
   if (output.generation_fallback) lines.push("生成失敗のため固定文を使用");
   lines.push(`場面の変化:\n${output.situation_diff}`);
   return lines.join("\n");

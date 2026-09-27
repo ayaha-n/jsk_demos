@@ -251,10 +251,10 @@ unset. It prints the URL including `?token=...`; share that URL.
   the same session until `--session-ttl` seconds (default 600) of inactivity
   pass; an expired session is discarded without the ending line or motion.
 - The **終了** button (or typing `exit`) plays the scenario's fixed ending
-  line with `performance_cue: ending`. When the model itself interprets an
-  utterance as leaving, Pooh answers with the same fixed ending line and cue
-  instead of a generated goodbye.
-- **はじめから** ends the current session (with the ending cue, sent to ROS
+  line with its ending motion. When the model itself interprets an utterance
+  as leaving, Pooh answers with the same fixed ending line and motion instead
+  of a generated goodbye.
+- **はじめから** ends the current session (with the ending line and motion, sent to ROS
   once, if the story was still running), frees its slot, and starts a new one.
 - The **詳細** toggle shows the interaction mode, reference scene, narrative
   actions, and state changes for each turn.

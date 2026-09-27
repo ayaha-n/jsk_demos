@@ -26,13 +26,13 @@ import web_server
 class FakeOutput:
     source: str
     bot_response: str
-    performance_cue: str | None = None
+    motion: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source,
             "bot_response": self.bot_response,
-            "performance_cue": self.performance_cue,
+            "motion": self.motion or {},
         }
 
 
@@ -60,7 +60,7 @@ class FakeSession:
             self.active_calls -= 1
 
     def start(self):
-        return FakeOutput("session_open", "やあ", "opening")
+        return FakeOutput("session_open", "やあ", {"arm": "right_hand_up"})
 
     def submit(self, user_input: str):
         self._enter()
@@ -100,7 +100,7 @@ class FakeSession:
             return None
         self.ended = True
         self.closed_reasons.append(reason)
-        return FakeOutput("session_close", "またね", "ending")
+        return FakeOutput("session_close", "またね", {"arm": "right_hand_bye"})
 
 
 class WebServerTests(AioHTTPTestCase):
@@ -138,7 +138,7 @@ class WebServerTests(AioHTTPTestCase):
         session_id = await self.new_session()
         async with self.client.ws_connect(f"/ws/{session_id}") as ws:
             transcript = await self.receive_until(ws, "transcript")
-        self.assertEqual(transcript["messages"][0]["output"]["performance_cue"], "opening")
+        self.assertEqual(transcript["messages"][0]["output"]["motion"], {"arm": "right_hand_up"})
         self.assertFalse(transcript["ended"])
 
     async def test_page_uses_scenario_title(self):
@@ -253,7 +253,7 @@ class WebServerTests(AioHTTPTestCase):
             await self.receive_until(ws, "ended")
             await ws.send_json({"type": "close"})
             await ws.send_json({"type": "user_input", "text": "まだいる？"})
-        self.assertEqual(output["output"]["performance_cue"], "ending")
+        self.assertEqual(output["output"]["motion"], {"arm": "right_hand_bye"})
         self.assertEqual(self.sessions[session_id].closed_reasons, ["web_close"])
         self.assertEqual(self.sessions[session_id].inputs, [])
 

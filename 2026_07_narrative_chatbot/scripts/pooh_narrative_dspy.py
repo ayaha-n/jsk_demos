@@ -61,6 +61,7 @@ from narrative_events import (
     WorldEvent,
     estimate_speech_seconds,
     fixed_utterance_id,
+    fixed_utterance_motion,
 )
 from pooh_examples import (
     INITIAL_SITUATION,
@@ -891,12 +892,16 @@ class SessionOutput:
     scene_label: str | None = None
     situation_diff: str = "(変化なし)"
     narrative_actions: list[str] = field(default_factory=list)
-    performance_cue: str | None = None
     fixed_utterance_id: str | None = None
     world_event_id: str | None = None
     latency_ms: float = 0.0
     generation_fallback: bool = False
     turn: Turn | None = None
+
+    @property
+    def motion(self) -> dict[str, str]:
+        """The body motion registered with this fixed line, if any."""
+        return fixed_utterance_motion(self.fixed_utterance_id) if self.fixed_utterance_id else {}
 
     @property
     def current_scene(self) -> str:
@@ -914,7 +919,7 @@ class SessionOutput:
             "situation": self.updated_situation.model_dump(),
             "situation_diff": self.situation_diff,
             "narrative_actions": list(self.narrative_actions),
-            "performance_cue": self.performance_cue,
+            "motion": self.motion,
             "fixed_utterance_id": self.fixed_utterance_id,
             "world_event_id": self.world_event_id,
             "latency_ms": round(self.latency_ms, 1),
@@ -1197,7 +1202,6 @@ class NarrativeSession:
             scene_id=output.scene_id,
             source=output.source,
             world_event_id=output.world_event_id,
-            performance_cue=output.performance_cue,
             fixed_utterance_id=output.fixed_utterance_id,
         )
 
@@ -1213,7 +1217,6 @@ class NarrativeSession:
             scene_id="none",
             updated_situation=self.current_situation,
             situation_diff=format_situation_diff(None, self.current_situation),
-            performance_cue="opening",
             fixed_utterance_id=fixed_utterance_id(self.scenario.opening_line),
         )
         if self.controller is not None:
@@ -1232,7 +1235,6 @@ class NarrativeSession:
             interaction_mode="exit",
             scene_id="none",
             updated_situation=self.current_situation,
-            performance_cue="ending",
             fixed_utterance_id=fixed_utterance_id(self.scenario.ending_line),
         )
         self._publish(output)
@@ -1480,7 +1482,6 @@ class NarrativeSession:
                 previous_situation, turn.updated_situation
             ),
             narrative_actions=actions,
-            performance_cue="ending" if is_exit else None,
             latency_ms=latency_ms,
             turn=turn,
         )

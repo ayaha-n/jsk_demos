@@ -46,7 +46,6 @@ class NarrativeRelayPublisher:
         scene_id: str,
         source: str,
         world_event_id: str | None = None,
-        performance_cue: str | None = None,
         fixed_utterance_id: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {
@@ -59,8 +58,6 @@ class NarrativeRelayPublisher:
         }
         if world_event_id is not None:
             payload["world_event_id"] = world_event_id
-        if performance_cue is not None:
-            payload["performance_cue"] = performance_cue
         if fixed_utterance_id is not None:
             payload["fixed_utterance_id"] = fixed_utterance_id
             # The robot plays the motion registered with the fixed line, so

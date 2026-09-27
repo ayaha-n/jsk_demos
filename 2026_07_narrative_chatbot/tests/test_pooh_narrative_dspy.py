@@ -217,7 +217,7 @@ class RegressionTests(unittest.TestCase):
         payload = json.loads(sent[0].decode("utf-8"))
         self.assertEqual(payload["world_event_id"], "pooh_ate_honey")
 
-    def test_narrative_relay_publisher_includes_performance_cue_when_given(self):
+    def test_narrative_relay_publisher_sends_the_fixed_line_motion(self):
         sent = []
 
         class FakeSocket:
@@ -234,13 +234,11 @@ class RegressionTests(unittest.TestCase):
             narrative_actions=[],
             scene_id="none",
             source="session_close",
-            performance_cue="ending",
             fixed_utterance_id="eeyore_birthday.ending",
         )
 
         payload = json.loads(sent[0].decode("utf-8"))
         self.assertEqual(payload["source"], "session_close")
-        self.assertEqual(payload["performance_cue"], "ending")
         self.assertEqual(payload["fixed_utterance_id"], "eeyore_birthday.ending")
         self.assertEqual(payload["motion"], fixed_utterance_motion("eeyore_birthday.ending"))
 
@@ -267,24 +265,18 @@ class RegressionTests(unittest.TestCase):
 
         opening = session.start()
         self.assertEqual(opening.bot_response, scenario.opening_line)
-        self.assertEqual(opening.performance_cue, "opening")
+        self.assertTrue(opening.motion)
+        self.assertEqual(opening.motion, fixed_utterance_motion("eeyore_birthday.opening"))
         self.assertEqual(opening.fixed_utterance_id, "eeyore_birthday.opening")
         self.assertIsNone(session.start())
 
         ending = session.close()
         self.assertEqual(ending.bot_response, scenario.ending_line)
-        self.assertEqual(ending.performance_cue, "ending")
+        self.assertTrue(ending.motion)
+        self.assertEqual(ending.motion, fixed_utterance_motion("eeyore_birthday.ending"))
         self.assertEqual(ending.fixed_utterance_id, "eeyore_birthday.ending")
         self.assertIsNone(session.close())
         self.assertEqual(publisher.publish.call_count, 2)
-        self.assertEqual(
-            publisher.publish.call_args_list[0].kwargs["performance_cue"],
-            "opening",
-        )
-        self.assertEqual(
-            publisher.publish.call_args_list[1].kwargs["performance_cue"],
-            "ending",
-        )
         self.assertEqual(
             publisher.publish.call_args_list[0].kwargs["fixed_utterance_id"],
             "eeyore_birthday.opening",
@@ -333,7 +325,7 @@ class RegressionTests(unittest.TestCase):
             output = session.submit("もう終わりにしたい")
 
         self.assertTrue(session.ended)
-        self.assertEqual(output.performance_cue, "ending")
+        self.assertEqual(output.motion, fixed_utterance_motion(f"{scenario.key}.ending"))
         self.assertEqual(output.bot_response, scenario.ending_line)
         self.assertEqual(output.fixed_utterance_id, "tea_party.ending")
         # The log records the line Pooh actually spoke.
@@ -1495,7 +1487,7 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(session.ended)
         self.assertEqual(output.source, "session_close")
         self.assertEqual(output.bot_response, scenario.ending_line)
-        self.assertEqual(output.performance_cue, "ending")
+        self.assertEqual(output.motion, fixed_utterance_motion(f"{scenario.key}.ending"))
         self.assertIsNone(session.close())
         self.assertEqual(publisher.publish.call_count, 2)
 
