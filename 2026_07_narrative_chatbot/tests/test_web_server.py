@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -439,6 +440,79 @@ class LogViewerTests(AioHTTPTestCase):
         for name in ("../../config/storybook.json.png", "..%2F..%2Fsecret.png", "missing.png"):
             response = await self.client.get(f"/storybook/{name}")
             self.assertEqual(response.status, 404, name)
+
+
+class OwnStorybookTests(AioHTTPTestCase):
+    """Any Web UI user can read their own session's book, from anywhere."""
+
+    async def get_application(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.log_dir = Path(temporary.name)
+
+        def factory(session_id: str) -> FakeSession:
+            session = FakeSession(session_id)
+            session.log_path = self.log_dir / f"session_x_{session_id[:8]}.jsonl"
+            session.scenario = SimpleNamespace(key="eeyore_birthday")
+            return session
+
+        return web_server.create_app(factory, log_dir=self.log_dir, access_token="secret")
+
+    async def start_session(self) -> str:
+        response = await self.client.post("/api/sessions", headers={web_server.TOKEN_HEADER: "secret"})
+        return (await response.json())["session_id"]
+
+    async def get(self, path: str):
+        return await self.client.get(path, headers={web_server.TOKEN_HEADER: "secret"})
+
+    async def test_book_of_own_session_even_from_outside(self):
+        session_id = await self.start_session()
+        entry = self.app[web_server.REGISTRY_KEY].get(session_id)
+        entry.session.log_path.write_text(json.dumps({
+            "scenario": "eeyore_birthday", "source": "participant",
+            "user_action": "こんにちは", "bot_response": "やあ。", "interaction_mode": "narrative",
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+        with unittest.mock.patch.object(web_server, "_is_loopback_address", return_value=False):
+            response = await self.get(f"/api/sessions/{session_id}/storybook")
+            self.assertEqual(response.status, 200)
+            texts = [e["text"] for page in (await response.json())["pages"] for e in page["entries"]]
+            self.assertIn("「こんにちは」と、あなたは いいました。", texts)
+            response = await self.get(f"/api/sessions/{session_id}/storybook.pdf")
+            self.assertTrue((await response.read()).startswith(b"%PDF"))
+            # The past-log viewer stays local.
+            self.assertEqual((await self.get("/api/logs")).status, 403)
+
+    async def test_book_before_the_first_turn_is_the_opening(self):
+        session_id = await self.start_session()
+        body = await (await self.get(f"/api/sessions/{session_id}/storybook")).json()
+        self.assertEqual(body["pages"][0]["beat_id"], "opening")
+
+    async def test_needs_the_token_and_a_live_session_id(self):
+        session_id = await self.start_session()
+        response = await self.client.get(f"/api/sessions/{session_id}/storybook")
+        self.assertEqual(response.status, 401)
+        response = await self.get(f"/api/sessions/{'0' * 32}/storybook")
+        self.assertEqual(response.status, 404)
+
+
+class LocalOnlyTabletTests(AioHTTPTestCase):
+    """Only sessions started on this PC write the book on the tablet."""
+
+    async def get_application(self):
+        self.tablet = object()
+        return web_server.create_app(FakeSession, local_output_listeners=[self.tablet])
+
+    async def listeners_of_new_session(self):
+        body = await (await self.client.post("/api/sessions")).json()
+        entry = self.app[web_server.REGISTRY_KEY].get(body["session_id"])
+        return getattr(entry.session, "output_listeners", ())
+
+    async def test_local_session_writes_the_tablet_book(self):
+        self.assertEqual(await self.listeners_of_new_session(), (self.tablet,))
+
+    async def test_session_from_another_machine_does_not(self):
+        with unittest.mock.patch.object(web_server, "_is_loopback_address", return_value=False):
+            self.assertEqual(await self.listeners_of_new_session(), ())
 
 
 class AccessTokenTests(AioHTTPTestCase):

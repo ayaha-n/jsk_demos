@@ -21,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, Sequence
 from uuid import uuid4
 
 from aiohttp import WSMsgType, web
@@ -84,14 +84,19 @@ class SessionRegistry:
         ttl_seconds: float = DEFAULT_SESSION_TTL_SECONDS,
         max_sessions: int = DEFAULT_MAX_SESSIONS,
         clock: Callable[[], float] = time.monotonic,
+        local_output_listeners: Sequence[Any] = (),
     ) -> None:
         self.factory = factory
+        # Given only to sessions started on this PC itself (e.g. the live
+        # picture book on the tablet next to the robot).
+        self.local_output_listeners = tuple(local_output_listeners)
         self.ttl_seconds = ttl_seconds
         self.max_sessions = max_sessions
         self.clock = clock
         self.sessions: dict[str, WebSession] = {}
 
-    async def create(self) -> WebSession | None:
+    async def create(self, *, local: bool = False) -> WebSession | None:
+        """A new session; ``local`` when its browser runs on this PC."""
         self.sweep()
         if len(self.sessions) >= self.max_sessions:
             return None
@@ -100,6 +105,9 @@ class SessionRegistry:
         session = await asyncio.to_thread(self.factory, session_id)
         if len(self.sessions) >= self.max_sessions:
             return None
+        if local and self.local_output_listeners:
+            # Before start(), so the opening reaches them too.
+            session.output_listeners = self.local_output_listeners
         entry = WebSession(session, last_active=self.clock())
         self.sessions[session_id] = entry
         async with entry.lock:
@@ -380,20 +388,24 @@ def _storybook_layout(request: web.Request) -> str | None:
     return layout if layout in STORYBOOK_LAYOUTS else None
 
 
-def _build_storybook(records: list[dict[str, Any]], layout: str) -> Any:
+def _build_storybook(
+    records: list[dict[str, Any]], layout: str, scenario_key: str | None = None
+) -> Any:
     import storybook
     from scenarios import get_scenario
 
-    scenario = get_scenario(str(records[0].get("scenario", "")))
+    scenario = get_scenario(scenario_key or str(records[0].get("scenario", "")))
     return storybook.build_book(
         records, scenario=scenario.key, opening_line=scenario.opening_line, layout=layout
     )
 
 
-def _storybook_dict(records: list[dict[str, Any]], layout: str) -> dict[str, Any]:
+def _storybook_dict(
+    records: list[dict[str, Any]], layout: str, scenario_key: str | None = None
+) -> dict[str, Any]:
     import storybook
 
-    book = _build_storybook(records, layout).to_dict()
+    book = _build_storybook(records, layout, scenario_key).to_dict()
     for page in book["pages"]:
         illustration = page.get("illustration")
         available = illustration and storybook.find_illustration(illustration) is not None
@@ -443,9 +455,20 @@ async def read_storybook_pdf(request: web.Request) -> web.StreamResponse:
     if isinstance(found, web.Response):
         return found
     path, records = found
-    headers = {"Content-Disposition": f'inline; filename="{path.stem}.pdf"'}
     saved = request.app[LOG_DIR_KEY] / "storybooks" / f"{path.stem}.pdf"
-    if "layout" not in request.query and saved.is_file():
+    return await _storybook_pdf_response(request, path.stem, saved, records, layout)
+
+
+async def _storybook_pdf_response(
+    request: web.Request,
+    stem: str,
+    saved: Path | None,
+    records: list[dict[str, Any]],
+    layout: str,
+    scenario_key: str | None = None,
+) -> web.StreamResponse:
+    headers = {"Content-Disposition": f'inline; filename="{stem}.pdf"'}
+    if "layout" not in request.query and saved is not None and saved.is_file():
         return web.FileResponse(saved, headers=headers)
 
     def render() -> bytes:
@@ -453,7 +476,7 @@ async def read_storybook_pdf(request: web.Request) -> web.StreamResponse:
 
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "book.pdf"
-            write_pdf(_build_storybook(records, layout), target)
+            write_pdf(_build_storybook(records, layout, scenario_key), target)
             return target.read_bytes()
 
     try:
@@ -461,6 +484,71 @@ async def read_storybook_pdf(request: web.Request) -> web.StreamResponse:
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=422)
     return web.Response(body=body, content_type="application/pdf", headers=headers)
+
+
+def _own_session_book(request: web.Request) -> tuple[WebSession, Path | None] | web.Response:
+    """The session the request names, for its own participant. Unlike the
+    past-log viewer this is open beyond loopback: holding a session's id
+    (random, known only to its browser) is what lets one read its book, and
+    only its book."""
+    if not _authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    entry = request.app[REGISTRY_KEY].get(request.match_info["session_id"])
+    if entry is None:
+        return web.json_response({"error": "session not found"}, status=404)
+    log_path = getattr(entry.session, "log_path", None)
+    return entry, Path(log_path) if log_path is not None else None
+
+
+def _session_records(log_path: Path | None) -> list[dict[str, Any]]:
+    """Its log so far; none before the first turn (the book is then just
+    the opening)."""
+    if log_path is None or not log_path.is_file():
+        return []
+    records, _, _ = _read_log(log_path)
+    return records
+
+
+def _session_scenario(entry: WebSession) -> str | None:
+    scenario = getattr(entry.session, "scenario", None)
+    return getattr(scenario, "key", None)
+
+
+async def read_session_storybook(request: web.Request) -> web.Response:
+    """The book of the requester's own session, so far or finished."""
+    layout = _storybook_layout(request)
+    if layout is None:
+        return web.json_response({"error": "unknown layout"}, status=400)
+    found = _own_session_book(request)
+    if isinstance(found, web.Response):
+        return found
+    entry, log_path = found
+    records = await asyncio.to_thread(_session_records, log_path)
+    scenario_key = _session_scenario(entry)
+    if not records and scenario_key is None:
+        return web.json_response({"error": "no storybook"}, status=404)
+    try:
+        book = await asyncio.to_thread(_storybook_dict, records, layout, scenario_key)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=422)
+    return web.json_response(book)
+
+
+async def read_session_storybook_pdf(request: web.Request) -> web.StreamResponse:
+    layout = _storybook_layout(request)
+    if layout is None:
+        return web.json_response({"error": "unknown layout"}, status=400)
+    found = _own_session_book(request)
+    if isinstance(found, web.Response):
+        return found
+    entry, log_path = found
+    records = await asyncio.to_thread(_session_records, log_path)
+    scenario_key = _session_scenario(entry)
+    if not records and scenario_key is None:
+        return web.json_response({"error": "no storybook"}, status=404)
+    stem = log_path.stem if log_path is not None else "storybook"
+    saved = log_path.parent / "storybooks" / f"{stem}.pdf" if log_path is not None else None
+    return await _storybook_pdf_response(request, stem, saved, records, layout, scenario_key)
 
 
 def _resolve_illustration(name: str) -> Path | None:
@@ -488,7 +576,7 @@ async def create_session(request: web.Request) -> web.Response:
     if not _authorized(request):
         return web.json_response({"error": "unauthorized"}, status=401)
     registry = request.app[REGISTRY_KEY]
-    entry = await registry.create()
+    entry = await registry.create(local=_is_loopback_address(request.remote))
     if entry is None:
         return web.json_response(
             {"error": "満員です。しばらくしてからもう一度お試しください。"}, status=503
@@ -560,9 +648,15 @@ def create_app(
     scenario_title: str = "Narrative Chat",
     scene_intro: str = "",
     log_dir: Path | None = None,
+    local_output_listeners: Sequence[Any] = (),
 ) -> web.Application:
     app = web.Application()
-    registry = SessionRegistry(factory, ttl_seconds=ttl_seconds, max_sessions=max_sessions)
+    registry = SessionRegistry(
+        factory,
+        ttl_seconds=ttl_seconds,
+        max_sessions=max_sessions,
+        local_output_listeners=local_output_listeners,
+    )
     app[REGISTRY_KEY] = registry
     app[TOKEN_KEY] = access_token
     app[LOG_DIR_KEY] = log_dir or Path(
@@ -589,6 +683,8 @@ def create_app(
     app.router.add_get("/static/storybook-font.ttf", storybook_font)
     app.router.add_post("/api/sessions", create_session)
     app.router.add_delete("/api/sessions/{session_id}", delete_session)
+    app.router.add_get("/api/sessions/{session_id}/storybook", read_session_storybook)
+    app.router.add_get("/api/sessions/{session_id}/storybook.pdf", read_session_storybook_pdf)
     app.router.add_get("/ws/{session_id}", session_socket)
     # Do not expose index.html as a static file: it would bypass per-peer UI hiding.
     app.router.add_get("/static/app.js", static_app_script)
@@ -647,7 +743,8 @@ def build_factory(
         else None
     )
 
-    # One book for the whole server: it follows the newest session.
+    # The live book on the tablet, for sessions started on this PC only (see
+    # SessionRegistry.create): one book, following the newest of them.
     listeners = pooh.create_storybook_listeners(args)
 
     def factory(session_id: str) -> NarrativeSessionLike:
@@ -661,7 +758,6 @@ def build_factory(
             scenario,
             ros_publisher=publisher,
             session_id=session_id,
-            output_listeners=listeners,
         )
 
     return factory, scenario.label, scenario.scene_intro, listeners
@@ -708,6 +804,7 @@ def main() -> int:
         access_token=access_token,
         scenario_title=scenario_title,
         scene_intro=scene_intro,
+        local_output_listeners=listeners,
     )
     suffix = f"/?token={access_token}" if access_token else "/"
     print(f"Web UI: http://{args.host}:{args.port}{suffix}")

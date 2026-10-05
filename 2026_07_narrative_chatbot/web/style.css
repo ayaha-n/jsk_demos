@@ -205,7 +205,7 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
 
 #log-viewer-status { min-height: 1.6em; color: var(--muted); font-size: 0.85rem; }
 
-#log-viewer {
+#log-viewer, .storybook-viewer {
   display: flex;
   flex-direction: column;
   gap: 10px;

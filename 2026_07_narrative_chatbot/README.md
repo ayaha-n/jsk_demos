@@ -362,9 +362,14 @@ Then press reload in the AppLoad list, close any other AppLoad app, open
 export EINK_HOST=10.11.99.1   # USB; or the tablet's ssh alias
 python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday \
   --ros-relay --storybook-eink
-# or with the Web UI (the book follows the newest browser session):
+# or with the Web UI:
 python scripts/web_server.py --scenario eeyore_birthday --storybook-eink
 ```
+
+With the Web UI, only sessions started from a browser on this PC itself
+(`127.0.0.1`) are written on the tablet; sessions from other machines are
+not. If several local sessions run at once, the tablet follows the newest
+one.
 
 `--storybook-preview DIR` writes the pages being written as PNGs instead of,
 or as well as, the tablet, so the book can be checked without it. The page
@@ -390,7 +395,10 @@ To read a session back:
   written, tap the right third of the panel for the next page and the left
   third for the previous one. Touches do nothing while a book is being
   written, and the next session's book starts afresh.
-- **Web UI, right after the session:** 絵本を見る appears once it ends.
+- **Web UI, right after the session:** 絵本を見る appears once it ends and
+  shows that session's own book, with a PDF link. This works from any
+  machine (with `POOH_WEB_TOKEN`): the session's id, known only to its
+  browser, is what opens its book, and nothing else.
 - **Web UI, any past session:** open 過去ログ and check 絵本で見る; choose
   横/縦 for the page orientation. PDF opens the saved live book, or renders
   one in the chosen orientation if there is none.

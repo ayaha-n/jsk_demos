@@ -12,7 +12,7 @@
     <h1>{{SCENARIO_TITLE}}</h1>
     <div class="controls">
       <label class="toggle"><input type="checkbox" id="show-details"> 詳細</label>
-      <button type="button" id="storybook-button" class="secondary local-log-feature" hidden>絵本を見る</button>
+      <button type="button" id="storybook-button" class="secondary" hidden>絵本を見る</button>
       <button type="button" id="log-button" class="secondary local-log-feature">過去ログ</button>
       <button type="button" id="end-button" class="secondary" disabled>終了</button>
       <button type="button" id="restart-button" class="secondary">はじめから</button>
@@ -46,6 +46,23 @@
     </div>
     <div id="log-viewer-status" role="status"></div>
     <div id="log-viewer"></div>
+  </dialog>
+
+  <!-- This session's own book: open to its participant from anywhere. -->
+  <dialog id="storybook-dialog">
+    <div class="dialog-header">
+      <h2>絵本</h2>
+      <button type="button" id="storybook-close-button" class="secondary">閉じる</button>
+    </div>
+    <div class="log-toolbar">
+      <select id="storybook-layout" aria-label="絵本の向き">
+        <option value="landscape">横</option>
+        <option value="portrait">縦</option>
+      </select>
+      <a id="storybook-pdf" class="button-link secondary" target="_blank" rel="noopener">PDF</a>
+    </div>
+    <div id="storybook-status" role="status"></div>
+    <div id="storybook-viewer" class="storybook-viewer"></div>
   </dialog>
 
   <!-- Scenario-authored scene description; display only, not model input. -->
