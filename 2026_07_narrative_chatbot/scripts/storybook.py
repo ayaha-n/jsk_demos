@@ -33,7 +33,11 @@ ILLUSTRATION_ROOT = PROJECT_ROOT / "assets" / "storybook"
 PLUSH_MEMORY_DIR = Path(
     os.getenv("PLUSH_MEMORY_DIR", str(PROJECT_ROOT.parents[1] / "plush_memory"))
 )
-FONT_PATH = PLUSH_MEMORY_DIR / "eink-viewer" / "fonts" / "Yomogi-Regular.ttf"
+# The tablet's handwriting font, bundled (assets/fonts/README.md): the same
+# file plush_memory's viewer writes with, so PDFs and the Web book lay lines
+# out as the tablet does, without plush_memory.
+FONT_PATH = PROJECT_ROOT / "assets" / "fonts" / "Yomogi-Regular.ttf"
+VIEWER_FONT_PATH = PLUSH_MEMORY_DIR / "eink-viewer" / "fonts" / "Yomogi-Regular.ttf"
 
 # The viewer's handwriting geometry (eink-viewer/src/ink.rs, main.rs, and
 # eink_memory_push.TEXT_PARAGRAPH_GAP); positions computed here must agree
@@ -289,7 +293,7 @@ def _font(px: int) -> Any:
 
 def default_measure(text: str, px: int) -> float:
     """Advance width as the viewer measures it, or a full-width estimate
-    when plush_memory's font is not available."""
+    when the font file is missing."""
     if FONT_PATH.is_file():
         return float(_font(px).getlength(text))
     return px / YOMOGI_HEIGHT_EM * len(text)

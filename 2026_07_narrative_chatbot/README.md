@@ -24,6 +24,12 @@ See [`CODEX_INSTRUCTIONS_POOH_DSPY.md`](CODEX_INSTRUCTIONS_POOH_DSPY.md) for the
 
 Requirements: Linux, Python 3.12, DSPy 3.2.1, an OpenAI API key, and internet access (for installation, compilation and inference).
 
+Writing the picture book on the reMarkable tablet also needs [plush_memory](https://github.com/ayaha-n/plush_memory) (its `feature/eink-display` branch, for now), checked out in the same catkin workspace as `jsk_demos` (`~/catkin_ws/src/plush_memory`), and a Rust toolchain to build the tablet app. Everything else, including the picture book's PDFs and Web view, works without it:
+
+```bash
+cd ~/catkin_ws/src && git clone -b feature/eink-display https://github.com/ayaha-n/plush_memory.git
+```
+
 Use a project-local virtual environment (`.venv`, excluded from Git), for example with [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```bash
@@ -50,6 +56,7 @@ export OPENAI_API_KEY='YOUR_API_KEY'
 | `POOH_LOG_DIR` | Directory for conversation logs | `logs` |
 | `POOH_WEB_TOKEN` | Access token for the Web UI beyond this PC | (none) |
 | `EINK_HOST` | The reMarkable tablet for the picture book | `10.11.99.1` |
+| `PLUSH_MEMORY_DIR` | plush_memory, if not in the same catkin workspace | `<workspace>/src/plush_memory` |
 
 Changing the model, examples, metric, or DSPy version produces a different compiled-program identifier and requires compiling again.
 
@@ -151,7 +158,8 @@ python scripts/web_server.py --scenario eeyore_birthday --storybook-eink
 - With the Web UI, only sessions started from a browser on this PC are written on the tablet.
 - When a book ends it is saved as a PDF in `logs/storybooks/`. Read it back by tapping the sides of the tablet, with **絵本を見る** in the Web UI (each participant sees only their own book), with 過去ログ → 絵本で見る, or with `python scripts/storybook_render.py <log>`.
 - `--storybook-preview DIR` writes the pages as PNGs, for working without the tablet.
-- Scenes, narration, illustrations (`assets/storybook/`) and motion phrases are set in `config/storybook.json`.
+- Scenes, narration, illustrations (`assets/storybook/`) and motion phrases are set in `config/storybook.json`; the handwriting font is bundled in `assets/fonts/`.
+- Only the tablet needs [plush_memory](https://github.com/ayaha-n/plush_memory) (see Setup); PDFs, 絵本を見る and 過去ログ work without it.
 
 ## State, logs and caches
 
@@ -191,6 +199,7 @@ Model-output quality, state retention across generated turns, and the LLM evalua
 │   └── ...
 ├── config/                          # Fixed lines and motions, picture-book settings
 ├── assets/storybook/                # Picture-book illustrations per scenario
+├── assets/fonts/                    # The handwriting font (Yomogi, OFL)
 ├── storybook_viewer/                # Tablet app for the live book (Rust, AppLoad)
 ├── web/                             # Web chat UI (HTML/JS/CSS)
 ├── docs/                            # Design notes

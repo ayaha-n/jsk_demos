@@ -143,7 +143,7 @@ class WrapTest(unittest.TestCase):
         self.assertEqual(wrap_text("こんにちは\nさようなら", 10, 1000, full_width),
                          ["こんにちは", "さようなら"])
 
-    @unittest.skipUnless(storybook.FONT_PATH.is_file(), "plush_memory font not available")
+    @unittest.skipUnless(storybook.FONT_PATH.is_file(), "font not available")
     def test_measures_at_the_viewers_scale(self):
         # ab_glyph (eink-viewer script::measure) gives 386.74 px at px=56.
         self.assertAlmostEqual(storybook.default_measure("あいうえおかきくけこ", 56), 386.74, delta=1.0)
@@ -299,6 +299,17 @@ class BuilderTest(WithIllustrations):
                     placed.extend(event.placed)
         for run in storybook_live._same_style_runs(placed):
             self.assertEqual(len({item.x for item in run}), 1)
+
+
+class BundledFontTest(unittest.TestCase):
+    def test_bundled_font_is_there(self):
+        self.assertTrue(storybook.FONT_PATH.is_file())
+
+    @unittest.skipUnless(storybook.VIEWER_FONT_PATH.is_file(), "plush_memory not available")
+    def test_bundled_font_is_the_one_the_tablet_writes_with(self):
+        # Lines are wrapped here for the tablet; a different font would
+        # break them where the viewer does not.
+        self.assertEqual(storybook.FONT_PATH.read_bytes(), storybook.VIEWER_FONT_PATH.read_bytes())
 
 
 class RgbaCopyTest(unittest.TestCase):

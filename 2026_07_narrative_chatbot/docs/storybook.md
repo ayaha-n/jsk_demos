@@ -40,7 +40,8 @@ ssh root@10.11.99.1 'echo landscape_cw > /home/root/xovi/exthome/appload/storybo
 
 AppLoad の一覧で再読み込みし、ほかの AppLoad アプリを閉じて "Storybook" を開いてから、チャットを `--storybook-eink` 付きで起動する（README の Picture book）。
 
-- `plush_memory` は catkin ワークスペースで `jsk_demos` の隣にある前提。別の場所にあるなら、PC 側（Python）は `PLUSH_MEMORY_DIR` で指定する（`eink_memory_push.py` と手書きフォント `eink-viewer/fonts/Yomogi-Regular.ttf` をそこから読む）。タブレット側のビルドは `storybook_viewer/Cargo.toml` の `path = "../../../plush_memory/eink-viewer"` を書き換える。
+- タブレットまわり（ライブ書き込みと `storybook_viewer` のビルド）だけ [plush_memory](https://github.com/ayaha-n/plush_memory)（当面は `feature/eink-display` ブランチ）が要る。`jsk_demos` と同じ catkin ワークスペースの `src/` にある前提（`~/catkin_ws/src/plush_memory`）。別の場所にあるなら、PC 側（Python、`eink_memory_push.py`）は `PLUSH_MEMORY_DIR` で指定し、タブレット側のビルドは `storybook_viewer/Cargo.toml` の `path = "../../../plush_memory/eink-viewer"` を書き換える。
+- 手書きフォント Yomogi は `assets/fonts/` に同梱している（plush_memory の `eink-viewer/fonts/` と同じファイル。由来と SHA256 は `assets/fonts/README.md`、一致はテストで確認）。PDF と Web の絵本は plush_memory なしで動く。
 - タブレットの宛先は `EINK_HOST`（既定 `10.11.99.1`、USB）。
 - タブレットに届かなくても会話は続き、エラーが表示されるだけ。
 - 会話に書くのが追いつかないとき（タブレットの未描画が溜まったとき）は書く速さを上げる。
