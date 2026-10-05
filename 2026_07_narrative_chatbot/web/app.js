@@ -20,10 +20,18 @@ const logRefreshButton = document.getElementById("log-refresh-button");
 const logSelect = document.getElementById("log-select");
 const logViewerStatus = document.getElementById("log-viewer-status");
 const logViewer = document.getElementById("log-viewer");
+const logStorybookToggle = document.getElementById("log-storybook");
+const logStorybookLayout = document.getElementById("log-storybook-layout");
+const logStorybookPdf = document.getElementById("log-storybook-pdf");
+const storybookButton = document.getElementById("storybook-button");
+// Yomogi's ascender + descender in ems (storybook.YOMOGI_HEIGHT_EM): the
+// tablet's text px is that whole height.
+const YOMOGI_HEIGHT_EM = 1.448;
 
 let socket = null;
 let sessionId = null;
 let ended = false;
+let endedSessionId = null;  // the session whose book 絵本を見る opens
 let busy = false;
 let reconnectDelay = 1000;
 let reconnectTimer = null;
@@ -137,7 +145,8 @@ function appendLogRecord(record, index) {
 
   const meta = document.createElement("div");
   meta.className = "log-record-meta";
-  meta.textContent = `Turn ${index + 1} · ${formatLogTime(record.timestamp)}`;
+  const label = record.source === "session_close" ? "終了" : `Turn ${index + 1}`;
+  meta.textContent = `${label} · ${formatLogTime(record.timestamp)}`;
   item.appendChild(meta);
 
   if (record.user_action) {
@@ -170,6 +179,76 @@ function appendLogRecord(record, index) {
   logViewer.appendChild(item);
 }
 
+function appendStoryPage(page, book) {
+  // Laid out at the tablet's own coordinates, scaled to the sheet's width,
+  // so columns and line breaks read as they did on the e-ink page.
+  const [width, height] = book.size;
+  const percent = (value, whole) => `${(value / whole) * 100}%`;
+  // Font sizes in units of the sheet's width (container query units).
+  const scaled = (px) => `${(px / width) * 100}cqw`;
+
+  const sheet = document.createElement("article");
+  sheet.className = "story-page";
+  sheet.style.aspectRatio = `${width} / ${height}`;
+  if (page.illustration) {
+    const [x, y, w, h] = book.picture_box;
+    const picture = document.createElement("div");
+    picture.className = "story-picture";
+    Object.assign(picture.style, {
+      left: percent(x, width), top: percent(y, height),
+      width: percent(w, width), height: percent(h, height),
+    });
+    if (page.illustration_url) {
+      const image = document.createElement("img");
+      image.src = page.illustration_url;
+      image.alt = "";
+      picture.appendChild(image);
+    } else {
+      picture.textContent = `（さしえ: ${page.illustration}）`;
+    }
+    sheet.appendChild(picture);
+  }
+  for (const entry of page.entries) {
+    const paragraph = document.createElement("div");
+    paragraph.className = `story-entry story-${entry.style}`;
+    Object.assign(paragraph.style, {
+      left: percent(entry.x, width), top: percent(entry.y, height),
+      width: percent(entry.w, width),
+      fontSize: scaled(entry.px / YOMOGI_HEIGHT_EM),
+      lineHeight: scaled(Math.floor(entry.px * 1.5)),
+      textAlign: entry.align === "center" ? "center" : "left",
+    });
+    // The lines as the tablet wrote them.
+    for (const line of entry.lines) {
+      const row = document.createElement("div");
+      row.textContent = line;
+      paragraph.appendChild(row);
+    }
+    sheet.appendChild(paragraph);
+  }
+  const number = document.createElement("div");
+  number.className = "story-page-number";
+  number.textContent = String(page.index + 1);
+  sheet.appendChild(number);
+  logViewer.appendChild(sheet);
+}
+
+async function loadSelectedStorybook(name) {
+  const base = `/api/logs/${encodeURIComponent(name)}/storybook`;
+  const layout = encodeURIComponent(logStorybookLayout.value);
+  const token = encodeURIComponent(accessToken());
+  // The PDF in the orientation shown here.
+  logStorybookPdf.href = `${base}.pdf?token=${token}&layout=${layout}`;
+  logStorybookPdf.hidden = false;
+  const response = await fetch(`${base}?layout=${layout}`, {
+    headers: authenticatedHeaders(),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  body.pages.forEach((page) => appendStoryPage(page, body));
+  logViewerStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
+}
+
 async function loadSelectedLog() {
   const name = logSelect.value;
   if (!name) {
@@ -179,7 +258,12 @@ async function loadSelectedLog() {
   }
   logViewerStatus.textContent = "読み込んでいます…";
   logViewer.replaceChildren();
+  logStorybookPdf.hidden = true;
   try {
+    if (logStorybookToggle.checked) {
+      await loadSelectedStorybook(name);
+      return;
+    }
     const response = await fetch(`/api/logs/${encodeURIComponent(name)}`, {
       headers: authenticatedHeaders(),
     });
@@ -232,6 +316,10 @@ function handleMessage(message) {
       message.messages.forEach(renderMessage);
       ended = message.ended;
       busy = message.busy;
+      if (ended) {
+        endedSessionId = sessionId;
+        storybookButton.hidden = false;
+      }
       break;
     case "output":
     case "user_input":
@@ -242,6 +330,8 @@ function handleMessage(message) {
       break;
     case "ended":
       ended = true;
+      endedSessionId = sessionId;
+      storybookButton.hidden = false;
       break;
     case "error":
       appendNotice(message.message, true);
@@ -288,6 +378,7 @@ async function startNewSession() {
   clearLog();
   ended = false;
   busy = false;
+  storybookButton.hidden = true;
   sessionId = null;
   storageSet(SESSION_KEY, null);
   statusLine.textContent = "準備しています…";
@@ -354,9 +445,24 @@ logButton.addEventListener("click", () => {
   refreshLogList();
 });
 
+// Right after a session ends: its book, from the log it just wrote.
+storybookButton.addEventListener("click", async () => {
+  logStorybookToggle.checked = true;
+  logDialog.showModal();
+  await refreshLogList();
+  const suffix = `_${(endedSessionId || "").slice(0, 8)}.jsonl`;
+  const option = [...logSelect.options].find((item) => item.value.endsWith(suffix));
+  if (option) {
+    logSelect.value = option.value;
+    await loadSelectedLog();
+  }
+});
+
 logCloseButton.addEventListener("click", () => logDialog.close());
 logRefreshButton.addEventListener("click", refreshLogList);
 logSelect.addEventListener("change", loadSelectedLog);
+logStorybookToggle.addEventListener("change", loadSelectedLog);
+logStorybookLayout.addEventListener("change", loadSelectedLog);
 
 sessionId = storageGet(SESSION_KEY);
 if (sessionId) connect();

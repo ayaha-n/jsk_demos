@@ -323,6 +323,78 @@ expected WAV filename, and optional body `motion` (e.g. the opening and ending
 gestures) are listed in `config/fixed_utterances.json`; the relay sends that
 motion with the line, so the robot side needs no copy of it.
 
+### Write the session as a picture book (optional)
+
+The session can be retold as a picture book, written live on the reMarkable
+Paper Pro and reviewable afterwards. The book only retells what the session
+recorded, without asking a model to invent anything:
+
+- the participant's words (「…」と、あなたは いいました。);
+- Pooh's lines;
+- the body motion of fixed lines (プーは かなしそうな かおで、あごに てを あてて、…);
+- the scripted world events, each opening a new illustrated page.
+
+Pages break at those story beats and when the text no longer fits. Beats,
+their narration and illustrations, and the motion phrases are configured in
+`config/storybook.json`.
+
+The tablet side is
+[plush_memory](https://github.com/ayaha-n/plush_memory)'s e-ink viewer (`plush_memory_viewer`,
+an AppLoad app), reused as is: the chatbot imports
+`plush_memory/scripts/eink_memory_push.py` and pushes over ssh. Install and
+start the viewer as described in plush_memory's README, then:
+
+```bash
+export EINK_HOST=10.11.99.1   # USB; or the tablet's ssh alias
+python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday \
+  --ros-relay --storybook-eink
+# or with the Web UI (the book follows the newest browser session):
+python scripts/web_server.py --scenario eeyore_birthday --storybook-eink
+```
+
+`--storybook-preview DIR` writes the pages being written as PNGs instead of,
+or as well as, the tablet, so the book can be checked without it. The page
+layout follows the way the tablet is turned when a session starts: portrait
+puts the picture above the text, landscape spreads them like an open book.
+
+If the tablet is unreachable, the conversation goes on and the error is
+printed. Writing speeds up while turns pile up, so the book stays close to
+the conversation.
+
+`plush_memory` is expected next to `jsk_demos` in the catkin workspace. Set
+`PLUSH_MEMORY_DIR` if it lives elsewhere; the handwriting font
+(`eink-viewer/fonts/Yomogi-Regular.ttf`) is also taken from there.
+
+When a live book ends, it is saved as a PDF laid out as the tablet showed
+it, in `storybooks/` in the log directory (`logs/storybooks/<log name>.pdf`
+by default). The PDF holds the text as text in the handwriting font, so it
+stays sharp and searchable; only the illustrations are images.
+
+To read a session back:
+
+- **Web UI, right after the session:** 絵本を見る appears once it ends.
+- **Web UI, any past session:** open 過去ログ and check 絵本で見る; choose
+  横/縦 for the page orientation. PDF opens the saved live book, or renders
+  one in the chosen orientation if there is none.
+- **Files:**
+
+  ```bash
+  python scripts/storybook_render.py logs/session_<...>.jsonl             # -> logs/storybooks/<log name>.pdf
+  python scripts/storybook_render.py logs/saved_examples/<...>.jsonl --layout portrait --out /tmp/book.pdf --png /tmp/pages
+  ```
+
+Illustrations are PNGs under `assets/storybook/<scenario>/`, at the paths
+given in `config/storybook.json`, kept as 256-color PNGs to stay small (the
+picture barely changes; the tablet's reveal is black and white anyway). A
+scene whose illustration does not exist yet is laid out as text: in
+landscape it continues on the right page if that is still empty.
+
+`scripts/storybook_illustrations.py --scenario <key>` asks `gpt-image-1` to
+draw them from each beat's prompt, with `assets/storybook/bear-reference.png`
+as the reference. In practice the image model's moderation has rejected
+these requests (`moderation_blocked` at the output stage), so drawn or
+photographed illustrations may have to be supplied by hand.
+
 ### Compare implementation variants
 
 ```bash
@@ -397,6 +469,11 @@ Recorded fields include:
 - Model name
 - Compiled-program identifier
 - Response latency
+- `fixed_utterance_id` of a scripted line (its motion is in `config/fixed_utterances.json`)
+
+When a session that has logged turns is closed, a last `session_close` line
+records the ending line and the reason, so the picture book of the log ends
+where the session did.
 
 The logs may contain participant speech, actions, or other research data. Before sharing, backing up, or analyzing them, confirm that their handling is consistent with the research protocol, consent scope, and applicable privacy requirements.
 
@@ -422,9 +499,16 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 │   ├── narrative_state.py
 │   ├── scenarios.py
 │   ├── web_server.py                 # Browser chat UI server
+│   ├── storybook.py                  # Session -> picture-book pages (narration, layout)
+│   ├── storybook_live.py             # Live book on the e-ink tablet / PNG preview
+│   ├── storybook_render.py           # Past log -> page PNGs, PDF, book.json
+│   ├── storybook_illustrations.py    # Illustration generation per story beat
 │   └── ...
+├── assets/storybook/                   # Picture-book illustrations per scenario
+├── config/                            # Fixed lines and motions, picture-book settings
 ├── web/                               # Browser chat UI (HTML/JS/CSS)
 └── tests/
     ├── test_pooh_narrative_dspy.py   # Regression tests without LLM calls
-    └── test_web_server.py            # Web UI server tests with a fake session
+    ├── test_web_server.py            # Web UI server tests with a fake session
+    └── test_storybook.py             # Picture-book tests without tablet or APIs
 ```

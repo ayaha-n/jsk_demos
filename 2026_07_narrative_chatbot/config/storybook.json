@@ -1,0 +1,134 @@
+{
+  "motion_phrases": {
+    "eyebrow": {
+      "happy": "うれしそうな かおで",
+      "sad": "かなしそうな かおで",
+      "surprised": "びっくりした かおで",
+      "angry": "おこった かおで"
+    },
+    "arm": {
+      "right_hand_up": [
+        "みぎてを あげて",
+        "みぎてを あげました"
+      ],
+      "right_hand_bye": [
+        "てを ふって",
+        "てを ふりました"
+      ],
+      "left_hand_chin": [
+        "あごに てを あてて",
+        "あごに てを あてました"
+      ],
+      "right_hand_mouth": [
+        "くちに てを あてて",
+        "くちに てを あてました"
+      ],
+      "onegai": [
+        "りょうてを あわせて",
+        "りょうてを あわせました"
+      ],
+      "cross_arms": [
+        "うでを くんで",
+        "うでを くみました"
+      ],
+      "banzai": [
+        "ばんざいを して",
+        "ばんざいを しました"
+      ],
+      "left_hand_point": [
+        "ひだりてで ゆびさして",
+        "ひだりてで ゆびさしました"
+      ],
+      "saved_r:right_hand_point": [
+        "みぎてで ゆびさして",
+        "みぎてで ゆびさしました"
+      ],
+      "left_hand_bye": [
+        "ひだりてを ふって",
+        "ひだりてを ふりました"
+      ],
+      "left_hand_up": [
+        "ひだりてを あげて",
+        "ひだりてを あげました"
+      ],
+      "start_shake": [
+        "てを さしだして",
+        "てを さしだしました"
+      ],
+      "janken": [
+        "じゃんけんの てを だして",
+        "じゃんけんの てを だしました"
+      ]
+    },
+    "neck": {
+      "nod": [
+        "うなずいて",
+        "うなずきました"
+      ],
+      "tilt": [
+        "くびを かしげて",
+        "くびを かしげました"
+      ],
+      "natural_nod": [
+        "うなずいて",
+        "うなずきました"
+      ],
+      "disagree": [
+        "くびを よこに ふって",
+        "くびを よこに ふりました"
+      ]
+    },
+    "nose": {
+      "slight_nose": [
+        "はなを ひくひく させて",
+        "はなを ひくひく させました"
+      ]
+    }
+  },
+  "illustration_style": "Draw it as a delicate pen-and-ink line illustration with a soft watercolor wash, like a classic children's picture book: fine ink linework, light cross-hatching for shading, gentle watercolor tones (not flat cartoon fill), a plain white background with only a hint of ground. Keep this bear's face, proportions and expression exactly as in the reference image. Leave out the human hand from the reference. No text or letters anywhere in the picture.",
+  "scenarios": {
+    "tea_party": {
+      "title": "もりの おちゃかい",
+      "beats": {
+        "opening": {
+          "narration": "もりの あきちで、プーが テーブルの ところに すわって いました。",
+          "illustration": "tea_party/opening.png",
+          "prompt": "This bear from the reference image sits at a small wooden table in a forest clearing, with teacups, plates and a honey pot on the table and a blue balloon tied nearby, smiling as if welcoming a guest."
+        }
+      },
+      "closing": "おしまい"
+    },
+    "eeyore_birthday": {
+      "title": "イーヨーの おたんじょうび",
+      "beats": {
+        "opening": {
+          "narration": "100エーカーの もりの あきちで、プーが テーブルの ところに すわって いました。",
+          "illustration": "eeyore_birthday/opening.png",
+          "prompt": "This bear from the reference image sits at a small wooden table in a forest clearing, thinking with a paw on its chin. On the table are cups, plates and a full honey pot; colorful balloons and a ribbon lie nearby."
+        },
+        "honey_gift_committed": {
+          "narration": "プーは、イーヨーへの おくりものを きめました。",
+          "illustration": "eeyore_birthday/honey_gift_committed.png",
+          "prompt": "This bear from the reference image holds up a full honey pot with both paws, looking pleased, as if it has just decided this will be a birthday present."
+        },
+        "pooh_tastes_honey": {
+          "narration": "プーは、ひとくちだけの つもりで、はちみつの つぼを もちだしました。",
+          "illustration": "eeyore_birthday/pooh_tastes_honey.png",
+          "prompt": "This bear from the reference image sits hugging the honey pot and peeks inside it with a small guilty, tempted smile, one paw lifted toward the lid."
+        },
+        "pooh_ate_honey": {
+          "narration": "きが つくと、つぼの なかの はちみつは、すっかり なくなって いました。",
+          "illustration": "eeyore_birthday/pooh_ate_honey.png",
+          "prompt": "This bear from the reference image sits with an empty honey pot tipped on its side in its lap, a little honey on its paw and mouth, looking surprised and a bit sorry."
+        },
+        "story_wrap_up": {
+          "narration": "こうして、イーヨーへの おくりものが きまりました。",
+          "illustration": "eeyore_birthday/story_wrap_up.png",
+          "prompt": "This bear from the reference image walks happily through the forest carrying a birthday present for a friend, with a balloon on a string floating above."
+        }
+      },
+      "closing": "おしまい"
+    }
+  },
+  "participant_presence": "The person this bear is with (the reader) is never drawn as a figure: no face, body or hands. They are present only as a soft, faceless gray shadow falling into the scene from the bottom edge, as if the reader were standing just outside the picture."
+}

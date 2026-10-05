@@ -16,6 +16,7 @@ import ipaddress
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -371,6 +372,118 @@ async def read_log(request: web.Request) -> web.Response:
     })
 
 
+STORYBOOK_LAYOUTS = ("landscape", "portrait")
+
+
+def _storybook_layout(request: web.Request) -> str | None:
+    layout = request.query.get("layout", "landscape")
+    return layout if layout in STORYBOOK_LAYOUTS else None
+
+
+def _build_storybook(records: list[dict[str, Any]], layout: str) -> Any:
+    import storybook
+    from scenarios import get_scenario
+
+    scenario = get_scenario(str(records[0].get("scenario", "")))
+    return storybook.build_book(
+        records, scenario=scenario.key, opening_line=scenario.opening_line, layout=layout
+    )
+
+
+def _storybook_dict(records: list[dict[str, Any]], layout: str) -> dict[str, Any]:
+    import storybook
+
+    book = _build_storybook(records, layout).to_dict()
+    for page in book["pages"]:
+        illustration = page.get("illustration")
+        available = illustration and storybook.find_illustration(illustration) is not None
+        page["illustration_url"] = f"/storybook/{illustration}" if available else None
+    return book
+
+
+async def _storybook_records(request: web.Request) -> tuple[Path, list[dict[str, Any]]] | web.Response:
+    if not _local_log_access_allowed(request):
+        return web.json_response({"error": "local access only"}, status=403)
+    if not _authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    path = _resolve_log_path(request.app[LOG_DIR_KEY], request.match_info["name"])
+    if path is None:
+        return web.json_response({"error": "log not found"}, status=404)
+    if path.stat().st_size > MAX_LOG_BYTES:
+        return web.json_response({"error": "log is too large"}, status=413)
+    records, _, _ = await asyncio.to_thread(_read_log, path)
+    if not records:
+        return web.json_response({"error": "empty log"}, status=404)
+    return path, records
+
+
+async def read_storybook(request: web.Request) -> web.Response:
+    """The picture book of one past session, for review after the fact."""
+    layout = _storybook_layout(request)
+    if layout is None:
+        return web.json_response({"error": "unknown layout"}, status=400)
+    found = await _storybook_records(request)
+    if isinstance(found, web.Response):
+        return found
+    path, records = found
+    try:
+        book = await asyncio.to_thread(_storybook_dict, records, layout)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=422)
+    return web.json_response({"name": path.name, **book})
+
+
+async def read_storybook_pdf(request: web.Request) -> web.StreamResponse:
+    """The book as a PDF: the one the live book saved, laid out as the tablet
+    showed it, or else one rendered now in the requested layout."""
+    layout = _storybook_layout(request)
+    if layout is None:
+        return web.json_response({"error": "unknown layout"}, status=400)
+    found = await _storybook_records(request)
+    if isinstance(found, web.Response):
+        return found
+    path, records = found
+    headers = {"Content-Disposition": f'inline; filename="{path.stem}.pdf"'}
+    saved = request.app[LOG_DIR_KEY] / "storybooks" / f"{path.stem}.pdf"
+    if "layout" not in request.query and saved.is_file():
+        return web.FileResponse(saved, headers=headers)
+
+    def render() -> bytes:
+        from storybook_render import write_pdf
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "book.pdf"
+            write_pdf(_build_storybook(records, layout), target)
+            return target.read_bytes()
+
+    try:
+        body = await asyncio.to_thread(render)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=422)
+    return web.Response(body=body, content_type="application/pdf", headers=headers)
+
+
+def _resolve_illustration(name: str) -> Path | None:
+    import storybook
+
+    return storybook.find_illustration(name)
+
+
+async def storybook_illustration(request: web.Request) -> web.StreamResponse:
+    path = _resolve_illustration(request.match_info["name"])
+    if path is None:
+        raise web.HTTPNotFound()
+    return web.FileResponse(path)
+
+
+async def storybook_font(request: web.Request) -> web.StreamResponse:
+    import storybook
+
+    if not storybook.FONT_PATH.is_file():
+        raise web.HTTPNotFound()
+    return web.FileResponse(storybook.FONT_PATH)
+
+
 async def create_session(request: web.Request) -> web.Response:
     if not _authorized(request):
         return web.json_response({"error": "unauthorized"}, status=401)
@@ -470,6 +583,10 @@ def create_app(
     app.router.add_get("/", index)
     app.router.add_get("/api/logs", list_logs)
     app.router.add_get("/api/logs/{name}", read_log)
+    app.router.add_get("/api/logs/{name}/storybook", read_storybook)
+    app.router.add_get("/api/logs/{name}/storybook.pdf", read_storybook_pdf)
+    app.router.add_get("/storybook/{name:.+\\.png}", storybook_illustration)
+    app.router.add_get("/static/storybook-font.ttf", storybook_font)
     app.router.add_post("/api/sessions", create_session)
     app.router.add_delete("/api/sessions/{session_id}", delete_session)
     app.router.add_get("/ws/{session_id}", session_socket)
@@ -508,7 +625,9 @@ class _LockedPublisher:
             self._publisher.publish(**kwargs)
 
 
-def build_factory(args: argparse.Namespace) -> tuple[SessionFactory, str, str]:
+def build_factory(
+    args: argparse.Namespace,
+) -> tuple[SessionFactory, str, str, list[Any]]:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import pooh_narrative_dspy as pooh
     from narrative_relay import NarrativeRelayPublisher
@@ -528,6 +647,9 @@ def build_factory(args: argparse.Namespace) -> tuple[SessionFactory, str, str]:
         else None
     )
 
+    # One book for the whole server: it follows the newest session.
+    listeners = pooh.create_storybook_listeners(args)
+
     def factory(session_id: str) -> NarrativeSessionLike:
         # A private agent per session lets different participants' LLM calls
         # run concurrently without sharing module state across threads.
@@ -539,9 +661,10 @@ def build_factory(args: argparse.Namespace) -> tuple[SessionFactory, str, str]:
             scenario,
             ros_publisher=publisher,
             session_id=session_id,
+            output_listeners=listeners,
         )
 
-    return factory, scenario.label, scenario.scene_intro
+    return factory, scenario.label, scenario.scene_intro, listeners
 
 
 def parse_args() -> argparse.Namespace:
@@ -559,6 +682,9 @@ def parse_args() -> argparse.Namespace:
                         help="指定時、各ターンをROS中継へ送る（入力は受けない）。")
     parser.add_argument("--ros-relay-host", default="127.0.0.1")
     parser.add_argument("--ros-relay-port", type=int, default=8765)
+    from pooh_narrative_dspy import add_storybook_arguments
+
+    add_storybook_arguments(parser)
     return parser.parse_args()
 
 
@@ -570,7 +696,7 @@ def main() -> int:
         print(f"エラー: {error}", file=sys.stderr)
         return 1
     try:
-        factory, scenario_title, scene_intro = build_factory(args)
+        factory, scenario_title, scene_intro, listeners = build_factory(args)
     except Exception as exc:
         # APIキーやLMリクエスト本文を含む可能性のある詳細tracebackは表示しない。
         print(f"エラー: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -585,7 +711,12 @@ def main() -> int:
     )
     suffix = f"/?token={access_token}" if access_token else "/"
     print(f"Web UI: http://{args.host}:{args.port}{suffix}")
-    web.run_app(app, host=args.host, port=args.port, print=None)
+    try:
+        web.run_app(app, host=args.host, port=args.port, print=None)
+    finally:
+        # Let the picture book finish the page it is writing.
+        for listener in listeners:
+            listener.close()
     return 0
 
 

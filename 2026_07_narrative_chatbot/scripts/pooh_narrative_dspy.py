@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Sequence
 from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -927,6 +927,10 @@ class SessionOutput:
         }
 
 
+# Called with (session, output) for every output, before the ROS relay.
+OutputListener = Callable[["NarrativeSession", SessionOutput], None]
+
+
 def settled_topics(value: Any) -> list[str]:
     return sorted(
         SettledDetail.model_validate(detail).topic
@@ -968,6 +972,14 @@ def append_log(path: Path, turn: Turn, metadata: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {**metadata, "timestamp": datetime.now(timezone.utc).isoformat(), **asdict(turn)}
     record["updated_situation"] = turn.updated_situation.model_dump()
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def append_session_record(path: Path, record: dict[str, Any]) -> None:
+    """A log line that is not a turn (the session's close)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {**record, "timestamp": datetime.now(timezone.utc).isoformat()}
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -1170,6 +1182,7 @@ class NarrativeSession:
         event_controller: HoneyGiftEventController | None = None,
         ros_publisher: NarrativeRelayPublisher | None = None,
         session_id: str | None = None,
+        output_listeners: Sequence[OutputListener] = (),
     ) -> None:
         self.agent = agent
         self.model_name = model_name
@@ -1179,6 +1192,7 @@ class NarrativeSession:
         self.turns: list[Turn] = []
         self.controller = event_controller or create_event_controller(scenario)
         self.ros_publisher = ros_publisher
+        self.output_listeners = tuple(output_listeners)
         self.session_id = session_id or uuid4().hex
         timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
         self.log_path = LOG_DIR / f"session_{timestamp}_{self.session_id[:8]}.jsonl"
@@ -1194,6 +1208,13 @@ class NarrativeSession:
         )
 
     def _publish(self, output: SessionOutput) -> None:
+        for listener in self.output_listeners:
+            try:
+                listener(self, output)
+            except Exception as exc:
+                # A listener (e.g. the picture book) never stops the story.
+                print(f"[{self.session_id[:8]}] 出力リスナーのエラー: "
+                      f"{type(exc).__name__}: {exc}", file=sys.stderr)
         if self.ros_publisher is None:
             return
         self.ros_publisher.publish(
@@ -1237,6 +1258,19 @@ class NarrativeSession:
             updated_situation=self.current_situation,
             fixed_utterance_id=fixed_utterance_id(self.scenario.ending_line),
         )
+        if self.log_path.exists():
+            # Only a session that has logged turns gets its ending recorded,
+            # so the picture book of a past log ends where the session did.
+            # This line is not a turn: its source is "session_close".
+            append_session_record(self.log_path, {
+                "scenario": self.scenario.key,
+                "session_id": self.session_id,
+                "source": "session_close",
+                "close_reason": reason,
+                "interaction_mode": "exit",
+                "bot_response": output.bot_response,
+                "fixed_utterance_id": output.fixed_utterance_id,
+            })
         self._publish(output)
         return output
 
@@ -1307,6 +1341,7 @@ class NarrativeSession:
         )
         self.turns.append(turn)
         self.current_situation = result.updated_situation
+        utterance_id = fixed_utterance_id(turn.bot_response) if event.fixed_response else None
         append_log(
             self.log_path,
             turn,
@@ -1316,6 +1351,7 @@ class NarrativeSession:
                 "scenario": self.scenario.key,
                 "session_id": self.session_id,
                 "world_event_id": event.event_id,
+                "fixed_utterance_id": utterance_id,
                 "event_follow_up": follow_up,
                 "generation_fallback": used_fallback,
                 "latency_ms": round(latency_ms, 1),
@@ -1332,9 +1368,7 @@ class NarrativeSession:
                 previous_situation, turn.updated_situation
             ),
             narrative_actions=actions,
-            fixed_utterance_id=(
-                fixed_utterance_id(turn.bot_response) if event.fixed_response else None
-            ),
+            fixed_utterance_id=utterance_id,
             world_event_id=event.event_id,
             latency_ms=latency_ms,
             generation_fallback=used_fallback,
@@ -1454,6 +1488,8 @@ class NarrativeSession:
         )
         self.turns.append(turn)
         self.current_situation = result.updated_situation
+        # A generated line that happens to be a fixed one can reuse its WAV too.
+        utterance_id = fixed_utterance_id(turn.bot_response)
         append_log(
             self.log_path,
             turn,
@@ -1462,6 +1498,7 @@ class NarrativeSession:
                 "program_id": self.program_id,
                 "scenario": self.scenario.key,
                 "session_id": self.session_id,
+                "fixed_utterance_id": utterance_id,
                 "latency_ms": round(latency_ms, 1),
                 "response_replaced": response_replaced,
                 "question_kind": str(getattr(result, "question_kind", "none")),
@@ -1472,8 +1509,7 @@ class NarrativeSession:
         output = SessionOutput(
             source="participant",
             bot_response=turn.bot_response,
-            # A generated line that happens to be a fixed one can reuse its WAV too.
-            fixed_utterance_id=fixed_utterance_id(turn.bot_response),
+            fixed_utterance_id=utterance_id,
             interaction_mode=turn.interaction_mode,
             scene_id=turn.scene_id,
             updated_situation=turn.updated_situation,
@@ -1498,6 +1534,7 @@ def run_chat(
     input_fn: Callable[[str], str | None] | None = None,
     event_controller: HoneyGiftEventController | None = None,
     ros_publisher: NarrativeRelayPublisher | None = None,
+    output_listeners: Sequence[OutputListener] = (),
 ) -> None:
     session = NarrativeSession(
         agent,
@@ -1506,6 +1543,7 @@ def run_chat(
         scenario,
         event_controller=event_controller,
         ros_publisher=ros_publisher,
+        output_listeners=output_listeners,
     )
     print(f"シナリオ: {scenario.label}")
     print(session.current_situation)
@@ -1602,7 +1640,32 @@ def parse_args() -> argparse.Namespace:
         default=8765,
         help="ROS中継のTCPポート（デフォルト: 8765）。",
     )
+    add_storybook_arguments(parser)
     return parser.parse_args()
+
+
+def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--storybook-eink",
+        action="store_true",
+        help="会話を絵本にして reMarkable（plush_memory_viewer, EINK_HOST）にライブで書く。",
+    )
+    parser.add_argument(
+        "--storybook-preview",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="ライブの絵本のページをPNGとしてDIRに書き出す（タブレットなしの確認用）。",
+    )
+
+
+def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]:
+    if not (args.storybook_eink or args.storybook_preview):
+        return []
+    from storybook_live import create_live_storybook
+
+    live = create_live_storybook(eink=args.storybook_eink, preview_dir=args.storybook_preview)
+    return [live] if live is not None else []
 
 
 def main() -> int:
@@ -1624,14 +1687,21 @@ def main() -> int:
                 if args.ros_relay
                 else None
             )
-            run_chat(
-                compiled,
-                train_model,
-                cache_hash(train_model, judge_model, scenario),
-                scenario,
-                input_fn=ros_publisher.receive_user_input if ros_publisher else None,
-                ros_publisher=ros_publisher,
-            )
+            listeners = create_storybook_listeners(args)
+            try:
+                run_chat(
+                    compiled,
+                    train_model,
+                    cache_hash(train_model, judge_model, scenario),
+                    scenario,
+                    input_fn=ros_publisher.receive_user_input if ros_publisher else None,
+                    ros_publisher=ros_publisher,
+                    output_listeners=listeners,
+                )
+            finally:
+                # Let the picture book write the ending before exiting.
+                for listener in listeners:
+                    listener.close()
         return 0
     except Exception as exc:
         # APIキーやLMリクエスト本文を含む可能性のある詳細tracebackは表示しない。

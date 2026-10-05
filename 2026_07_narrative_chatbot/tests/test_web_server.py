@@ -371,6 +371,14 @@ class LogViewerTests(AioHTTPTestCase):
             }, ensure_ascii=False) + "\nnot-json\n",
             encoding="utf-8",
         )
+        (self.log_dir / "session_book.jsonl").write_text(json.dumps({
+            "scenario": "eeyore_birthday",
+            "user_action": "こんにちは",
+            "bot_response": "やあ。",
+            "source": "participant",
+            "interaction_mode": "narrative",
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.utime(self.log_dir / "session_book.jsonl", (0, 0))
         os.utime(first, (1, 1))
         os.utime(second, (2, 2))
         (self.log_dir / "unrelated.jsonl").write_text("{}\n", encoding="utf-8")
@@ -380,7 +388,7 @@ class LogViewerTests(AioHTTPTestCase):
         body = await (await self.client.get("/api/logs")).json()
         self.assertEqual(
             [item["name"] for item in body["logs"]],
-            ["session_second.jsonl", "session_first.jsonl"],
+            ["session_second.jsonl", "session_first.jsonl", "session_book.jsonl"],
         )
 
     async def test_reads_records_and_reports_invalid_lines(self):
@@ -390,6 +398,47 @@ class LogViewerTests(AioHTTPTestCase):
         self.assertEqual(body["records"][0]["source"], "world_event")
         self.assertEqual(body["invalid_lines"], 1)
         self.assertFalse(body["truncated"])
+
+
+    async def test_builds_the_storybook_of_a_log(self):
+        response = await self.client.get("/api/logs/session_book.jsonl/storybook")
+        body = await response.json()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(body["pages"][0]["beat_id"], "opening")
+        texts = [entry["text"] for page in body["pages"] for entry in page["entries"]]
+        self.assertIn("「こんにちは」と、あなたは いいました。", texts)
+        self.assertEqual(texts[-1], "おしまい")
+
+    async def test_storybook_layouts(self):
+        for layout, size in (("landscape", [2160, 1620]), ("portrait", [1620, 2160])):
+            body = await (await self.client.get(
+                f"/api/logs/session_book.jsonl/storybook?layout={layout}")).json()
+            self.assertEqual(body["size"], size)
+        response = await self.client.get("/api/logs/session_book.jsonl/storybook?layout=sideways")
+        self.assertEqual(response.status, 400)
+
+    async def test_storybook_pdf_prefers_the_saved_live_book(self):
+        response = await self.client.get("/api/logs/session_book.jsonl/storybook.pdf")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.content_type, "application/pdf")
+        self.assertTrue((await response.read()).startswith(b"%PDF"))
+        saved = self.log_dir / "storybooks" / "session_book.pdf"
+        saved.parent.mkdir()
+        saved.write_bytes(b"%PDF-saved")
+        response = await self.client.get("/api/logs/session_book.jsonl/storybook.pdf")
+        self.assertEqual(await response.read(), b"%PDF-saved")
+        # An explicit layout renders afresh.
+        response = await self.client.get("/api/logs/session_book.jsonl/storybook.pdf?layout=portrait")
+        self.assertNotEqual(await response.read(), b"%PDF-saved")
+
+    async def test_storybook_of_a_log_without_scenario_is_rejected(self):
+        response = await self.client.get("/api/logs/session_first.jsonl/storybook")
+        self.assertEqual(response.status, 422)
+
+    async def test_illustrations_stay_inside_their_directory(self):
+        for name in ("../../config/storybook.json.png", "..%2F..%2Fsecret.png", "missing.png"):
+            response = await self.client.get(f"/storybook/{name}")
+            self.assertEqual(response.status, 404, name)
 
 
 class AccessTokenTests(AioHTTPTestCase):

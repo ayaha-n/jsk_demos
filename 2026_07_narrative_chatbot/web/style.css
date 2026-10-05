@@ -225,3 +225,64 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
 .log-record-pooh { margin-top: 4px; font-weight: 600; }
 .log-record details { margin-top: 6px; color: var(--muted); font-size: 0.8rem; }
 .log-record pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.button-link[hidden] { display: none; }
+
+/* Picture-book view of a past session, laid out like the e-ink pages. */
+@font-face {
+  font-family: "Yomogi";
+  src: url("/static/storybook-font.ttf") format("truetype");
+}
+
+.story-page {
+  position: relative;
+  flex: none;
+  container-type: inline-size;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  background: #fff;
+  color: #111;
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  font-family: "Yomogi", "Hiragino Maru Gothic ProN", sans-serif;
+  overflow: hidden;
+}
+
+.story-picture {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  font-size: 2cqw;
+  border: 1px dashed #ddd;
+  box-sizing: border-box;
+}
+
+.story-picture:has(img) { border: none; }
+.story-picture img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+.story-entry {
+  position: absolute;
+  white-space: nowrap;
+}
+
+.story-page-number {
+  position: absolute;
+  bottom: 1.5%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #bbb;
+  font-size: 1.6cqw;
+}
