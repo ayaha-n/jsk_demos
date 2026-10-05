@@ -15,6 +15,9 @@ import hmac
 import ipaddress
 import json
 import os
+import secrets
+import signal
+import socket
 import sys
 import tempfile
 import threading
@@ -240,6 +243,8 @@ REGISTRY_KEY = web.AppKey("registry", SessionRegistry)
 TOKEN_KEY = web.AppKey("access_token", str)
 INDEX_HTML_KEY = web.AppKey("index_html", str)
 LOG_DIR_KEY = web.AppKey("log_dir", Path)
+# The local port the public tunnel forwards to (--public), if any.
+PUBLIC_PORT_KEY = web.AppKey("public_port", int)
 
 
 def _authorized(request: web.Request) -> bool:
@@ -260,7 +265,7 @@ def _asset_version() -> str:
 
 async def index(request: web.Request) -> web.Response:
     body = request.app[INDEX_HTML_KEY].replace(
-        "{{LOCAL_LOG_STYLE}}", _local_log_style(request.remote)
+        "{{LOCAL_LOG_STYLE}}", _local_log_style(_local_peer(request))
     ).replace("{{ASSET_VERSION}}", _asset_version())
     return web.Response(text=body, content_type="text/html", headers=NO_CACHE)
 
@@ -288,8 +293,31 @@ def _local_log_style(address: str | None) -> str:
     return ".local-log-feature { display: none !important; }"
 
 
+def _via_public_tunnel(request: web.Request) -> bool:
+    """Whether the request came in through the --public tunnel. The tunnel
+    connects from 127.0.0.1 too, so it is told apart by the port it was
+    given, never by a forwarding header (which anyone can send)."""
+    app = getattr(request, "app", None)
+    public_port = app.get(PUBLIC_PORT_KEY) if app is not None else None
+    transport = getattr(request, "transport", None)
+    if public_port is None or transport is None:
+        return False
+    sockname = transport.get_extra_info("sockname")
+    return bool(sockname) and sockname[1] == public_port
+
+
+def _local_peer(request: web.Request) -> str | None:
+    """The peer address, for the loopback checks; none through the tunnel."""
+    return None if _via_public_tunnel(request) else request.remote
+
+
+def _is_local_request(request: web.Request) -> bool:
+    """Made on this PC itself: allowed the past-log viewer and the tablet."""
+    return _is_loopback_address(_local_peer(request))
+
+
 def _local_log_access_allowed(request: web.Request) -> bool:
-    return _is_loopback_address(request.remote)
+    return _is_local_request(request)
 
 
 # Always revalidated: with only Last-Modified, a browser may keep using an
@@ -589,7 +617,7 @@ async def create_session(request: web.Request) -> web.Response:
     if not _authorized(request):
         return web.json_response({"error": "unauthorized"}, status=401)
     registry = request.app[REGISTRY_KEY]
-    entry = await registry.create(local=_is_loopback_address(request.remote))
+    entry = await registry.create(local=_is_local_request(request))
     if entry is None:
         return web.json_response(
             {"error": "満員です。しばらくしてからもう一度お試しください。"}, status=503
@@ -712,6 +740,14 @@ def create_app(
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
+def resolve_access_token(configured: str, *, public: bool) -> str:
+    """POOH_WEB_TOKEN if set; published without one, a fresh unguessable key
+    for this launch (shown on the terminal only, never stored)."""
+    if configured or not public:
+        return configured
+    return secrets.token_urlsafe(24)
+
+
 def check_bind_security(host: str, access_token: str) -> str | None:
     """Return an error when a non-loopback bind would expose unguarded API use."""
     if host in LOOPBACK_HOSTS or access_token:
@@ -791,6 +827,9 @@ def parse_args() -> argparse.Namespace:
                         help="指定時、各ターンをROS中継へ送る（入力は受けない）。")
     parser.add_argument("--ros-relay-host", default="127.0.0.1")
     parser.add_argument("--ros-relay-port", type=int, default=8765)
+    parser.add_argument("--public", action="store_true",
+                        help="Cloudflare quick tunnel で公開用HTTPS URLを出す（キー付き、終了で停止）。"
+                             "公開経由では過去ログとタブレットは使えない。")
     from pooh_narrative_dspy import add_storybook_arguments
 
     add_storybook_arguments(parser)
@@ -799,11 +838,20 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    access_token = os.getenv("POOH_WEB_TOKEN", "")
+    access_token = resolve_access_token(os.getenv("POOH_WEB_TOKEN", ""), public=args.public)
     error = check_bind_security(args.host, access_token)
     if error is not None:
         print(f"エラー: {error}", file=sys.stderr)
         return 1
+    cloudflared = None
+    if args.public:
+        from public_tunnel import find_cloudflared
+
+        cloudflared = find_cloudflared()
+        if cloudflared is None:
+            print("エラー: --public には cloudflared が必要です（PATH か .tools/cloudflared。"
+                  "README の「Publish the Web UI」を参照）。", file=sys.stderr)
+            return 1
     try:
         factory, scenario_title, scene_intro, listeners = build_factory(args)
     except Exception as exc:
@@ -822,12 +870,64 @@ def main() -> int:
     suffix = f"/?token={access_token}" if access_token else "/"
     print(f"Web UI: http://{args.host}:{args.port}{suffix}")
     try:
-        web.run_app(app, host=args.host, port=args.port, print=None)
+        if cloudflared is None:
+            web.run_app(app, host=args.host, port=args.port, print=None)
+        else:
+            asyncio.run(serve_public(app, args.host, args.port, cloudflared, suffix))
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        print(f"エラー: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
     finally:
         # Let the picture book finish the page it is writing.
         for listener in listeners:
             listener.close()
     return 0
+
+
+async def serve_public(
+    app: web.Application, host: str, port: int, cloudflared: str, suffix: str
+) -> None:
+    """Serve as usual, plus a public HTTPS address through a quick tunnel.
+
+    The tunnel gets a loopback port of its own: requests arriving there are
+    treated as coming from outside (no past logs, no tablet), even though
+    cloudflared connects from 127.0.0.1. The tunnel ends with the server."""
+    from public_tunnel import QuickTunnel
+
+    tunnel_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tunnel_socket.bind(("127.0.0.1", 0))
+    app[PUBLIC_PORT_KEY] = tunnel_socket.getsockname()[1]
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tunnel = QuickTunnel(cloudflared)
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signum, stop.set)
+    try:
+        await web.TCPSite(runner, host, port).start()
+        await web.SockSite(runner, tunnel_socket).start()
+        print("公開用トンネルを起動しています…")
+        url = await tunnel.start(app[PUBLIC_PORT_KEY])
+        # The key is printed here only: not logged or written anywhere.
+        print(f"公開URL: {url}{suffix}")
+        print("終了すると公開も止まります（Ctrl+C）。")
+        stopped = asyncio.ensure_future(stop.wait())
+        tunnel_ended = asyncio.ensure_future(tunnel.wait())
+        await asyncio.wait({stopped, tunnel_ended}, return_when=asyncio.FIRST_COMPLETED)
+        for task in (stopped, tunnel_ended):
+            task.cancel()
+        if not stop.is_set():
+            # Serving on without it would look published while it is not.
+            raise RuntimeError(
+                f"公開トンネル（cloudflared）が終了しました（終了コード {tunnel_ended.result()}）。"
+                "公開URLは使えないので、サーバも止めます。"
+            )
+    finally:
+        await tunnel.stop()
+        await runner.cleanup()
 
 
 if __name__ == "__main__":

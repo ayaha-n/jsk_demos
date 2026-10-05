@@ -270,6 +270,39 @@ unset. It prints the URL including `?token=...`; share that URL.
   relay's speech input is not read). Use it only when one participant drives
   the robot.
 
+### Publish the Web UI (optional)
+
+`--public` also gives the Web UI a public HTTPS address, through a
+[Cloudflare quick tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/)
+(no account needed), so participants can join from outside the local
+network:
+
+```bash
+python scripts/web_server.py --scenario eeyore_birthday --storybook-eink --public
+# Web UI: http://127.0.0.1:8080/?token=<key>
+# 公開URL: https://<random words>.trycloudflare.com/?token=<key>
+```
+
+- The key comes from `POOH_WEB_TOKEN`, or, if that is unset, is a fresh
+  random one for each launch. It is printed on the terminal only; anyone
+  with the URL and key can talk to Pooh on this PC's API key, so share it
+  only with participants.
+- The public address is random and works until the server stops (Ctrl+C):
+  the tunnel ends with it.
+- Through the tunnel, a participant gets the conversation and their own
+  session's book and PDF (絵本を見る), but not the past-log viewer, and their
+  sessions are not written on the tablet. The tunnel reaches the server from
+  127.0.0.1 like a local browser, so it is given a loopback port of its own
+  and told apart by that, not by any forwarding header.
+- `cloudflared` is taken from PATH, or from `.tools/` in this directory
+  (gitignored):
+
+  ```bash
+  mkdir -p .tools && curl -fsSL -o .tools/cloudflared \
+    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+  chmod +x .tools/cloudflared
+  ```
+
 ### Connect to the Pooh body (optional)
 
 The chatbot remains a Python 3.12 application and does not import ROS. When
@@ -529,6 +562,7 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 │   ├── storybook_live.py             # Live book on the e-ink tablet / PNG preview
 │   ├── storybook_render.py           # Past log -> page PNGs, PDF, book.json
 │   ├── storybook_illustrations.py    # Illustration generation per story beat
+│   ├── public_tunnel.py              # Cloudflare quick tunnel for --public
 │   └── ...
 ├── assets/storybook/                   # Picture-book illustrations per scenario
 ├── config/                            # Fixed lines and motions, picture-book settings
@@ -537,5 +571,6 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 └── tests/
     ├── test_pooh_narrative_dspy.py   # Regression tests without LLM calls
     ├── test_web_server.py            # Web UI server tests with a fake session
-    └── test_storybook.py             # Picture-book tests without tablet or APIs
+    ├── test_storybook.py             # Picture-book tests without tablet or APIs
+    └── test_public.py                # --public tests with a stand-in cloudflared
 ```
