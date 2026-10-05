@@ -442,6 +442,23 @@ class LogViewerTests(AioHTTPTestCase):
             self.assertEqual(response.status, 404, name)
 
 
+class StaticCachingTests(AioHTTPTestCase):
+    async def get_application(self):
+        return web_server.create_app(FakeSession)
+
+    async def test_page_asks_for_the_current_version_of_its_assets(self):
+        body = await (await self.client.get("/")).text()
+        version = web_server._asset_version()
+        self.assertIn(f'src="/static/app.js?v={version}"', body)
+        self.assertIn(f'href="/static/style.css?v={version}"', body)
+        self.assertEqual((await self.client.get(f"/static/app.js?v={version}")).status, 200)
+
+    async def test_page_and_assets_are_always_revalidated(self):
+        for path in ("/", "/static/app.js", "/static/style.css"):
+            response = await self.client.get(path)
+            self.assertEqual(response.headers.get("Cache-Control"), "no-cache", path)
+
+
 class OwnStorybookTests(AioHTTPTestCase):
     """Any Web UI user can read their own session's book, from anywhere."""
 

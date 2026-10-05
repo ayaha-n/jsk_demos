@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SCENARIO_TITLE}}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ASSET_VERSION}}">
   <style>{{LOCAL_LOG_STYLE}}</style>
 </head>
 <body>
@@ -68,6 +68,6 @@
   <!-- Scenario-authored scene description; display only, not model input. -->
   <template id="scene-intro-template"><div class="scene-intro">{{SCENE_INTRO}}</div></template>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v={{ASSET_VERSION}}"></script>
 </body>
 </html>

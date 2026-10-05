@@ -250,11 +250,19 @@ def _authorized(request: web.Request) -> bool:
     return hmac.compare_digest(supplied, expected)
 
 
+def _asset_version() -> str:
+    """Changes whenever app.js or style.css does: the page asks for them by
+    this, so a browser never keeps using a copy cached before an update."""
+    return str(max(
+        (WEB_ROOT / name).stat().st_mtime_ns for name in ("app.js", "style.css")
+    ))
+
+
 async def index(request: web.Request) -> web.Response:
     body = request.app[INDEX_HTML_KEY].replace(
         "{{LOCAL_LOG_STYLE}}", _local_log_style(request.remote)
-    )
-    return web.Response(text=body, content_type="text/html")
+    ).replace("{{ASSET_VERSION}}", _asset_version())
+    return web.Response(text=body, content_type="text/html", headers=NO_CACHE)
 
 
 def _is_loopback_address(address: str | None) -> bool:
@@ -284,12 +292,17 @@ def _local_log_access_allowed(request: web.Request) -> bool:
     return _is_loopback_address(request.remote)
 
 
+# Always revalidated: with only Last-Modified, a browser may keep using an
+# older app.js after an update, out of step with the freshly served page.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
 async def static_app_script(request: web.Request) -> web.FileResponse:
-    return web.FileResponse(WEB_ROOT / "app.js")
+    return web.FileResponse(WEB_ROOT / "app.js", headers=NO_CACHE)
 
 
 async def static_stylesheet(request: web.Request) -> web.FileResponse:
-    return web.FileResponse(WEB_ROOT / "style.css")
+    return web.FileResponse(WEB_ROOT / "style.css", headers=NO_CACHE)
 
 
 def _resolve_log_path(log_dir: Path, name: str) -> Path | None:
