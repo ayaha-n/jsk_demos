@@ -1,0 +1,9 @@
+{
+  "id": "storybook_viewer",
+  "name": "Storybook",
+  "version": "0.1.0",
+  "description": "Writes the conversation with Pooh as a picture book, then lets you read it back.",
+  "application": "storybook_viewer",
+  "qtfb": true,
+  "supportsRotation": true
+}

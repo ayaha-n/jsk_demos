@@ -338,11 +338,25 @@ Pages break at those story beats and when the text no longer fits. Beats,
 their narration and illustrations, and the motion phrases are configured in
 `config/storybook.json`.
 
-The tablet side is
-[plush_memory](https://github.com/ayaha-n/plush_memory)'s e-ink viewer (`plush_memory_viewer`,
-an AppLoad app), reused as is: the chatbot imports
-`plush_memory/scripts/eink_memory_push.py` and pushes over ssh. Install and
-start the viewer as described in plush_memory's README, then:
+The tablet side is `storybook_viewer/`, an AppLoad app built on
+[plush_memory](https://github.com/ayaha-n/plush_memory)'s e-ink viewer: it
+uses that viewer's engine as a library (`plush_memory/eink-viewer`, see
+"Reusing the viewer in another app" in plush_memory's README) and adds only
+reading the finished book back. The chatbot pushes to it over ssh with
+`plush_memory/scripts/eink_memory_push.py`. The tablet needs xovi and
+AppLoad as for plush_memory. Build and install it once:
+
+```bash
+cd storybook_viewer && cargo build --release --target aarch64-unknown-linux-musl
+ssh root@10.11.99.1 mkdir -p /home/root/xovi/exthome/appload/storybook_viewer
+scp target/aarch64-unknown-linux-musl/release/storybook_viewer external.manifest.json icon.png \
+    root@10.11.99.1:/home/root/xovi/exthome/appload/storybook_viewer/
+# a tablet set down on its side (with xochitl's auto-rotate off):
+ssh root@10.11.99.1 'echo landscape_cw > /home/root/xovi/exthome/appload/storybook_viewer/orientation.conf'
+```
+
+Then press reload in the AppLoad list, close any other AppLoad app, open
+"Storybook", and start the chatbot:
 
 ```bash
 export EINK_HOST=10.11.99.1   # USB; or the tablet's ssh alias
@@ -372,6 +386,10 @@ stays sharp and searchable; only the illustrations are images.
 
 To read a session back:
 
+- **On the tablet, right after the session:** once the last page is
+  written, tap the right third of the panel for the next page and the left
+  third for the previous one. Touches do nothing while a book is being
+  written, and the next session's book starts afresh.
 - **Web UI, right after the session:** 絵本を見る appears once it ends.
 - **Web UI, any past session:** open 過去ログ and check 絵本で見る; choose
   横/縦 for the page orientation. PDF opens the saved live book, or renders
@@ -506,6 +524,7 @@ Both `.dspy_cache` and `logs` are excluded from Git.
 │   └── ...
 ├── assets/storybook/                   # Picture-book illustrations per scenario
 ├── config/                            # Fixed lines and motions, picture-book settings
+├── storybook_viewer/                   # AppLoad app on the tablet for the live book (Rust)
 ├── web/                               # Browser chat UI (HTML/JS/CSS)
 └── tests/
     ├── test_pooh_narrative_dspy.py   # Regression tests without LLM calls

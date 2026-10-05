@@ -8,9 +8,11 @@ answer.  The book follows the newest session; outputs of any other session
 
 Backends:
 
-- ``EinkBackend`` pushes to plush_memory's e-ink viewer on the reMarkable
-  Paper Pro through ``plush_memory/scripts/eink_memory_push.py``: the
-  illustration materializes first, then the text is written by hand.
+- ``EinkBackend`` pushes to the storybook viewer (``storybook_viewer/``, an
+  AppLoad app built on plush_memory's e-ink viewer) on the reMarkable Paper
+  Pro through ``plush_memory/scripts/eink_memory_push.py``: the illustration
+  materializes first, then the text is written by hand.  Once the book is
+  done, the viewer lets the reader turn back through its pages by tapping.
 - ``PreviewBackend`` re-renders the current page as a PNG after each event,
   for working without the tablet.
 """
@@ -55,6 +57,15 @@ DRAIN_POLL_SEC = 1.0
 DRAIN_TIMEOUT_SEC = 120.0
 PAGE_READ_HOLD_SEC = 3.0
 PAGE_CLEAR_HOLD_MS = 3000
+# Reading the finished book back on the tablet: how long a page turn holds
+# the panel blank before drawing the page, so the previous one does not
+# ghost through. Sent with the book's end; the viewer needs no rebuild.
+PAGE_TURN_CLEAR_MS = 1000
+# Sending a page's end mark, which reading back depends on.
+END_MARK_ATTEMPTS = 3
+END_MARK_RETRY_SEC = 2.0
+# Where the storybook viewer is installed on the tablet (see its README).
+STORYBOOK_APP_DIR = "/home/root/xovi/exthome/appload/storybook_viewer"
 
 
 class Backend(Protocol):
@@ -75,26 +86,54 @@ def import_eink_memory_push() -> Any:
 
 
 class EinkBackend:
-    """plush_memory_viewer on the tablet, over ssh (EINK_HOST)."""
+    """The storybook viewer on the tablet, over ssh (EINK_HOST).
 
-    def __init__(self, push: Any | None = None) -> None:
+    Besides plush_memory's event keys, it marks the first event of a book
+    (``book_start``) and the end of its last page (``book_end``), between
+    which the viewer keeps each page to be read back."""
+
+    def __init__(self, push: Any | None = None, app_dir: str = STORYBOOK_APP_DIR) -> None:
         self.push = push or import_eink_memory_push()
+        self.app_dir = app_dir
         self.layout: PageLayout = LAYOUTS["portrait"]
         self._clear_pending = False
         self._page_open = False
+        self._book_start = False
+        self._page_number = 0
         self._last_id = 0
 
     def orientation(self) -> str:
-        return self.push.read_orientation()
+        return self.push.read_orientation(app_dir=self.app_dir)
 
     def begin_book(self, layout: PageLayout) -> None:
         self.layout = layout
+        self._book_start = True
+        self._page_number = 0
+        self._drop_incomplete_events()
+
+    def _drop_incomplete_events(self) -> None:
+        """Remove event dirs a stopped run left without READY: the viewer
+        never draws them. Events are sent one at a time, so at a book's
+        start none is still on its way."""
+        try:
+            self.push.ssh(
+                f"cd {self.app_dir}/events 2>/dev/null || exit 0; "
+                'for d in */; do [ -f "$d/READY" ] || rm -rf -- "$d"; done'
+            )
+        except Exception as exc:
+            _report(self, exc)
 
     def new_page(self, event: NewPage) -> None:
         if self._page_open:
             self._wait_drained()
             time.sleep(PAGE_READ_HOLD_SEC)
-        self._end_page()
+        try:
+            self._end_page()
+        except Exception as exc:
+            # Only that page is missing from the read-back; the new page
+            # still starts on a blank panel.
+            _report(self, exc)
+            self._page_open = False
         # Until something lands on the new page, the next push blanks the
         # panel and starts the page; a failed illustration push leaves this
         # set, so the text does not end up over the previous page.
@@ -108,8 +147,10 @@ class EinkBackend:
                     str(image), x + w // 2, y + h // 2, target_w=w, max_h=h,
                     clear_first=True, page_start=True, layout=self.layout.name,
                     clear_hold_ms=PAGE_CLEAR_HOLD_MS, event_id=self._next_id(),
+                    app_dir=self.app_dir, extra=self._extra(),
                 )
             self._clear_pending = False
+            self._book_start = False
 
     def write(self, event: WriteEntries, points_per_step: int) -> None:
         # What the tablet has yet to draw is the real backlog: pushes return
@@ -127,20 +168,44 @@ class EinkBackend:
                 clear_first=self._clear_pending, page_start=self._clear_pending,
                 layout=self.layout.name, points_per_step=points_per_step,
                 clear_hold_ms=PAGE_CLEAR_HOLD_MS, event_id=self._next_id(),
+                app_dir=self.app_dir, extra=self._extra(),
             )
             self._clear_pending = False
+            self._book_start = False
 
     def end_book(self) -> None:
-        self._end_page()
+        self._end_page(book_end=True)
 
-    def _end_page(self) -> None:
-        if self._page_open:
-            self._page_open = False
-            self.push.push_page_end(self._next_id())
+    def _end_page(self, book_end: bool = False) -> None:
+        """Mark the page done, retrying a few times: the viewer keeps a page
+        for reading back only on this mark, and starts reading only on the
+        book's last one."""
+        if not self._page_open:
+            return
+        # The page's number lets the viewer keep it once even if a mark that
+        # did land is sent again because its reply was lost.
+        self._page_number += 1
+        extra: dict[str, Any] = {"page": self._page_number}
+        if book_end:
+            extra.update(book_end=True, turn_clear_ms=PAGE_TURN_CLEAR_MS)
+        for attempt in range(END_MARK_ATTEMPTS):
+            try:
+                self.push.push_page_end(self._next_id(), app_dir=self.app_dir, extra=extra)
+                break
+            except Exception:
+                if attempt + 1 == END_MARK_ATTEMPTS:
+                    raise
+                time.sleep(END_MARK_RETRY_SEC)
+        self._page_open = False
+
+    def _extra(self) -> dict[str, bool] | None:
+        """``book_start`` until one of the book's events has been sent: a
+        failed first push must not leave the previous book's pages in."""
+        return {"book_start": True} if self._book_start else None
 
     def _pending(self) -> int:
         try:
-            return self.push.pending_events()
+            return self.push.pending_events(app_dir=self.app_dir)
         except Exception:
             return 0
 

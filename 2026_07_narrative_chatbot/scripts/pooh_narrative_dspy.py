@@ -1648,7 +1648,7 @@ def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--storybook-eink",
         action="store_true",
-        help="会話を絵本にして reMarkable（plush_memory_viewer, EINK_HOST）にライブで書く。",
+        help="会話を絵本にして reMarkable（Storybook アプリ, EINK_HOST）にライブで書く。",
     )
     parser.add_argument(
         "--storybook-preview",

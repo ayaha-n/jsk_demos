@@ -487,12 +487,16 @@ class LiveStorybookTest(unittest.TestCase):
 class FakePush:
     def __init__(self):
         self.calls = []
+        self.commands = []
 
-    def read_orientation(self):
+    def read_orientation(self, **kwargs):
         return "portrait"
 
-    def pending_events(self):
+    def pending_events(self, **kwargs):
         return 0
+
+    def ssh(self, command, *args, **kwargs):
+        self.commands.append(command)
 
     def push_memory(self, path, cx, cy, **kwargs):
         self.calls.append(("memory", Path(path).name, kwargs))
@@ -501,7 +505,7 @@ class FakePush:
         self.calls.append(("text", paragraphs, kwargs))
 
     def push_page_end(self, event_id, **kwargs):
-        self.calls.append(("page_end", event_id))
+        self.calls.append(("page_end", event_id, kwargs))
 
 
 class FailingIllustrationPush(FakePush):
@@ -563,7 +567,7 @@ class EinkBackendTest(WithIllustrations):
         class Busy(FakePush):
             backlog = [2, 1, 0]
 
-            def pending_events(self):
+            def pending_events(self, **kwargs):
                 self.calls.append(("pending",))
                 return self.backlog.pop(0) if self.backlog else 0
 
@@ -579,7 +583,7 @@ class EinkBackendTest(WithIllustrations):
 
     def test_writing_hurries_while_the_tablet_is_behind(self):
         class Behind(FakePush):
-            def pending_events(self):
+            def pending_events(self, **kwargs):
                 return 5
 
         push = Behind()
@@ -591,6 +595,133 @@ class EinkBackendTest(WithIllustrations):
                 backend.write(event, storybook_live.BASE_POINTS_PER_STEP)
         self.assertEqual(push.calls[0][2]["points_per_step"], storybook_live.RUSHED_POINTS_PER_STEP)
         self.assertEqual(push.calls[0][2]["clear_hold_ms"], storybook_live.PAGE_CLEAR_HOLD_MS)
+
+    def test_book_is_marked_for_reading_back(self):
+        push = FakePush()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
+        backend.begin_book(builder.layout)
+        for turn in (StoryTurn("session_open", "やあ。"),
+                     StoryTurn("world_event", "あれ？", world_event_id="pooh_tastes_honey"),
+                     StoryTurn("session_close", "またね。", ends_story=True)):
+            for event in builder.add(turn):
+                if isinstance(event, NewPage):
+                    backend.new_page(event)
+                else:
+                    backend.write(event, 12)
+        backend.end_book()
+        extras = [call[2].get("extra") for call in push.calls]
+        self.assertEqual(extras[0], {"book_start": True})
+        # Between them: nothing, except the page numbers of the page ends.
+        self.assertTrue(all(extra is None or set(extra) == {"page"} for extra in extras[1:-1]))
+        self.assertEqual(push.calls[-1][0], "page_end")
+        self.assertEqual(extras[-1], {"page": 2, "book_end": True,
+                                      "turn_clear_ms": storybook_live.PAGE_TURN_CLEAR_MS})
+        self.assertTrue(all(call[2]["app_dir"] == storybook_live.STORYBOOK_APP_DIR
+                            for call in push.calls))
+
+    def test_book_start_survives_a_failed_first_push(self):
+        class FlakyText(FakePush):
+            failures = 1
+
+            def push_text(self, paragraphs, **kwargs):
+                if self.failures:
+                    self.failures -= 1
+                    raise OSError("scp failed")
+                super().push_text(paragraphs, **kwargs)
+
+        push = FlakyText()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
+        backend.begin_book(builder.layout)
+        events = builder.add(StoryTurn("participant", "やあ。", user_text="こんにちは"))
+        backend.new_page(events[0])
+        with self.assertRaises(OSError):
+            backend.write(events[1], 12)
+        backend.write(events[1], 12)
+        self.assertEqual(push.calls[0][2]["extra"], {"book_start": True})
+        backend.write(events[1], 12)
+        self.assertIsNone(push.calls[1][2]["extra"])
+
+    def test_book_end_is_resent_until_it_lands(self):
+        class FlakyEnd(FakePush):
+            failures = 2
+
+            def push_page_end(self, event_id, **kwargs):
+                if self.failures:
+                    self.failures -= 1
+                    raise OSError("ssh failed")
+                super().push_page_end(event_id, **kwargs)
+
+        push = FlakyEnd()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
+        backend.begin_book(builder.layout)
+        backend.new_page(builder._new_page(None))
+        with patch.object(storybook_live, "END_MARK_RETRY_SEC", 0):
+            backend.end_book()
+        self.assertEqual(push.calls[-1][0], "page_end")
+        self.assertTrue(push.calls[-1][2]["extra"]["book_end"])
+
+    def test_a_resent_end_mark_carries_the_same_page_number(self):
+        class ReplyLost(FakePush):
+            lost = 1
+
+            def push_page_end(self, event_id, **kwargs):
+                super().push_page_end(event_id, **kwargs)  # it did land
+                if self.lost:
+                    self.lost -= 1
+                    raise TimeoutError("ssh reply lost")
+
+        push = ReplyLost()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
+        backend.begin_book(builder.layout)
+        backend.new_page(builder._new_page(None))
+        with patch.object(storybook_live, "END_MARK_RETRY_SEC", 0):
+            backend.new_page(builder._new_page(None))
+            backend.end_book()
+        pages = [call[2]["extra"]["page"] for call in push.calls if call[0] == "page_end"]
+        self.assertEqual(pages, [1, 1, 2])
+
+    def test_book_end_that_never_lands_can_be_sent_again(self):
+        class Down(FakePush):
+            def push_page_end(self, event_id, **kwargs):
+                raise OSError("ssh failed")
+
+        push = Down()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
+        backend.begin_book(builder.layout)
+        backend.new_page(builder._new_page(None))
+        with patch.object(storybook_live, "END_MARK_RETRY_SEC", 0):
+            with self.assertRaises(OSError):
+                backend.end_book()
+        # Still open: a later end_book tries again.
+        self.assertTrue(backend._page_open)
+
+    def test_new_page_starts_even_if_the_last_one_could_not_be_marked(self):
+        class Down(FakePush):
+            def push_page_end(self, event_id, **kwargs):
+                raise OSError("ssh failed")
+
+        push = Down()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
+        backend.begin_book(builder.layout)
+        backend.new_page(builder._new_page(None))
+        with patch.object(storybook_live, "END_MARK_RETRY_SEC", 0):
+            backend.new_page(builder._new_page(None))
+        self.assertTrue(backend._clear_pending)
+        self.assertTrue(backend._page_open)
+
+    def test_book_start_drops_incomplete_events_left_by_a_stopped_run(self):
+        push = FakePush()
+        backend = storybook_live.EinkBackend(push)
+        backend.begin_book(LAYOUTS["portrait"])
+        [command] = push.commands
+        self.assertIn(f"{storybook_live.STORYBOOK_APP_DIR}/events", command)
+        self.assertIn("READY", command)
 
     def test_new_page_ends_the_previous_one(self):
         push = FakePush()
