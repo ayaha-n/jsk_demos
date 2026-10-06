@@ -151,7 +151,6 @@ Scripted lines (opening, ending, fixed events) carry a stable `fixed_utterance_i
 The session can be retold as a picture book, written by hand live on a reMarkable Paper Pro and read back afterwards. It retells only what the session recorded (the participant's words, Pooh's lines, the motion of fixed lines and the timed events), with an illustrated page per scene. Install the tablet app `storybook_viewer/` once and open "Storybook" in AppLoad (see [`docs/storybook.md`](docs/storybook.md)), then add `--storybook-eink`:
 
 ```bash
-python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday --ros-relay --storybook-eink
 python scripts/web_server.py --scenario eeyore_birthday --storybook-eink
 ```
 
