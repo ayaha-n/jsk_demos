@@ -47,7 +47,12 @@ class QuickTunnel:
     async def start(self, port: int, timeout: float = START_TIMEOUT_SEC) -> str:
         """Start the tunnel and return its public address."""
         self.process = await asyncio.create_subprocess_exec(
-            self.executable, "tunnel", "--no-autoupdate",
+            # Some networks (seen on this lab's own Wi-Fi) block the
+            # outbound QUIC/UDP cloudflared defaults to; its own
+            # connectivity precheck then recommends HTTP/2 but does not
+            # actually switch to it, so cloudflared just retries QUIC
+            # forever and the tunnel never comes up. Force HTTP/2 instead.
+            self.executable, "tunnel", "--no-autoupdate", "--protocol", "http2",
             "--url", f"http://127.0.0.1:{port}",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
