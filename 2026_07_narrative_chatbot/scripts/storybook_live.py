@@ -20,6 +20,7 @@ Backends:
 from __future__ import annotations
 
 import contextlib
+import os
 import queue
 import sys
 import tempfile
@@ -76,7 +77,16 @@ class Backend(Protocol):
     def end_book(self) -> None: ...
 
 
+# This project is tied to one specific tablet, reachable over Tailscale as
+# `plush-eink` (see ~/.ssh/config for the host/port). plush_memory itself
+# stays host-agnostic (its own EINK_HOST default is the USB address,
+# 10.11.99.1), so the project-specific default lives here instead; an
+# explicitly set EINK_HOST still wins.
+DEFAULT_EINK_HOST = "plush-eink"
+
+
 def import_eink_memory_push() -> Any:
+    os.environ.setdefault("EINK_HOST", DEFAULT_EINK_HOST)
     scripts = storybook.PLUSH_MEMORY_DIR / "scripts"
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
