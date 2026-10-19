@@ -608,6 +608,53 @@ class RegressionTests(unittest.TestCase):
         ):
             self.assertEqual(publisher.receive_user_input(), "青い風船がいいな")
 
+    def test_narrative_relay_keeps_observed_actions(self):
+        class FakeSocket:
+            def __init__(self):
+                self.chunks = [(
+                    '{"type":"observed_actions","observed_actions":["参加者がプーの左手をなでた"]}\n'
+                    '{"type":"user_input","text":"「どうぞ」と言って、風船をプーに手渡す",'
+                    '"observed_actions":["参加者が風船をプーに手渡した"]}\n'
+                ).encode()]
+
+            def recv(self, _size):
+                return self.chunks.pop(0) if self.chunks else b""
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
+        publisher._socket = FakeSocket()
+        with patch(
+            "narrative_relay.select.select",
+            return_value=([publisher._socket], [], []),
+        ):
+            # Observed on their own: no input, but checked before waiting again.
+            self.assertIsNone(publisher.receive_user_input())
+            self.assertEqual(publisher.take_observed_actions(), ["参加者がプーの左手をなでた"])
+            self.assertEqual(publisher.receive_user_input(), "「どうぞ」と言って、風船をプーに手渡す")
+        self.assertEqual(publisher.take_observed_actions(), ["参加者が風船をプーに手渡した"])
+        self.assertEqual(publisher.take_observed_actions(), [])
+
+    def test_session_records_observed_actions_without_a_reply(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        agent = Mock()
+        publisher = Mock()
+        heard = []
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, ros_publisher=publisher,
+            output_listeners=[lambda _session, output: heard.append(output)],
+        )
+        with patch.object(pooh, "append_session_record") as record:
+            output = session.observe(["参加者がはちみつの壺をプーの左手に手渡した", ""])
+
+        self.assertIn("参加者がはちみつの壺をプーの左手に手渡した", session.current_situation.events)
+        agent.assert_not_called()
+        publisher.publish.assert_not_called()
+        self.assertEqual(heard, [output])
+        self.assertEqual(output.observed_actions, ["参加者がはちみつの壺をプーの左手に手渡した"])
+        logged = record.call_args.args[1]
+        self.assertEqual(logged["source"], "observed")
+        self.assertEqual(logged["observed_actions"], ["参加者がはちみつの壺をプーの左手に手渡した"])
+        self.assertIsNone(session.observe([]))
+
     def test_narrative_relay_receive_poll_allows_timed_event_checks(self):
         publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
         publisher._socket = object()

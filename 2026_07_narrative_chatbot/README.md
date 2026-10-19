@@ -148,6 +148,8 @@ Scripted lines (opening, ending, fixed events) carry a stable `fixed_utterance_i
 
 A generated line is sent to the relay as soon as the respond stage has written it (`narrative_response_chunk`), so the robot starts speaking before the turn's last stage (interpret) finishes; the complete `narrative_response` that follows carries `"streamed": true` so that it is not spoken again. A turn whose line may still be replaced after that (an exit, the guards in `enforce_response_invariants`) is sent whole at the end as before; see `response_may_be_replaced`. A participant's request about the honey (not to eat it, or to give something else instead of Pooh's jar) is judged by the classify stage before generation, and while a fixed line answers it, no line is generated.
 
+The ROS side may also report what the robot saw the participant do (e.g. `参加者がはちみつの壺をプーの左手に手渡した`, from pooh_body's `handover_vision_relay.py`), with an utterance or on its own as `observed_actions`. These are added to the story's events without a reply of their own, before the utterance, if any, is answered; they are logged with source `observed` and retold in the picture book.
+
 ### Picture book
 
 The session can be retold as a picture book, written by hand live on a reMarkable Paper Pro and read back afterwards. It retells only what the session recorded (the participant's words, Pooh's lines, the motion of fixed lines and the timed events), with an illustrated page per scene. Install the tablet app `storybook_viewer/` once and open "Storybook" in AppLoad (see [`docs/storybook.md`](docs/storybook.md)), then add `--storybook-eink`:

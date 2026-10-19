@@ -23,6 +23,7 @@ class NarrativeRelayPublisher:
         self.scenario_key = scenario_key
         self._socket: socket.socket | None = None
         self._receive_buffer = b""
+        self._observed: list[str] = []
 
     def _connect(self) -> socket.socket | None:
         if self._socket is not None:
@@ -98,8 +99,25 @@ class NarrativeRelayPublisher:
             return False
         return True
 
+    def take_observed_actions(self) -> list[str]:
+        """What the robot saw the participant do since the last call.
+
+        They come with an utterance (``"observed_actions"`` of a
+        ``user_input``), or on their own (``"type": "observed_actions"``)
+        when the robot was busy and no turn was taken; either way they are
+        to be recorded before the utterance, if any, is answered.
+        """
+        observed, self._observed = self._observed, []
+        return observed
+
+    def _keep_observed(self, payload: dict[str, Any]) -> None:
+        actions = payload.get("observed_actions", [])
+        if isinstance(actions, list):
+            self._observed.extend(str(a).strip() for a in actions if str(a).strip())
+
     def receive_user_input(self, _prompt: str = "") -> str | None:
-        """Return one relayed utterance, or ``None`` so timers can be checked."""
+        """Return one relayed utterance, or ``None`` so timers (and observed
+        actions, see ``take_observed_actions``) can be checked."""
         connection = self._connect()
         if connection is None:
             raise EOFError
@@ -117,8 +135,12 @@ class NarrativeRelayPublisher:
                 if not isinstance(payload, dict):
                     print("ROS中継からJSONオブジェクト以外を受信しました", file=sys.stderr)
                     continue
+                if payload.get("type") == "observed_actions":
+                    self._keep_observed(payload)
+                    return None
                 if payload.get("type") != "user_input":
                     continue
+                self._keep_observed(payload)
                 text = str(payload.get("text", "")).strip()
                 if text:
                     return text

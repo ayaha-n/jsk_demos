@@ -971,6 +971,8 @@ class SessionOutput:
     # Set when the line was sent to the robot before the turn finished.
     turn_id: str | None = None
     streamed: bool = False
+    # For source "observed": what the robot saw the participant do.
+    observed_actions: list[str] = field(default_factory=list)
 
     @property
     def motion(self) -> dict[str, str]:
@@ -1290,7 +1292,7 @@ class NarrativeSession:
             f"{format_history(self.turns)}"
         )
 
-    def _publish(self, output: SessionOutput) -> None:
+    def _notify_listeners(self, output: SessionOutput) -> None:
         for listener in self.output_listeners:
             try:
                 listener(self, output)
@@ -1298,6 +1300,9 @@ class NarrativeSession:
                 # A listener (e.g. the picture book) never stops the story.
                 print(f"[{self.session_id[:8]}] 出力リスナーのエラー: "
                       f"{type(exc).__name__}: {exc}", file=sys.stderr)
+
+    def _publish(self, output: SessionOutput) -> None:
+        self._notify_listeners(output)
         if self.ros_publisher is None:
             return
         self.ros_publisher.publish(
@@ -1357,6 +1362,37 @@ class NarrativeSession:
                 "fixed_utterance_id": output.fixed_utterance_id,
             })
         self._publish(output)
+        return output
+
+    def observe(self, actions: Sequence[str]) -> SessionOutput | None:
+        """Record what the robot saw the participant do, without a reply.
+
+        The actions (e.g. 「参加者がはちみつの壺をプーの左手に手渡した」) join
+        the story's events, so the next answer can take them up; they are
+        logged with source "observed" and retold in the picture book, but
+        nothing is sent to the robot.
+        """
+        actions = [action for action in actions if action]
+        if self.ended or not actions:
+            return None
+        self.current_situation = apply_situation_update(
+            self.current_situation, SituationUpdate(add_events=actions))
+        append_session_record(self.log_path, {
+            "scenario": self.scenario.key,
+            "session_id": self.session_id,
+            "source": "observed",
+            "observed_actions": actions,
+            "updated_situation": self.current_situation.model_dump(),
+        })
+        output = SessionOutput(
+            source="observed",
+            bot_response="",
+            interaction_mode="narrative",
+            scene_id="none",
+            updated_situation=self.current_situation,
+            observed_actions=actions,
+        )
+        self._notify_listeners(output)
         return output
 
     def seconds_until_due(self) -> float | None:
@@ -1689,6 +1725,9 @@ def run_chat(
             if closing is not None:
                 print(pooh_line(closing.bot_response))
             break
+        observed = ros_publisher.take_observed_actions() if ros_publisher else []
+        if session.observe(observed) is not None:
+            print(f"[観察された行為] {'、'.join(observed)}")
         if user_input is None:
             continue
         if not user_input:
