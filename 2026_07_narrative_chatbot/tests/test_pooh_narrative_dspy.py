@@ -2069,5 +2069,152 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(pooh.clamp_score("bad"), 1)
 
 
+
+class EarlyResponseTests(unittest.TestCase):
+    def publisher(self, sent=True):
+        publisher = Mock()
+        publisher.publish_chunk.return_value = sent
+        return publisher
+
+    def test_relay_sends_the_line_as_a_chunk(self):
+        sent = []
+
+        class FakeSocket:
+            def sendall(self, data):
+                sent.append(json.loads(data.decode("utf-8")))
+
+            def close(self):
+                pass
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
+        publisher._socket = FakeSocket()
+        self.assertTrue(publisher.publish_chunk(turn_id="t-1", index=0, text="うん。"))
+        publisher.publish(bot_response="うん。", narrative_actions=[], scene_id="none",
+                          source="participant", turn_id="t-1", streamed=True)
+        self.assertEqual(sent[0], {"type": "narrative_response_chunk", "turn_id": "t-1",
+                                   "index": 0, "text": "うん。"})
+        self.assertTrue(sent[1]["streamed"])
+        self.assertEqual(sent[1]["turn_id"], "t-1")
+
+    def test_turns_that_may_be_replaced_are_not_sent_early(self):
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        self.assertTrue(pooh.response_may_be_replaced("ケーキにしよう", "", controller))
+        controller.state.honey_status = "empty"
+        self.assertFalse(pooh.response_may_be_replaced("ケーキにしよう", "", controller))
+        self.assertTrue(pooh.response_may_be_replaced("うーん、どうしよう", "", controller))
+        self.assertTrue(pooh.response_may_be_replaced("いいね", "", None))
+        self.assertFalse(pooh.response_may_be_replaced("いいね", "風船", None))
+        self.assertFalse(pooh.response_may_be_replaced("ケーキにしよう", "", None))
+
+    def agent(self, mode="narrative", technical_terms=()):
+        order = []
+
+        def factory(signature):
+            name = signature.__name__
+
+            def predictor(**kwargs):
+                order.append(name)
+                if name == "AnalyzeInteraction":
+                    return SimpleNamespace(
+                        interaction_mode=mode, current_scene="none",
+                        technical_terms=list(technical_terms),
+                    )
+                if name == "PlanMishearing":
+                    return SimpleNamespace(candidates=[])
+                if name == "GeneratePoohResponse":
+                    return SimpleNamespace(
+                        selected_mishearing="none", situation_update=SituationUpdate(),
+                        bot_response="ロボットのことだね。",
+                    )
+                return SimpleNamespace(
+                    narrative_actions=[], settled_details=[], question_kind="none",
+                )
+            return predictor
+        return pooh.PoohNarrativeAgent(factory), order
+
+    def run_forward(self, **kwargs):
+        agent, order = self.agent(**kwargs)
+        received = []
+        agent.forward(
+            current_situation=pooh.get_scenario("tea_party").initial_situation,
+            user_action="こんにちは", history="",
+            on_response=lambda line: (received.append(line), order.append("sent")),
+        )
+        return received, order
+
+    def test_line_is_sent_before_interpret(self):
+        received, order = self.run_forward()
+        self.assertEqual(received, ["ロボットのことだね。"])
+        self.assertLess(order.index("sent"), order.index("InterpretTurn"))
+
+    def test_technical_term_guard_applies_before_sending(self):
+        received, _ = self.run_forward(mode="meta", technical_terms=["ロボット"])
+        self.assertEqual(len(received), 1)
+        self.assertNotIn("ロボット", received[0])
+
+    def test_exit_line_is_not_sent(self):
+        received, _ = self.run_forward(mode="exit")
+        self.assertEqual(received, [])
+
+    def line_agent(self, line):
+        scenario = pooh.get_scenario("tea_party")
+
+        def agent(**kwargs):
+            kwargs["on_response"](line)
+            return SimpleNamespace(
+                interaction_mode="narrative",
+                current_scene="none",
+                narrative_actions=[],
+                bot_response=line,
+                updated_situation=scenario.initial_situation,
+            )
+        return scenario, agent
+
+    def test_early_turn_is_marked_so_it_is_not_spoken_again(self):
+        scenario, agent = self.line_agent("ケーキ、いいね。ぼくも食べたいな。")
+        publisher = self.publisher()
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, ros_publisher=publisher,
+            session_id="abcdef0123",
+        )
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("ケーキを持ってきたよ")
+        self.assertEqual(publisher.publish_chunk.call_args.kwargs, {
+            "turn_id": "abcdef01-1", "index": 0, "text": "ケーキ、いいね。ぼくも食べたいな。",
+        })
+        self.assertTrue(output.streamed)
+        final = publisher.publish.call_args.kwargs
+        self.assertTrue(final["streamed"])
+        self.assertEqual(final["turn_id"], "abcdef01-1")
+
+    def test_line_the_relay_did_not_take_is_sent_whole(self):
+        scenario, agent = self.line_agent("ケーキ、いいね。")
+        publisher = self.publisher(sent=False)
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, ros_publisher=publisher,
+        )
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("ケーキを持ってきたよ")
+        self.assertFalse(output.streamed)
+        self.assertFalse(publisher.publish.call_args.kwargs["streamed"])
+
+    def test_turn_is_not_sent_early_without_a_relay(self):
+        scenario = pooh.get_scenario("tea_party")
+        agent = Mock(return_value=SimpleNamespace(
+            interaction_mode="narrative",
+            current_scene="none",
+            narrative_actions=[],
+            bot_response="ケーキ、いいね。",
+            updated_situation=scenario.initial_situation,
+        ))
+        session = pooh.NarrativeSession(agent, "model", "program", scenario)
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("ケーキを持ってきたよ")
+        self.assertNotIn("on_response", agent.call_args.kwargs)
+        self.assertFalse(output.streamed)
+
 if __name__ == "__main__":
     unittest.main()

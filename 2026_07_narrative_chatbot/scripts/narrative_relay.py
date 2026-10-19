@@ -47,6 +47,8 @@ class NarrativeRelayPublisher:
         source: str,
         world_event_id: str | None = None,
         fixed_utterance_id: str | None = None,
+        turn_id: str | None = None,
+        streamed: bool = False,
     ) -> None:
         payload: dict[str, Any] = {
             "type": "narrative_response",
@@ -56,6 +58,11 @@ class NarrativeRelayPublisher:
             "scene_id": scene_id,
             "source": source,
         }
+        if turn_id is not None:
+            payload["turn_id"] = turn_id
+        if streamed:
+            # Its line was sent with publish_chunk as soon as it was written.
+            payload["streamed"] = True
         if world_event_id is not None:
             payload["world_event_id"] = world_event_id
         if fixed_utterance_id is not None:
@@ -65,9 +72,21 @@ class NarrativeRelayPublisher:
             motion = fixed_utterance_motion(fixed_utterance_id)
             if motion:
                 payload["motion"] = motion
+        self._send(payload)
+
+    def publish_chunk(self, *, turn_id: str, index: int, text: str) -> bool:
+        """Send a line before its turn finishes, so the robot starts speaking."""
+        return self._send({
+            "type": "narrative_response_chunk",
+            "turn_id": turn_id,
+            "index": index,
+            "text": text,
+        })
+
+    def _send(self, payload: dict[str, Any]) -> bool:
         connection = self._connect()
         if connection is None:
-            return
+            return False
         try:
             connection.sendall(
                 (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
@@ -76,6 +95,8 @@ class NarrativeRelayPublisher:
             print(f"ROS中継への送信に失敗しました: {error}", file=sys.stderr)
             connection.close()
             self._socket = None
+            return False
+        return True
 
     def receive_user_input(self, _prompt: str = "") -> str | None:
         """Return one relayed utterance, or ``None`` so timers can be checked."""
@@ -119,3 +140,4 @@ class NarrativeRelayPublisher:
                 self._socket = None
                 raise EOFError
             self._receive_buffer += chunk
+

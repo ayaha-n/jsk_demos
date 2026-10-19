@@ -379,6 +379,31 @@ HONEY_PROPOSAL_FALLBACK_RESPONSE = (
 )
 
 
+HESITATION_MARKERS = ("うーん", "迷", "まよう", "どうしよう", "わからない")
+
+
+def response_may_be_replaced(
+    user_action: str,
+    history: str,
+    controller: HoneyGiftEventController | None,
+) -> bool:
+    """Whether submit() may swap the generated line once it is complete.
+
+    A line sent before the turn finishes is spoken before that, so such
+    turns are sent whole at the end.
+    Judged from the input and state only; keep in step with
+    enforce_response_invariants and the replacements in submit().
+    """
+    gift_status = controller.state.gift_status if controller is not None else "undecided"
+    if gift_status == "undecided" and any(m in user_action for m in HESITATION_MARKERS):
+        return True
+    if user_action.strip() == "いいね" and "風船" not in history:
+        return True
+    # While the honey is there, interpret may ask for a fixed line instead
+    # (decline_honey_jar_gift, ask_pooh_not_to_eat_honey).
+    return controller is not None and controller.state.honey_status == "full"
+
+
 def enforce_response_invariants(
     user_action: str,
     history: str,
@@ -386,9 +411,7 @@ def enforce_response_invariants(
     gift_status: str = "undecided",
 ) -> str:
     """Apply small deterministic guards for requirements LM output may violate."""
-    hesitation = any(
-        marker in user_action for marker in ("うーん", "迷", "まよう", "どうしよう", "わからない")
-    )
+    hesitation = any(marker in user_action for marker in HESITATION_MARKERS)
     asks_back = any(
         marker in bot_response for marker in ("？", "?", "どう思う", "何かいいアイデア", "何か思いつ")
     )
@@ -442,7 +465,11 @@ class PoohNarrativeAgent(dspy.Module):
         event_scene: str = "none",
         previous_bot_response: str = "",
         pooh_preferences: str = "",
+        on_response: Callable[[str], None] | None = None,
     ) -> Any:
+        """``on_response(bot_response)``, if given, receives the line as soon
+        as it is written, before interpret, so the robot can start speaking.
+        An exit's line is replaced by the ending, so it is not passed."""
         current_situation = coerce_situation(current_situation)
         technical_terms: list[str] = []
         if world_event:
@@ -512,6 +539,8 @@ class PoohNarrativeAgent(dspy.Module):
                 "ぼくにはよくわからないけれど、"
                 "いま、きみとお茶会をしているのはわかるよ。"
             )
+        if on_response is not None and mode != "exit":
+            on_response(bot_response)
         interpretation = self.interpret(
             current_situation=current_situation,
             history=history,
@@ -897,6 +926,9 @@ class SessionOutput:
     latency_ms: float = 0.0
     generation_fallback: bool = False
     turn: Turn | None = None
+    # Set when the line was sent to the robot before the turn finished.
+    turn_id: str | None = None
+    streamed: bool = False
 
     @property
     def motion(self) -> dict[str, str]:
@@ -994,8 +1026,11 @@ def invoke(
     event_scene: str = "none",
     previous_bot_response: str = "",
     pooh_preferences: str = "",
+    on_response: Callable[[str], None] | None = None,
 ) -> tuple[Any, float]:
     started = time.perf_counter()
+    # Only passed when used, so agents without the hook keep working.
+    hooks = {} if on_response is None else {"on_response": on_response}
     result = agent(
         current_situation=situation,
         user_action=action,
@@ -1004,6 +1039,7 @@ def invoke(
         event_scene=event_scene,
         previous_bot_response=previous_bot_response,
         pooh_preferences=pooh_preferences,
+        **hooks,
     )
     return result, (time.perf_counter() - started) * 1000
 
@@ -1224,6 +1260,8 @@ class NarrativeSession:
             source=output.source,
             world_event_id=output.world_event_id,
             fixed_utterance_id=output.fixed_utterance_id,
+            turn_id=output.turn_id,
+            streamed=output.streamed,
         )
 
     def start(self) -> SessionOutput | None:
@@ -1394,6 +1432,18 @@ class NarrativeSession:
             self.controller.observe_activity()
         previous_situation = self.current_situation
         history = self._history()
+        turn_id = f"{self.session_id[:8]}-{len(self.turns) + 1}"
+        sent_early: list[str] = []
+
+        def send_early(line: str) -> None:
+            # The robot starts speaking while interpret still runs.
+            if self.ros_publisher.publish_chunk(turn_id=turn_id, index=0, text=line):
+                sent_early.append(line)
+
+        early = (
+            self.ros_publisher is not None
+            and not response_may_be_replaced(user_input, history, self.controller)
+        )
         result, latency_ms = invoke(
             self.agent,
             self.current_situation,
@@ -1403,7 +1453,9 @@ class NarrativeSession:
             pooh_preferences=relevant_preferences(
                 self.current_situation, self.scenario.pooh_preferences
             ),
+            on_response=send_early if early else None,
         )
+        streamed = bool(sent_early)
         generated_response = str(result.bot_response)
         result.bot_response = enforce_response_invariants(
             user_action=user_input,
@@ -1439,6 +1491,14 @@ class NarrativeSession:
         # The model's decisions and state delta describe the line it wrote;
         # once the runtime guard replaced that line, they no longer apply.
         response_replaced = result.bot_response != generated_response
+        if streamed and response_replaced:
+            # response_may_be_replaced missed a case; the robot has said the
+            # generated line, and the replacement is only shown and logged.
+            print(
+                f"警告: 送信済みの応答が差し替えられました: "
+                f"{generated_response!r} -> {result.bot_response!r}",
+                file=sys.stderr,
+            )
         if response_replaced:
             result.narrative_actions = []
             result.settled_details = []
@@ -1520,6 +1580,8 @@ class NarrativeSession:
             narrative_actions=actions,
             latency_ms=latency_ms,
             turn=turn,
+            turn_id=turn_id if streamed else None,
+            streamed=streamed,
         )
         self._publish(output)
         return output

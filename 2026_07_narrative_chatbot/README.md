@@ -146,6 +146,8 @@ rostopic pub -1 /speech_to_text_final std_msgs/String "data: '青い風船がい
 
 Scripted lines (opening, ending, fixed events) carry a stable `fixed_utterance_id`; `config/fixed_utterances.json` lists each one's text, WAV file and body `motion`, which the relay sends with the line. The robot's TTS plays the WAV, generating it only if missing. See the [pooh_body guide](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/blob/add-pooh-model/pooh_body/README.md) for the robot side.
 
+A generated line is sent to the relay as soon as the respond stage has written it (`narrative_response_chunk`), so the robot starts speaking before the turn's last stage (interpret) finishes; the complete `narrative_response` that follows carries `"streamed": true` so that it is not spoken again. A turn whose line may still be replaced after that (an exit, the guards in `enforce_response_invariants`, and in `eeyore_birthday` while the honey is there, as interpret may ask for a fixed line) is sent whole at the end as before; see `response_may_be_replaced`.
+
 ### Picture book
 
 The session can be retold as a picture book, written by hand live on a reMarkable Paper Pro and read back afterwards. It retells only what the session recorded (the participant's words, Pooh's lines, the motion of fixed lines and the timed events), with an illustrated page per scene. Install the tablet app `storybook_viewer/` once and open "Storybook" in AppLoad (see [`docs/storybook.md`](docs/storybook.md)), then add `--storybook-eink`:

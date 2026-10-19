@@ -769,6 +769,10 @@ class _LockedPublisher:
         with self._lock:
             self._publisher.publish(**kwargs)
 
+    def publish_chunk(self, **kwargs: Any) -> bool:
+        with self._lock:
+            return self._publisher.publish_chunk(**kwargs)
+
 
 def build_factory(
     args: argparse.Namespace,
