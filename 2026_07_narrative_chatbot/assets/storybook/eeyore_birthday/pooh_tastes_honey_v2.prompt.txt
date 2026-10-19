@@ -1,0 +1,4 @@
+Source: Image 1: honey_gift_committed_v2.png (whose face was matched to bear-reference.png)
+Created with the built-in image_gen tool; transparent background. Earlier versions retained.
+
+Edit this picture-book illustration locally. Preserve the entire bear head and face UNCHANGED: same outline, head angle, ears, exact eye placement and size, nose, cheeks, honey-golden muzzle, eyebrows, small smile, colors and ink strokes. Preserve the body, legs, ground, plants, shadow, watercolor texture and transparent background. Change only the jar, lid and paws: remove the blue ribbon, keep the brown ceramic jar upright in the lap, open its lid and place that lid in the raised paw just above the jar, while the other paw steadies it. Show a little amber honey still inside the open jar. The bear's mouth and paws remain clean. The resulting scene is the bear opening the jar to look inside. Do not change the face or expression. No new objects, text, scenery or background fill.

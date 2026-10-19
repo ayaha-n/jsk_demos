@@ -180,7 +180,16 @@ def main() -> int:
                         help="PDFの出力先（デフォルト: <ログディレクトリ>/storybooks/<ログ名>.pdf）")
     parser.add_argument("--png", type=Path, default=None, metavar="DIR",
                         help="ページごとのPNGもDIRに書き出す")
+    parser.add_argument("--generate-illustrations", action="store_true",
+                        help="会話から挿絵を生成してから絵本を書き出す（生成済みは再利用）")
     args = parser.parse_args()
+    if args.generate_illustrations:
+        from storybook_illustrations import IllustrationGenerationError, generate_from_log
+
+        try:
+            generate_from_log(args.log)
+        except IllustrationGenerationError as exc:
+            print(f"[絵本] {exc}。保存済みの挿絵・既存絵でPDF作成を続けます。", file=sys.stderr)
     builder = build_from_log(args.log, args.layout)
     pdf = write_pdf(builder, args.out or default_pdf_path(args.log))
     print(f"{len(builder.pages)} ページの絵本を書き出しました: {pdf}")

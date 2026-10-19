@@ -17,7 +17,9 @@ font, so the viewer never has to re-wrap them.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import random
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +32,8 @@ STORYBOOK_CONFIG_PATH = PROJECT_ROOT / "config" / "storybook.json"
 # Illustrations, at their paths in config/storybook.json
 # (e.g. "eeyore_birthday/opening.png").
 ILLUSTRATION_ROOT = PROJECT_ROOT / "assets" / "storybook"
+FIXED_ILLUSTRATION_BEATS = frozenset({"opening", "pooh_ate_honey"})
+CLOSING_FALLBACK_BEATS = frozenset({"story_wrap_up"})
 PLUSH_MEMORY_DIR = Path(
     os.getenv("PLUSH_MEMORY_DIR", str(PROJECT_ROOT.parents[1] / "plush_memory"))
 )
@@ -68,6 +72,8 @@ class StoryBeat:
     narration: str = ""
     illustration: str | None = None
     prompt: str = ""
+    reference_illustration: str | None = None
+    illustration_variants: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -79,12 +85,92 @@ class StoryConfig:
     motion_phrases: dict[str, dict[str, Any]]
     illustration_style: str = ""
     participant_presence: str = ""
+    session_id: str = ""
+
+    def illustration_name(self, beat_id: str | None) -> str | None:
+        beat = self.beats.get(beat_id or "")
+        if beat is None:
+            return None
+        if self.session_id and beat_id not in FIXED_ILLUSTRATION_BEATS:
+            name = generated_illustration_name(self.scenario, self.session_id, beat.beat_id)
+            metadata = (ILLUSTRATION_ROOT / name).with_suffix(".scene.json")
+            saved = {}
+            try:
+                saved = json.loads(metadata.read_text(encoding="utf-8"))
+                if not isinstance(saved, dict):
+                    saved = {}
+                if saved.get("illustration_needed") is False:
+                    return self._closing_fallback(beat, saved) if beat_id in CLOSING_FALLBACK_BEATS else None
+            except (OSError, ValueError, AttributeError):
+                pass
+            if find_illustration(name):
+                return name
+            fallback = saved.get("fallback_illustration")
+            if isinstance(fallback, str) and fallback.startswith("generated/") and find_illustration(fallback):
+                return fallback
+            if beat_id in CLOSING_FALLBACK_BEATS:
+                return self._closing_fallback(beat, saved)
+        variants = [name for name in beat.illustration_variants if find_illustration(name)]
+        if variants:
+            # A session keeps the same random choice across Web/PDF/reopening.
+            seed = f"{self.scenario}:{self.session_id or id(self)}:{beat.beat_id}"
+            return random.Random(seed).choice(variants)
+        return beat.illustration
+
+    def _closing_fallback(self, beat: StoryBeat, metadata: dict) -> str | None:
+        if self.scenario == "eeyore_birthday" and metadata.get("balloon_color"):
+            name = "eeyore_birthday/story_wrap_up.png"
+            if find_illustration(name):
+                return name
+        return beat.illustration
 
     def illustration_path(self, beat_id: str | None) -> Path | None:
-        beat = self.beats.get(beat_id or "")
-        if beat is None or not beat.illustration:
-            return None
-        return find_illustration(beat.illustration)
+        name = self.illustration_name(beat_id)
+        return find_illustration(name) if name else None
+
+
+def generated_illustration_name(scenario: str, session_id: str, beat_id: str) -> str:
+    # Opaque names also keep session identifiers and arbitrary path components
+    # out of the public illustration URL.
+    key = hashlib.sha256(json.dumps([scenario, session_id, beat_id]).encode()).hexdigest()
+    return f"generated/{key}.png"
+
+
+def generated_fallback_candidates(scenario: str, beat_id: str) -> list[dict[str, str]]:
+    """Saved pictures with their actual successful scene descriptions/prompts."""
+    candidates: set[str] = set()
+    for metadata_path in (ILLUSTRATION_ROOT / "generated").glob("*.scene.json"):
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if metadata.get("scenario") == scenario and metadata.get("beat_id") == beat_id:
+                candidates.add("generated/" + metadata_path.name.removesuffix(".scene.json") + ".png")
+        except (OSError, ValueError, AttributeError):
+            continue
+    # Older metadata has no scenario. Recover its opaque image name from the
+    # log's session ID rather than mixing images from different scenarios.
+    for log_path in (PROJECT_ROOT / "logs").glob("session_*.jsonl"):
+        try:
+            with log_path.open(encoding="utf-8") as stream:
+                record = json.loads(next(stream))
+            if record.get("scenario") == scenario and record.get("session_id"):
+                candidates.add(generated_illustration_name(scenario, str(record["session_id"]), beat_id))
+        except (OSError, ValueError, AttributeError, StopIteration):
+            continue
+    available = []
+    for name in sorted(candidates):
+        path = find_illustration(name)
+        if path:
+            try:
+                metadata = json.loads(path.with_suffix(".scene.json").read_text(encoding="utf-8"))
+                # A failed redraw may have a newer description than the image.
+                description = metadata.get("image_description") or metadata.get("description")
+                if isinstance(description, str) and description:
+                    available.append({"name": name, "description": description,
+                                      "prompt": metadata.get("image_prompt", "")
+                                      if not metadata.get("image_description") or metadata["image_description"] == metadata.get("description") else ""})
+            except (OSError, ValueError, AttributeError):
+                continue
+    return available
 
 
 def find_illustration(name: str) -> Path | None:
@@ -126,6 +212,19 @@ class StoryTurn:
     world_event_id: str | None = None
     motion: dict[str, str] = field(default_factory=dict)
     ends_story: bool = False
+    situation: dict[str, Any] = field(default_factory=dict)
+
+
+def illustration_situation(value: Any) -> dict[str, Any]:
+    """A compact snapshot for image planning; never used to invent book text."""
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return {}
+    snapshot = {key: value[key] for key in ("place", "purpose", "props", "decided") if key in value}
+    if isinstance(value.get("events"), list):
+        snapshot["recent_events"] = value["events"][-6:]
+    return snapshot
 
 
 def turn_from_output(output: Any) -> StoryTurn:
@@ -138,6 +237,7 @@ def turn_from_output(output: Any) -> StoryTurn:
         world_event_id=output.world_event_id,
         motion=dict(output.motion),
         ends_story=output.source == "session_close" or output.interaction_mode == "exit",
+        situation=illustration_situation(getattr(output, "updated_situation", None)),
     )
 
 
@@ -154,6 +254,7 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
         world_event_id=record.get("world_event_id"),
         motion=fixed_utterance_motion(utterance_id) if utterance_id else {},
         ends_story=source == "session_close" or record.get("interaction_mode") == "exit",
+        situation=illustration_situation(record.get("updated_situation")),
     )
 
 
@@ -438,7 +539,7 @@ class StoryBuilder:
         empty column (the right page of a spread) instead of turning the
         page, so the spread is not left half blank."""
         page = self.pages[-1]
-        if self.config.illustration_path(beat_id) is not None:
+        if self._illustration_for_beat(beat_id) is not None:
             return False
         if page.column + 1 >= len(page.text_columns):
             return False
@@ -451,17 +552,25 @@ class StoryBuilder:
         beat = self.config.beats.get(beat_id or "")
         # Until a beat's illustration exists, its page is all text, rather
         # than a blank half on the tablet.
-        has_picture = self.config.illustration_path(beat_id) is not None
+        picture = self._illustration_for_beat(beat_id)
+        has_picture = picture is not None
         page = StoryPage(
             index=len(self.pages),
             beat_id=beat_id,
-            illustration=beat.illustration if has_picture else None,
+            illustration=picture,
             text_columns=(
                 self.layout.text_columns if has_picture else self.layout.plain_text_columns
             ),
         )
         self.pages.append(page)
         return NewPage(page)
+
+    def _illustration_for_beat(self, beat_id: str | None) -> str | None:
+        name = self.config.illustration_name(beat_id)
+        if not name or self.config.illustration_path(beat_id) is None:
+            return None
+        previous = next((page.illustration for page in reversed(self.pages) if page.illustration), None)
+        return None if name == previous else name
 
     def _place(self, entries: list[StoryEntry]) -> list[PageEvent]:
         events: list[PageEvent] = []
@@ -547,7 +656,13 @@ def build_book(
     measure: Measure = default_measure,
 ) -> StoryBuilder:
     """The whole book of a finished (or interrupted) session log."""
-    builder = StoryBuilder(load_story_config(scenario), LAYOUTS[layout], measure)
+    from dataclasses import replace
+
+    records = list(records)
+    config = load_story_config(scenario)
+    if records:
+        config = replace(config, session_id=str(records[0].get("session_id", "")))
+    builder = StoryBuilder(config, LAYOUTS[layout], measure)
     for turn in turns_from_log(records, opening_line):
         builder.add(turn)
     builder.finish()

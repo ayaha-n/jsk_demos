@@ -313,9 +313,11 @@ class LiveStorybook:
     is never read while it is still being laid out.
     """
 
-    def __init__(self, backends: list[Backend]) -> None:
+    def __init__(self, backends: list[Backend], illustrations: Any = None) -> None:
         self.backends = backends
+        self.illustrations = illustrations
         self.session_id: str | None = None
+        self._latest_session_id: str | None = None
         self.builder: StoryBuilder | None = None
         self.saved: list[Path] = []  # PDFs of finished books
         self._log_path: Path | None = None
@@ -330,7 +332,8 @@ class LiveStorybook:
         with self._lock:
             if output.source == "session_open":
                 self.session_id = session.session_id
-                self._queue.put(("begin", (session.scenario.key, getattr(session, "log_path", None))))
+                self._latest_session_id = session.session_id
+                self._queue.put(("begin", (session.scenario.key, getattr(session, "log_path", None), session.session_id)))
             elif session.session_id != self.session_id:
                 return
             self._queue.put(("turn", turn))
@@ -381,13 +384,24 @@ class LiveStorybook:
             # but not saved: a PDF of it now would stop half way.
             self._end_book(save=False)
             self.builder = None
-            scenario, self._log_path = value
+            from dataclasses import replace
+
+            scenario, self._log_path, session_id = value
             layout = LAYOUTS[self._read_orientation()]
-            self.builder = StoryBuilder(storybook.load_story_config(scenario), layout)
+            config = replace(storybook.load_story_config(scenario), session_id=session_id)
+            self.builder = StoryBuilder(config, layout)
             self._each_backend(lambda backend: backend.begin_book(layout))
             return
         if self.builder is None or self.builder.finished:
             return
+        if self.illustrations is not None:
+            beat_id, _ = storybook.narrate(value, self.builder.config)
+            if beat_id:
+                session_id = self.builder.config.session_id
+                self.illustrations.wait(
+                    session_id, beat_id,
+                    cancelled=lambda: self._latest_session_id != session_id,
+                )
         for event in self.builder.add(value):
             self._draw(event)
         if self.builder.finished:
@@ -448,10 +462,11 @@ def _report(backend: Any, exc: Exception) -> None:
     print(f"[絵本] {type(backend).__name__}: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
-def create_live_storybook(*, eink: bool, preview_dir: Path | None) -> LiveStorybook | None:
+def create_live_storybook(*, eink: bool, preview_dir: Path | None,
+                          illustrations: Any = None) -> LiveStorybook | None:
     backends: list[Backend] = []
     if eink:
         backends.append(EinkBackend())
     if preview_dir is not None:
         backends.append(PreviewBackend(preview_dir))
-    return LiveStorybook(backends) if backends else None
+    return LiveStorybook(backends, illustrations) if backends else None

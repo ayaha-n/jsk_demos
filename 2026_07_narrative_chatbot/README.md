@@ -160,6 +160,7 @@ python scripts/web_server.py --scenario eeyore_birthday --storybook-eink
 - When a book ends it is saved as a PDF in `logs/storybooks/`. Read it back by tapping the sides of the tablet, with **絵本を見る** in the Web UI (each participant sees only their own book), with 過去ログ → 絵本で見る, or with `python scripts/storybook_render.py <log>`.
 - `--storybook-preview DIR` writes the pages as PNGs, for working without the tablet.
 - Scenes, narration, illustrations (`assets/storybook/`) and motion phrases are set in `config/storybook.json`; the handwriting font is bundled in `assets/fonts/`.
+- Add `--storybook-generate` to generate session-specific illustrations in the background, or render a log with `scripts/storybook_render.py <log> --generate-illustrations`.
 - Only the tablet needs [plush_memory](https://github.com/ayaha-n/plush_memory) (see Setup); PDFs, 絵本を見る and 過去ログ work without it.
 
 ## State, logs and caches

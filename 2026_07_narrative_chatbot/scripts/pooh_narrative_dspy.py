@@ -1759,6 +1759,10 @@ def parse_args() -> argparse.Namespace:
 
 def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--storybook-generate", action="store_true",
+        help="会話に合わせた挿絵をバックグラウンド生成する（画像APIを使用）。",
+    )
+    parser.add_argument(
         "--storybook-eink",
         action="store_true",
         help="会話を絵本にして reMarkable（Storybook アプリ, EINK_HOST）にライブで書く。",
@@ -1773,12 +1777,22 @@ def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]:
+    listeners = []
+    illustrations = None
+    if getattr(args, "storybook_generate", False):
+        from storybook_illustrations import SessionIllustrations
+
+        illustrations = SessionIllustrations()
+        listeners.append(illustrations)
     if not (args.storybook_eink or args.storybook_preview):
-        return []
+        return listeners
     from storybook_live import create_live_storybook
 
-    live = create_live_storybook(eink=args.storybook_eink, preview_dir=args.storybook_preview)
-    return [live] if live is not None else []
+    live = create_live_storybook(eink=args.storybook_eink, preview_dir=args.storybook_preview,
+                                illustrations=illustrations)
+    if live is not None:
+        listeners.append(live)
+    return listeners
 
 
 def main() -> int:

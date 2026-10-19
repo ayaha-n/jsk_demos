@@ -452,23 +452,33 @@ logButton.addEventListener("click", () => {
 });
 
 // Right after a session ends: its own book, from wherever the browser is.
-async function loadOwnStorybook() {
+let ownStorybookSnapshot = "";
+let ownStorybookLoading = false;
+async function loadOwnStorybook(quiet = false) {
   if (!endedSessionId) return;
+  if (ownStorybookLoading) return;
+  ownStorybookLoading = true;
   const base = `/api/sessions/${encodeURIComponent(endedSessionId)}/storybook`;
   const token = encodeURIComponent(accessToken());
   const layout = encodeURIComponent(storybookLayout.value);
   // The PDF in the orientation shown here.
   storybookPdf.href = `${base}.pdf?token=${token}&layout=${layout}`;
-  storybookStatus.textContent = "読み込んでいます…";
-  storybookViewer.replaceChildren();
+  if (!quiet) storybookStatus.textContent = "読み込んでいます…";
   try {
     const response = await fetch(`${base}?layout=${layout}`, { headers: authenticatedHeaders() });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-    body.pages.forEach((page) => appendStoryPage(page, body, storybookViewer));
+    const snapshot = JSON.stringify(body);
+    if (snapshot !== ownStorybookSnapshot || !quiet) {
+      storybookViewer.replaceChildren();
+      body.pages.forEach((page) => appendStoryPage(page, body, storybookViewer));
+      ownStorybookSnapshot = snapshot;
+    }
     storybookStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
   } catch (error) {
-    storybookStatus.textContent = `絵本を読み込めませんでした: ${error.message}`;
+    if (!quiet) storybookStatus.textContent = `絵本を読み込めませんでした: ${error.message}`;
+  } finally {
+    ownStorybookLoading = false;
   }
 }
 
@@ -477,7 +487,11 @@ storybookButton.addEventListener("click", () => {
   loadOwnStorybook();
 });
 storybookCloseButton.addEventListener("click", () => storybookDialog.close());
-storybookLayout.addEventListener("change", loadOwnStorybook);
+storybookLayout.addEventListener("change", () => loadOwnStorybook());
+// Generated pictures may finish after the conversation has ended.
+setInterval(() => {
+  if (storybookDialog.open) loadOwnStorybook(true);
+}, 5000);
 
 logCloseButton.addEventListener("click", () => logDialog.close());
 logRefreshButton.addEventListener("click", refreshLogList);

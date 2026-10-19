@@ -85,7 +85,7 @@
       ]
     }
   },
-  "illustration_style": "Draw it as a delicate pen-and-ink line illustration with a soft watercolor wash, like a classic children's picture book: fine ink linework, light cross-hatching for shading, gentle watercolor tones (not flat cartoon fill), a plain white background with only a hint of ground. Keep this bear's face, proportions and expression exactly as in the reference image. Leave out the human hand from the reference. No text or letters anywhere in the picture.",
+  "illustration_style": "Continue the exact established picture-book illustration style shown in the primary reference: clearly defined irregular black pen-and-ink contours, short sharp fur hatching, visible watercolor grain inside the subjects, bright honey-golden fur, natural brown ceramics and clear blue accents. Preserve the reference bear's face, snout, proportions and original ink density. Use a genuinely transparent background with only a small muted green-gray patch of ground. No full background, yellow or sepia wash, paper rectangle, haze, vignette, soft painted outlines or desaturated fur. No text, lettering, speech bubbles or thought bubbles.",
   "scenarios": {
     "tea_party": {
       "title": "もりの おちゃかい",
@@ -108,13 +108,19 @@
         },
         "honey_gift_committed": {
           "narration": "プーは、イーヨーへの おくりものを きめました。",
-          "illustration": "eeyore_birthday/honey_gift_committed.png",
-          "prompt": "This bear from the reference image holds up a full honey pot with both paws, looking pleased, as if it has just decided this will be a birthday present."
+          "illustration": "eeyore_birthday/honey_gift_committed_v2.png",
+          "prompt": "The seated bear gently holds an upright closed brown ceramic jar with both paws in its lap. The jar has a fitted lid and a small blue ribbon. The bear smiles quietly, pleased with the prepared gift. Its mouth and paws are clean.",
+          "reference_illustration": "eeyore_birthday/pooh_ate_honey.png"
         },
         "pooh_tastes_honey": {
           "narration": "プーは、ひとくちだけの つもりで、はちみつの つぼを もちだしました。",
-          "illustration": "eeyore_birthday/pooh_tastes_honey.png",
-          "prompt": "This bear from the reference image sits hugging the honey pot and peeks inside it with a small guilty, tempted smile, one paw lifted toward the lid."
+          "illustration": "eeyore_birthday/pooh_tastes_honey_v2.png",
+          "illustration_variants": [
+            "eeyore_birthday/pooh_tastes_honey.png",
+            "eeyore_birthday/pooh_tastes_honey_v2.png"
+          ],
+          "prompt": "The seated bear steadies an upright brown ceramic jar in its lap with one paw and lifts its lid with the other. Some amber honey is visible inside. It looks into the jar with a curious, gently tempted smile. Its mouth and paws are still clean.",
+          "reference_illustration": "eeyore_birthday/pooh_ate_honey.png"
         },
         "pooh_ate_honey": {
           "narration": "きが つくと、つぼの なかの はちみつは、すっかり なくなって いました。",
@@ -123,8 +129,8 @@
         },
         "story_wrap_up": {
           "narration": "こうして、イーヨーへの おくりものが きまりました。",
-          "illustration": "eeyore_birthday/story_wrap_up.png",
-          "prompt": "This bear from the reference image walks happily through the forest carrying a birthday present for a friend, with a balloon on a string floating above."
+          "illustration": "eeyore_birthday/story_wrap_up_fallback.png",
+          "prompt": "This bear from the reference image walks happily carrying a wrapped birthday present in one paw and waving goodbye with the other empty paw. No balloon or balloon string."
         }
       },
       "closing": "おしまい"

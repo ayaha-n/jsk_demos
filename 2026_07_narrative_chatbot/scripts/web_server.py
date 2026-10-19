@@ -110,7 +110,10 @@ class SessionRegistry:
             return None
         if local and self.local_output_listeners:
             # Before start(), so the opening reaches them too.
-            session.output_listeners = self.local_output_listeners
+            existing = tuple(getattr(session, "output_listeners", ()))
+            session.output_listeners = existing + tuple(
+                listener for listener in self.local_output_listeners if listener not in existing
+            )
         entry = WebSession(session, last_active=self.clock())
         self.sessions[session_id] = entry
         async with entry.lock:
@@ -509,7 +512,19 @@ async def _storybook_pdf_response(
     scenario_key: str | None = None,
 ) -> web.StreamResponse:
     headers = {"Content-Disposition": f'inline; filename="{stem}.pdf"'}
-    if "layout" not in request.query and saved is not None and saved.is_file():
+    newer_picture = False
+    if saved is not None and saved.is_file() and records and records[0].get("session_id"):
+        import storybook
+
+        config = storybook.load_story_config(scenario_key or str(records[0].get("scenario", "")))
+        for beat_id in config.beats:
+            name = storybook.generated_illustration_name(
+                config.scenario, str(records[0]["session_id"]), beat_id)
+            image = storybook.find_illustration(name)
+            if image and image.stat().st_mtime_ns > saved.stat().st_mtime_ns:
+                newer_picture = True
+                break
+    if "layout" not in request.query and saved is not None and saved.is_file() and not newer_picture:
         return web.FileResponse(saved, headers=headers)
 
     def render() -> bytes:
@@ -799,6 +814,9 @@ def build_factory(
     # The live book on the tablet, for sessions started on this PC only (see
     # SessionRegistry.create): one book, following the newest of them.
     listeners = pooh.create_storybook_listeners(args)
+    from storybook_illustrations import SessionIllustrations
+    shared_listeners = [listener for listener in listeners
+                        if isinstance(listener, SessionIllustrations)]
 
     def factory(session_id: str) -> NarrativeSessionLike:
         # A private agent per session lets different participants' LLM calls
@@ -811,6 +829,7 @@ def build_factory(
             scenario,
             ros_publisher=publisher,
             session_id=session_id,
+            output_listeners=shared_listeners,
         )
 
     return factory, scenario.label, scenario.scene_intro, listeners

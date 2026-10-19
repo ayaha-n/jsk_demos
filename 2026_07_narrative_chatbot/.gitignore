@@ -6,6 +6,7 @@ logs/*
 !logs/saved_examples/
 .env
 __pycache__/
+assets/storybook/generated/
 *.py[cod]
 
 node_modules/
