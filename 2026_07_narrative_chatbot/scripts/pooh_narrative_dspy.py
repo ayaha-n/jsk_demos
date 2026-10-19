@@ -55,6 +55,7 @@ from narrative_state import (
 )
 from narrative_events import (
     HoneyGiftEventController,
+    HoneyRequest,
     NarrativeAction,
     SettledDetail,
     HONEY_GIFT_KEPT_RESPONSE,
@@ -74,7 +75,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v42"
+PROGRAM_VERSION = "pooh-structured-state-v43"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -122,6 +123,16 @@ class AnalyzeInteraction(dspy.Signature):
         desc=(
             "観察用の場面ID。会話例に定義された場面のうち、現在の展開に最も近い"
             "安定したIDを返す。順序や状態遷移の制御には使わない。該当しなければnone。"
+        )
+    )
+    honey_requests: list[HoneyRequest] = dspy.OutputField(
+        desc=(
+            "このターンの参加者の発話・行為そのものが次に当たる場合だけ返す。"
+            "historyにある前の頼みは数えず、話題が移った発話には返さない。"
+            "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると決めているのに、"
+            "参加者がそれをいらないと言った、または別の贈り物に置き換えようとした)、"
+            "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
+            "または食べないと約束するよう求めた)。該当しなければ空リスト。"
         )
     )
 
@@ -392,16 +403,13 @@ def response_may_be_replaced(
     A line sent before the turn finishes is spoken before that, so such
     turns are sent whole at the end.
     Judged from the input and state only; keep in step with
-    enforce_response_invariants and the replacements in submit().
+    enforce_response_invariants and the replacements in submit(). The fixed
+    lines for honey requests are chosen before generation instead.
     """
     gift_status = controller.state.gift_status if controller is not None else "undecided"
     if gift_status == "undecided" and any(m in user_action for m in HESITATION_MARKERS):
         return True
-    if user_action.strip() == "いいね" and "風船" not in history:
-        return True
-    # While the honey is there, interpret may ask for a fixed line instead
-    # (decline_honey_jar_gift, ask_pooh_not_to_eat_honey).
-    return controller is not None and controller.state.honey_status == "full"
+    return user_action.strip() == "いいね" and "風船" not in history
 
 
 def enforce_response_invariants(
@@ -466,12 +474,20 @@ class PoohNarrativeAgent(dspy.Module):
         previous_bot_response: str = "",
         pooh_preferences: str = "",
         on_response: Callable[[str], None] | None = None,
+        fixed_line_for: Callable[[list[str]], str | None] | None = None,
     ) -> Any:
         """``on_response(bot_response)``, if given, receives the line as soon
         as it is written, before interpret, so the robot can start speaking.
-        An exit's line is replaced by the ending, so it is not passed."""
+        An exit's line is replaced by the ending, so it is not passed.
+
+        ``fixed_line_for(honey_requests)``, if given, returns the fixed line
+        Pooh answers those requests with in the current state, or None; with
+        a line, nothing is generated and the turn decides nothing else
+        (``fixed_by_request``).
+        """
         current_situation = coerce_situation(current_situation)
         technical_terms: list[str] = []
+        honey_requests: list[str] = []
         if world_event:
             mode = "narrative"
             current_scene = event_scene
@@ -488,6 +504,30 @@ class PoohNarrativeAgent(dspy.Module):
             technical_terms = list(dict.fromkeys(extracted_terms + known_terms))
             if technical_terms and mode != "exit":
                 mode = "meta"
+            honey_requests = [
+                str(request) for request in getattr(classification, "honey_requests", []) or []
+            ]
+        # The ending replaces an exit's line anyway.
+        fixed_line = (
+            fixed_line_for(honey_requests)
+            if fixed_line_for is not None and honey_requests and mode != "exit"
+            else None
+        )
+        if fixed_line is not None:
+            return dspy.Prediction(
+                interaction_mode=mode,
+                current_scene=current_scene,
+                selected_mishearing="none",
+                situation_update=SituationUpdate(),
+                updated_situation=current_situation,
+                narrative_actions=[],
+                settled_details=[],
+                bot_response=fixed_line,
+                question_kind="none",
+                awaiting_reply=False,
+                honey_requests=honey_requests,
+                fixed_by_request=True,
+            )
         candidates: list[MishearingCandidate] = []
         if mode == "meta" and technical_terms:
             prior_mentions = count_prior_technical_mentions(history, technical_terms)
@@ -564,6 +604,8 @@ class PoohNarrativeAgent(dspy.Module):
             bot_response=bot_response,
             question_kind=question_kind,
             awaiting_reply=question_kind != "none",
+            honey_requests=honey_requests,
+            fixed_by_request=False,
         )
 
 
@@ -1027,10 +1069,15 @@ def invoke(
     previous_bot_response: str = "",
     pooh_preferences: str = "",
     on_response: Callable[[str], None] | None = None,
+    fixed_line_for: Callable[[list[str]], str | None] | None = None,
 ) -> tuple[Any, float]:
     started = time.perf_counter()
-    # Only passed when used, so agents without the hook keep working.
-    hooks = {} if on_response is None else {"on_response": on_response}
+    # Only passed when used, so agents without these hooks keep working.
+    hooks = {
+        name: value
+        for name, value in (("on_response", on_response), ("fixed_line_for", fixed_line_for))
+        if value is not None
+    }
     result = agent(
         current_situation=situation,
         user_action=action,
@@ -1416,6 +1463,23 @@ class NarrativeSession:
         self._publish(output)
         return output
 
+    def _fixed_line_for(self, honey_requests: list[str]) -> str | None:
+        """The fixed line for the participant's honey requests, if any applies now."""
+        assert self.controller is not None
+        line = None
+        if (
+            "decline_honey_jar_gift" in honey_requests
+            and self.controller.state.honey_jar_is_poohs_gift()
+        ):
+            # Pooh's own gift stays; a fixed line adds it beside the
+            # participant's idea instead of a generated line dropping it.
+            line = HONEY_GIFT_KEPT_RESPONSE
+        if "ask_pooh_not_to_eat_honey" in honey_requests:
+            # The honey is always eaten, so a generated line must not promise
+            # otherwise; Pooh sidesteps with a fixed line instead.
+            line = self.controller.state.sidestep_promise_request() or line
+        return line
+
     def submit(self, user_input: str) -> SessionOutput | None:
         """Process one participant utterance or textual physical action."""
         if not self.started:
@@ -1454,6 +1518,7 @@ class NarrativeSession:
                 self.current_situation, self.scenario.pooh_preferences
             ),
             on_response=send_early if early else None,
+            fixed_line_for=self._fixed_line_for if self.controller is not None else None,
         )
         streamed = bool(sent_early)
         generated_response = str(result.bot_response)
@@ -1467,30 +1532,16 @@ class NarrativeSession:
                 else "undecided"
             ),
         )
-        if (
-            self.controller is not None
-            and "decline_honey_jar_gift" in getattr(result, "narrative_actions", [])
-            and self.controller.state.honey_jar_is_poohs_gift()
-        ):
-            # Pooh's own gift stays; a fixed line adds it beside the
-            # participant's idea instead of a generated line dropping it.
-            result.bot_response = HONEY_GIFT_KEPT_RESPONSE
-        if (
-            self.controller is not None
-            and "ask_pooh_not_to_eat_honey" in getattr(result, "narrative_actions", [])
-        ):
-            # The honey is always eaten, so a generated line must not promise
-            # otherwise; Pooh sidesteps with a fixed line instead.
-            sidestep = self.controller.state.sidestep_promise_request()
-            if sidestep is not None:
-                result.bot_response = sidestep
         if str(result.interaction_mode) == "exit":
             # DSPy decides that the participant is leaving; the goodbye itself
             # is the scenario's fixed ending line, as when the session closes.
             result.bot_response = self.scenario.ending_line
         # The model's decisions and state delta describe the line it wrote;
         # once the runtime guard replaced that line, they no longer apply.
-        response_replaced = result.bot_response != generated_response
+        response_replaced = (
+            result.bot_response != generated_response
+            or bool(getattr(result, "fixed_by_request", False))
+        )
         if streamed and response_replaced:
             # response_may_be_replaced missed a case; the robot has said the
             # generated line, and the replacement is only shown and logged.

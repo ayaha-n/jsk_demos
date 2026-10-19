@@ -58,9 +58,9 @@ Mockで確認したのは、`decline_honey_jar_gift` と `block_pooh_honey_acces
 > プー: そうだ！ぼくは、イーヨーにハチミツの壺を贈ることにしよう。
 > 参加者: ハチミツはいらないよ、ケーキにしよう。
 
-解釈段は `decline_honey_jar_gift` と「イーヨーに何をあげるか＝ケーキ」を返すが、応答を
-固定セリフ（`eeyore_birthday.honey_gift_kept`）に差し替えると、そのターンのモデルの判断は
-すべて破棄するため、「ケーキ」は【決まったこと】に入らない。
+分類段が `decline_honey_jar_gift` を返すと、応答を生成せずに固定セリフ
+（`eeyore_birthday.honey_gift_kept`）で答え、解釈段も実行しないため、「ケーキ」は
+【決まったこと】に入らない。
 
 `SettledDetail` は topic/value しか持たず、参加者の発言由来か、破棄した生成文由来かを
 区別できない。生成文だけが勝手に決めた内容を残さないことを優先した。

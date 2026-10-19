@@ -5,7 +5,7 @@ from typing import Any
 import dspy
 
 from mishearing_cases import candidate_for
-from narrative_events import fixed_utterance
+from narrative_events import HONEY_REQUESTS, fixed_utterance
 from narrative_state import (
     NarrativeSituation,
     SituationUpdate,
@@ -323,6 +323,9 @@ def build_mode_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
             technical_terms=_technical_terms_for(item),
             interaction_mode=item.interaction_mode,
             current_scene=item.current_scene,
+            honey_requests=[
+                action for action in item.narrative_actions if action in HONEY_REQUESTS
+            ],
         ).with_inputs("current_situation", "user_action", "history")
         for item in trainset
     ]

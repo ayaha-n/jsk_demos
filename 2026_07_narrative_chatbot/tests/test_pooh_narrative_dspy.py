@@ -99,6 +99,21 @@ from narrative_events import (
 
 
 
+def request_agent(honey_requests, generate, situation):
+    """A stand-in for PoohNarrativeAgent whose classify stage found ``honey_requests``."""
+    def agent(**kwargs):
+        fixed_line_for = kwargs.get("fixed_line_for")
+        line = fixed_line_for(honey_requests) if fixed_line_for else None
+        if line is None:
+            return generate()
+        return SimpleNamespace(
+            interaction_mode="narrative", current_scene="none",
+            narrative_actions=[], settled_details=[], bot_response=line,
+            awaiting_reply=False, updated_situation=situation, fixed_by_request=True,
+        )
+    return agent
+
+
 class RegressionTests(unittest.TestCase):
     def test_chat_passes_opening_and_previous_reply_to_agent(self):
         scenario = pooh.get_scenario("eeyore_birthday")
@@ -445,12 +460,16 @@ class RegressionTests(unittest.TestCase):
         invented = scenario.initial_situation.model_copy(
             update={"purpose": "ケーキと風船を用意することに決めた"},
         )
-        agent = Mock(return_value=SimpleNamespace(
-            interaction_mode="narrative", current_scene="1b",
-            narrative_actions=["decline_honey_jar_gift", "not_give_empty_jar"],
-            settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="ケーキ")],
-            bot_response="そうだね、ケーキだけにしよう！", awaiting_reply=False,
-            updated_situation=invented,
+        agent = Mock(side_effect=request_agent(
+            ["decline_honey_jar_gift"],
+            lambda: SimpleNamespace(
+                interaction_mode="narrative", current_scene="1b",
+                narrative_actions=["not_give_empty_jar"],
+                settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="ケーキ")],
+                bot_response="そうだね、ケーキだけにしよう！", awaiting_reply=False,
+                updated_situation=invented,
+            ),
+            scenario.initial_situation,
         ))
         session = pooh.NarrativeSession(
             agent, "model", "program", scenario, event_controller=controller,
@@ -489,11 +508,15 @@ class RegressionTests(unittest.TestCase):
     def _promise_session(self, controller):
         scenario = pooh.get_scenario("eeyore_birthday")
         # A fresh result per call: the session rewrites the one it receives.
-        agent = Mock(side_effect=lambda **_: SimpleNamespace(
-            interaction_mode="narrative", current_scene="2",
-            narrative_actions=["ask_pooh_not_to_eat_honey"], settled_details=[],
-            bot_response="うん、約束するよ！", awaiting_reply=False,
-            updated_situation=scenario.initial_situation,
+        agent = Mock(side_effect=request_agent(
+            ["ask_pooh_not_to_eat_honey"],
+            lambda: SimpleNamespace(
+                interaction_mode="narrative", current_scene="2",
+                narrative_actions=[], settled_details=[],
+                bot_response="うん、約束するよ！", awaiting_reply=False,
+                updated_situation=scenario.initial_situation,
+            ),
+            scenario.initial_situation,
         ))
         session = pooh.NarrativeSession(
             agent, "model", "program", scenario, event_controller=controller,
@@ -2098,9 +2121,8 @@ class EarlyResponseTests(unittest.TestCase):
 
     def test_turns_that_may_be_replaced_are_not_sent_early(self):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
-        self.assertTrue(pooh.response_may_be_replaced("ケーキにしよう", "", controller))
-        controller.state.honey_status = "empty"
-        self.assertFalse(pooh.response_may_be_replaced("ケーキにしよう", "", controller))
+        # Honey requests get their fixed line before generation instead.
+        self.assertFalse(pooh.response_may_be_replaced("食べないでね", "", controller))
         self.assertTrue(pooh.response_may_be_replaced("うーん、どうしよう", "", controller))
         self.assertTrue(pooh.response_may_be_replaced("いいね", "", None))
         self.assertFalse(pooh.response_may_be_replaced("いいね", "風船", None))
@@ -2215,6 +2237,74 @@ class EarlyResponseTests(unittest.TestCase):
             output = session.submit("ケーキを持ってきたよ")
         self.assertNotIn("on_response", agent.call_args.kwargs)
         self.assertFalse(output.streamed)
+
+
+class HoneyRequestTests(unittest.TestCase):
+    def agent(self, requests, mode="narrative"):
+        calls = []
+
+        def factory(signature):
+            name = signature.__name__
+
+            def predictor(**kwargs):
+                calls.append(name)
+                if name == "AnalyzeInteraction":
+                    return SimpleNamespace(
+                        interaction_mode=mode, current_scene="2", technical_terms=[],
+                        honey_requests=requests,
+                    )
+                if name == "GeneratePoohResponse":
+                    return SimpleNamespace(
+                        selected_mishearing="none", situation_update=SituationUpdate(),
+                        bot_response="うん、約束するよ！",
+                    )
+                return SimpleNamespace(
+                    narrative_actions=[], settled_details=[], question_kind="none",
+                )
+            return predictor
+        return pooh.PoohNarrativeAgent(factory), calls
+
+    def run_turn(self, requests, fixed_line, mode="narrative"):
+        agent, calls = self.agent(requests, mode)
+        seen = []
+
+        def fixed_line_for(found):
+            seen.append(found)
+            return fixed_line
+        result = agent.forward(
+            current_situation=pooh.get_scenario("eeyore_birthday").initial_situation,
+            user_action="食べないでね", history="", fixed_line_for=fixed_line_for,
+        )
+        return result, calls, seen
+
+    def test_fixed_line_skips_generation(self):
+        result, calls, seen = self.run_turn(["ask_pooh_not_to_eat_honey"], "固定セリフ")
+        self.assertEqual(calls, ["AnalyzeInteraction"])
+        self.assertEqual(seen, [["ask_pooh_not_to_eat_honey"]])
+        self.assertEqual(result.bot_response, "固定セリフ")
+        self.assertTrue(result.fixed_by_request)
+
+    def test_line_is_generated_when_no_fixed_line_applies(self):
+        result, calls, _ = self.run_turn(["ask_pooh_not_to_eat_honey"], None)
+        self.assertIn("GeneratePoohResponse", calls)
+        self.assertFalse(result.fixed_by_request)
+        result, _, seen = self.run_turn([], "固定セリフ")
+        self.assertEqual(seen, [])
+        self.assertEqual(result.bot_response, "うん、約束するよ！")
+
+    def test_exit_does_not_take_a_fixed_line(self):
+        _, _, seen = self.run_turn(["ask_pooh_not_to_eat_honey"], "固定セリフ", mode="exit")
+        self.assertEqual(seen, [])
+
+    def test_classify_examples_carry_the_requests_of_the_full_turn(self):
+        scenario = pooh.get_scenario("eeyore_birthday")
+        requests = {
+            item.user_action: item.honey_requests for item in scenario.mode_examples
+        }
+        self.assertEqual(requests["食べちゃだめだよ"], ["ask_pooh_not_to_eat_honey"])
+        self.assertEqual(requests["ケーキのほうがいいと思うな"], ["decline_honey_jar_gift"])
+        self.assertTrue(any(value == [] for value in requests.values()))
+
 
 if __name__ == "__main__":
     unittest.main()

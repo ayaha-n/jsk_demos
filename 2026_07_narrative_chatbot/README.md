@@ -146,7 +146,7 @@ rostopic pub -1 /speech_to_text_final std_msgs/String "data: '青い風船がい
 
 Scripted lines (opening, ending, fixed events) carry a stable `fixed_utterance_id`; `config/fixed_utterances.json` lists each one's text, WAV file and body `motion`, which the relay sends with the line. The robot's TTS plays the WAV, generating it only if missing. See the [pooh_body guide](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/blob/add-pooh-model/pooh_body/README.md) for the robot side.
 
-A generated line is sent to the relay as soon as the respond stage has written it (`narrative_response_chunk`), so the robot starts speaking before the turn's last stage (interpret) finishes; the complete `narrative_response` that follows carries `"streamed": true` so that it is not spoken again. A turn whose line may still be replaced after that (an exit, the guards in `enforce_response_invariants`, and in `eeyore_birthday` while the honey is there, as interpret may ask for a fixed line) is sent whole at the end as before; see `response_may_be_replaced`.
+A generated line is sent to the relay as soon as the respond stage has written it (`narrative_response_chunk`), so the robot starts speaking before the turn's last stage (interpret) finishes; the complete `narrative_response` that follows carries `"streamed": true` so that it is not spoken again. A turn whose line may still be replaced after that (an exit, the guards in `enforce_response_invariants`) is sent whole at the end as before; see `response_may_be_replaced`. A participant's request about the honey (not to eat it, or to give something else instead of Pooh's jar) is judged by the classify stage before generation, and while a fixed line answers it, no line is generated.
 
 ### Picture book
 

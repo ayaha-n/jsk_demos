@@ -74,6 +74,12 @@ NarrativeAction = Literal[
     "not_give_empty_jar",
 ]
 
+# Participant requests that Pooh answers with a fixed line while the honey is
+# there. AnalyzeInteraction judges them from the input alone, before a line is
+# generated, so a turn that gets the fixed line generates (and sends early) none.
+HoneyRequest = Literal["decline_honey_jar_gift", "ask_pooh_not_to_eat_honey"]
+HONEY_REQUESTS = {"decline_honey_jar_gift", "ask_pooh_not_to_eat_honey"}
+
 KNOWN_NARRATIVE_ACTIONS = {
     "propose_honey_jar_gift",
     "decline_honey_jar_gift",

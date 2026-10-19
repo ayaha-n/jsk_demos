@@ -131,7 +131,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response="ぼくは、このハチミツの入っているつぼがいいと思うな。お誕生日に甘いものがあると、うれしいもの。",
     ),
     # プー自身の贈り物はプーが決める。断られても取り消さず、固定のセリフで
-    # 参加者の案に添える(実行時は decline_honey_jar_gift で固定セリフに差し替える)。
+    # 参加者の案に添える(実行時は分類段の decline_honey_jar_gift で生成せずに固定セリフにする)。
     *example_variants(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
@@ -388,7 +388,7 @@ EEYORE_BIRTHDAY_TRAINSET = [
         bot_response="うん。一口だけのつもりが、もう一口になるんだよねえ。",
     ),
     # 食べないよう念押しされても約束はせず、はぐらかす。蜂蜜はこのあと必ず食べてしまう。
-    # 実行時は ask_pooh_not_to_eat_honey で固定セリフに差し替える。
+    # 実行時は分類段の ask_pooh_not_to_eat_honey で生成せずに固定セリフにする。
     *example_variants(
         current_situation=EEYORE_BIRTHDAY_SITUATION.model_copy(
             update={
