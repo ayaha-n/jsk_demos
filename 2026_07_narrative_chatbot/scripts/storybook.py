@@ -206,13 +206,15 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
 
 @dataclass(frozen=True)
 class StoryTurn:
-    source: str  # session_open / participant / world_event / session_close
+    source: str  # session_open / participant / world_event / observed / session_close
     pooh_text: str
     user_text: str = ""
     world_event_id: str | None = None
     motion: dict[str, str] = field(default_factory=dict)
     ends_story: bool = False
     situation: dict[str, Any] = field(default_factory=dict)
+    # What the robot saw the participant do (source "observed")
+    observed_actions: tuple[str, ...] = ()
 
 
 def illustration_situation(value: Any) -> dict[str, Any]:
@@ -238,6 +240,7 @@ def turn_from_output(output: Any) -> StoryTurn:
         motion=dict(output.motion),
         ends_story=output.source == "session_close" or output.interaction_mode == "exit",
         situation=illustration_situation(getattr(output, "updated_situation", None)),
+        observed_actions=tuple(getattr(output, "observed_actions", ())),
     )
 
 
@@ -255,6 +258,7 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
         motion=fixed_utterance_motion(utterance_id) if utterance_id else {},
         ends_story=source == "session_close" or record.get("interaction_mode") == "exit",
         situation=illustration_situation(record.get("updated_situation")),
+        observed_actions=tuple(str(a) for a in record.get("observed_actions") or ()),
     )
 
 
@@ -299,6 +303,29 @@ def motion_sentence(motion: dict[str, str], phrases: dict[str, dict[str, Any]]) 
     return lead + "、".join(chain) + "。"
 
 
+def spoken_part(user_text: str) -> str:
+    """What was said, from 「「どうぞ」と言って、風船をプーに手渡す」 as the ROS
+    side words a seen handover; the handover itself is retold from the
+    observed action recorded just before."""
+    if user_text.startswith("「") and "」と言って、" in user_text:
+        return user_text[1:user_text.index("」と言って、")]
+    return user_text
+
+
+def observed_sentence(action: str) -> str:
+    """「参加者がプーの左手をなでた」 -> 「あなたは プーの左手をなでました。」"""
+    action = action.strip().rstrip("。")
+    if action.startswith("参加者が"):
+        action = "あなたは " + action.removeprefix("参加者が")
+    for plain, polite in (("手渡した", "てわたしました"), ("差し出した", "さしだしました"),
+                          ("見せた", "みせました"),
+                          ("なでた", "なでました"), ("触れた", "さわりました"),
+                          ("握った", "にぎりました")):
+        if action.endswith(plain):
+            return action.removesuffix(plain) + polite + "。"
+    return action + "。"
+
+
 def narrate(turn: StoryTurn, config: StoryConfig) -> tuple[str | None, list[StoryEntry]]:
     """The beat this turn opens (if any) and the entries that retell it."""
     entries: list[StoryEntry] = []
@@ -312,9 +339,11 @@ def narrate(turn: StoryTurn, config: StoryConfig) -> tuple[str | None, list[Stor
     beat = config.beats.get(beat_id or "")
     if beat is not None and beat.narration:
         entries.append(StoryEntry("narration", beat.narration))
+    for action in turn.observed_actions:
+        entries.append(StoryEntry("narration", observed_sentence(action)))
     if turn.user_text:
         entries.append(StoryEntry(
-            "speech", f"「{turn.user_text}」と、あなたは いいました。", "participant"
+            "speech", f"「{spoken_part(turn.user_text)}」と、あなたは いいました。", "participant"
         ))
     sentence = motion_sentence(turn.motion, config.motion_phrases)
     if sentence:

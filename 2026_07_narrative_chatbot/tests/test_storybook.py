@@ -104,6 +104,33 @@ class NarrationTest(unittest.TestCase):
              ("speech", "pooh", "「うん。」")],
         )
 
+    def test_observed_actions_are_retold_without_speech(self):
+        beat, entries = narrate(StoryTurn(
+            "observed", "", observed_actions=("参加者がプーの左手をなでた",
+                                              "参加者がはちみつの壺をプーの左手に手渡した")), EEYORE)
+        self.assertIsNone(beat)
+        self.assertEqual(
+            [(e.style, e.text) for e in entries],
+            [("narration", "あなたは プーの左手をなでました。"),
+             ("narration", "あなたは はちみつの壺をプーの左手にてわたしました。")],
+        )
+
+    def test_held_out_object_is_retold(self):
+        self.assertEqual(storybook.observed_sentence("参加者がはちみつの壺をプーに差し出した"),
+                         "あなたは はちみつの壺をプーにさしだしました。")
+
+    def test_a_seen_handover_turn_quotes_only_what_was_said(self):
+        _, entries = narrate(StoryTurn(
+            "participant", "ありがとう。",
+            user_text="「はちみつ どうぞ」と言って、はちみつの壺をプーの左手に手渡す"), EEYORE)
+        self.assertEqual(entries[0].text, "「はちみつ どうぞ」と、あなたは いいました。")
+
+    def test_observed_record_from_the_log(self):
+        turn = storybook.turn_from_record({
+            "source": "observed", "observed_actions": ["参加者がプーのおなかに触れた"]})
+        self.assertEqual((turn.pooh_text, turn.user_text), ("", ""))
+        self.assertEqual(turn.observed_actions, ("参加者がプーのおなかに触れた",))
+
     def test_world_event_opens_its_beat_with_narration(self):
         beat, entries = narrate(
             StoryTurn("world_event", "あれ？", world_event_id="pooh_ate_honey"), EEYORE
