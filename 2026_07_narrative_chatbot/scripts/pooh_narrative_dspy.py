@@ -75,7 +75,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v43"
+PROGRAM_VERSION = "pooh-structured-state-v44"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -155,6 +155,8 @@ class GeneratePoohResponse(dspy.Signature):
     """分類結果と候補を参考に、プーとして短く自然に応答する。
 
     プー自身の好み・考え・次にしたいことは、プー自身が決める。
+    プーが贈ると決めた贈り物は、参加者が別の案を出しても取り下げず、参加者の案と
+    一緒に贈る形で受け止める（例:「風船もいいね！ハチミツの壺と一緒に贈ろう」）。
     問いかけ: 参加者の質問にはまず答える。知らない事実は知らないと伝え、プー自身の
     考えを添える（例: 好きな色を知らなくても「青が好きそうだと思うよ」）。応答は
     問いかけで終える必要はなく、プー自身の考えや次にしたいことで終えるのを基本とする。
