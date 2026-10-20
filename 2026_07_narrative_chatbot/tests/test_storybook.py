@@ -170,6 +170,21 @@ class NarrationTest(unittest.TestCase):
         texts = [placed.entry.text for page in builder.pages for placed in page.placed]
         self.assertEqual(texts[-2:], ["あなたは 風船を プーに さしだしました。", EEYORE.closing])
 
+    def test_pooh_s_gesture_leads_into_the_line_it_goes_with(self):
+        # Not a sentence of its own after a touch, where it would read as
+        # Pooh's answer to it.
+        builder = StoryBuilder(EEYORE, measure=full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.add(StoryTurn("observed", "", observed_actions=("参加者がプーの左足に触れた",)))
+        builder.add(StoryTurn("session_close", "またね。", ends_story=True,
+                              motion={"eyebrow": "happy", "arm": "right_hand_bye"}))
+        texts = [placed.entry.text for page in builder.pages for placed in page.placed]
+        self.assertEqual(texts[-3:], ["あなたは プーの ひだりあしに さわりました。",
+                                      "プーは うれしそうな かおで、てを ふって いいました。「またね。」",
+                                      EEYORE.closing])
+        _, entries = narrate(StoryTurn("participant", "うん。", motion={"eyebrow": "happy"}), EEYORE)
+        self.assertEqual(entries[-1].text, "プーは うれしそうな かおで いいました。「うん。」")
+
     def test_touches_one_after_another_go_on_from_each_other(self):
         builder = StoryBuilder(EEYORE, measure=full_width)
         builder.add(StoryTurn("session_open", "やあ。"))
@@ -455,8 +470,10 @@ class BookFromLogTest(unittest.TestCase):
         texts = [entry["text"] for page in book["pages"] for entry in page["entries"]]
         self.assertIn("「ぷーのおばかさん」と、あなたは いいました。", texts)
         self.assertEqual(texts[-1], "おしまい")
-        # The opening's motion comes from its fixed line.
-        self.assertIn("プーは かなしそうな かおで、あごに てを あてて、くびを かしげました。", texts)
+        # The opening's motion comes from its fixed line, and leads into it.
+        self.assertTrue(any(text.startswith(
+            "プーは かなしそうな かおで、あごに てを あてて、くびを かしげて いいました。「いまね、")
+            for text in texts))
 
     def test_logged_close_is_the_last_speech(self):
         scenario = get_scenario("eeyore_birthday")
@@ -471,7 +488,8 @@ class BookFromLogTest(unittest.TestCase):
             measure=full_width,
         )
         entries = [item.entry for page in book.pages for item in page.placed]
-        self.assertEqual(entries[-2].text, f"「{scenario.ending_line}」")
+        self.assertEqual(entries[-2].text,
+                         f"プーは うれしそうな かおで、てを ふって いいました。「{scenario.ending_line}」")
         self.assertEqual(entries[-1].style, "closing")
 
 

@@ -307,6 +307,17 @@ def motion_sentence(motion: dict[str, str], phrases: dict[str, dict[str, Any]]) 
     return lead + "、".join(chain) + "。"
 
 
+def motion_lead(motion: dict[str, str], phrases: dict[str, dict[str, Any]]) -> str:
+    """「プーは うれしそうな かおで、みぎてを あげて」, to lead into a line."""
+    face = phrases.get("eyebrow", {}).get(motion.get("eyebrow", ""), "")
+    actions = [
+        phrases.get(part, {}).get(motion.get(part, ""))
+        for part in ("arm", "neck", "nose")
+    ]
+    links = ([face] if face else []) + [action[0] for action in actions if action]
+    return "プーは " + "、".join(links) if links else ""
+
+
 def spoken_part(user_text: str) -> str:
     """What was said, from 「「どうぞ」と言って、風船をプーに手渡す」 as the ROS
     side words a seen handover; the handover itself is retold from the
@@ -414,11 +425,14 @@ def narrate(turn: StoryTurn, config: StoryConfig) -> tuple[str | None, list[Stor
         entries.append(StoryEntry("narration", beat.narration))
     entries.extend(participant_entries(
         turn.observed_actions, spoken_part(turn.user_text) if turn.user_text else ""))
-    sentence = motion_sentence(turn.motion, config.motion_phrases)
-    if sentence:
-        entries.append(StoryEntry("narration", sentence))
+    # The gesture goes with the line it was made with, so it is not read
+    # as Pooh's answer to whatever is retold just before.
+    lead = motion_lead(turn.motion, config.motion_phrases)
     if turn.pooh_text:
-        entries.append(StoryEntry("speech", f"「{turn.pooh_text}」", "pooh"))
+        said = f"{lead} いいました。" if lead else ""
+        entries.append(StoryEntry("speech", f"{said}「{turn.pooh_text}」", "pooh"))
+    elif lead:
+        entries.append(StoryEntry("narration", motion_sentence(turn.motion, config.motion_phrases)))
     return beat_id, entries
 
 
