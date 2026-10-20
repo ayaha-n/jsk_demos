@@ -198,8 +198,11 @@ def scene_context(config, beat_id, turns):
             start = index
 
     def dialogue(items):
-        return [{"reader": turn.user_text[:1500], "bear": turn.pooh_text[:1500]}
-                for turn in items if turn.user_text or turn.pooh_text]
+        # What the robot saw the reader do goes in its place among the words.
+        return [{"reader_did": list(turn.observed_actions)} if turn.source == "observed"
+                else {"reader": turn.user_text[:1500], "bear": turn.pooh_text[:1500]}
+                for turn in items
+                if turn.user_text or turn.pooh_text or turn.observed_actions]
 
     beat = config.beats[beat_id]
     state = next((turn.situation for turn in reversed(turns) if turn.situation), {})
@@ -208,7 +211,8 @@ def scene_context(config, beat_id, turns):
         "prior_context": dialogue(turns[max(0, start - 24):start]),
         "current_scene": dialogue(turns[start:][-48:]),
         "current_state": state,
-        "latest_participant_dialogue": dialogue([turn for turn in turns if turn.source == "participant"][-8:]),
+        "latest_participant_dialogue": dialogue(
+            [turn for turn in turns if turn.source in ("participant", "observed")][-8:]),
         "is_closing": beat_id in storybook.CLOSING_FALLBACK_BEATS,
         "previous_illustration": previous_illustration(config, turns[:start]),
     }
@@ -220,7 +224,7 @@ def scene_cache_key(config, beat_id, turns):
         "model": os.getenv("STORYBOOK_SCENE_MODEL", "gpt-4o-mini"),
         "fixed_beats": sorted(storybook.FIXED_ILLUSTRATION_BEATS),
         "closing_fallback_beats": sorted(storybook.CLOSING_FALLBACK_BEATS),
-        "summary_policy": 3,
+        "summary_policy": 4,
     }
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
@@ -242,6 +246,11 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                 "pose, action, expression, visible props, their colors and arrangement. "
                 "Prioritize current_state.decided, current_state.place, recent "
                 "events and latest_participant_dialogue for what is happening NOW. "
+                "reader_did entries are what the reader was actually seen doing to "
+                "the bear (参加者 is the reader): handing or holding out an object, "
+                "stroking or touching it. They may be drawn: the bear holding or "
+                "lifting an object handed to it, or the reader's hand holding an "
+                "object out to the bear or touching it. "
                 "current_state.props is an accumulated inventory: do not draw all "
                 "of it. Draw only objects relevant to the latest exchange. "
                 "When is_closing=true, current_scene may contain only a generic "
@@ -257,11 +266,13 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                 "An explicit correction in current dialogue overrides the initial "
                 "scene. Track object state carefully: if honey is gone, do not "
                 "describe a full honey pot. Do not turn discussion of a gift into "
-                "a completed gift delivery or invent a holding/lifting action. "
+                "a completed gift delivery. The bear may hold or lift an object "
+                "it has or was handed. "
                 "Distinguish a proposal or question from an accepted decision. "
                 "Do not invent gifts, people, animals, actions or future events. "
-                "Call the protagonist 参照画像のクマ. The reader is not a visible "
-                "figure. There is no background except a small patch of ground: "
+                "Call the protagonist 参照画像のクマ. The reader is never a whole "
+                "figure or a face; only their hand and forearm may appear, when "
+                "they hand, hold out or touch something. There is no background except a small patch of ground: "
                 "do not add a forest, trees, flowers, lighting or scenery. Avoid "
                 "abstract feelings, atmosphere or decorative embellishment; "
                 "express emotion only through the bear's visible face and pose. "
@@ -315,8 +326,8 @@ def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existi
             "muzzle and fur, black dot eyes, brown nose, crisp irregular black ink "
             "lines, short fur hatching and watercolor grain. Keep the little ground "
             "patch, plants, soft gray reader shadow and genuinely transparent "
-            "background. Change the props, their state and paws only "
-            "as described in the following scene. Keep the whole bear and objects "
+            "background. Change the props, their state, paws and the reader's "
+            "hand only as described in the following scene. Keep the whole bear and objects "
             "inside the frame with clear margins. No extra objects, characters, "
             "writing, speech bubbles, scenery or colored backdrop.\nScene: " + description
         )

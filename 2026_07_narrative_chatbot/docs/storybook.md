@@ -87,4 +87,4 @@ PDF リンクは、画面で選んだ向きの PDF をその場で作って返�
 
 挿絵は `assets/storybook/<シナリオ>/` の PNG で、`config/storybook.json` に書いたパスで読む。リポジトリを軽くするため 256色 PNG にしてある（見た目の差は小さく、タブレットの描き出しは白黒）。タブレットに送るときは RGBA に直してから送る（`eink_memory_push` は透明部分から切り抜くため）。
 
-`scripts/storybook_illustrations.py --scenario <key>` は、各場面のプロンプトから `gpt-image-1` で挿絵を描かせる。参照画像は `assets/storybook/bear-reference.png`。ただし画像モデルのモデレーションで出力段階で拒否されることがあり（`moderation_blocked`）、その場合は手で描いた絵や写真を置く。参加者は姿を描かず、画面の下から差す影として表す（`config/storybook.json` の `participant_presence`）。
+`scripts/storybook_illustrations.py --scenario <key>` は、各場面のプロンプトから `gpt-image-1` で挿絵を描かせる。参照画像は `assets/storybook/bear-reference.png`。ただし画像モデルのモデレーションで出力段階で拒否されることがあり（`moderation_blocked`）、その場合は手で描いた絵や写真を置く。参加者は顔や体を描かず、画面の下から差す影として表す。物を手渡したり差し出したり、プーに触れたりした場面では、手と腕だけを画面の端から描いてよい（`config/storybook.json` の `participant_presence`）。会話中に生成する挿絵の要約には、ROS 側が見た参加者の行為（source `observed`）も会話と同じ時系列で `reader_did` として渡す。
