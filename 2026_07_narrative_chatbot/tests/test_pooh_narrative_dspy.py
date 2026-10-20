@@ -761,10 +761,11 @@ class RegressionTests(unittest.TestCase):
                     )
                 if name == "GeneratePoohResponse":
                     return SimpleNamespace(
-                        selected_mishearing="none", situation_update=SituationUpdate(),
+                        selected_mishearing="none",
                         bot_response="青にしよう！",
                     )
                 return SimpleNamespace(
+                    situation_update=SituationUpdate(),
                     narrative_actions=["not_give_empty_jar"],
                     settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="青い風船")],
                     question_kind="deepen",
@@ -2201,10 +2202,11 @@ class EarlyResponseTests(unittest.TestCase):
                     return SimpleNamespace(candidates=[])
                 if name == "GeneratePoohResponse":
                     return SimpleNamespace(
-                        selected_mishearing="none", situation_update=SituationUpdate(),
+                        selected_mishearing="none",
                         bot_response="ロボットのことだね。",
                     )
                 return SimpleNamespace(
+                    situation_update=SituationUpdate(),
                     narrative_actions=[], settled_details=[], question_kind="none",
                 )
             return predictor
@@ -2377,10 +2379,11 @@ class HoneyRequestTests(unittest.TestCase):
                     )
                 if name == "GeneratePoohResponse":
                     return SimpleNamespace(
-                        selected_mishearing="none", situation_update=SituationUpdate(),
+                        selected_mishearing="none",
                         bot_response="うん、約束するよ！",
                     )
                 return SimpleNamespace(
+                    situation_update=SituationUpdate(),
                     narrative_actions=[], settled_details=[], question_kind="none",
                 )
             return predictor

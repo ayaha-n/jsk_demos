@@ -340,6 +340,7 @@ def build_interpret_examples(trainset: list[dspy.Example]) -> list[dspy.Example]
             user_action=item.user_action,
             world_event=item.world_event,
             bot_response=item.bot_response,
+            situation_update=item.situation_update,
             narrative_actions=item.narrative_actions,
             settled_details=item.settled_details,
             question_kind=item.question_kind,
@@ -369,7 +370,6 @@ def build_response_examples(
             interaction_mode=item.interaction_mode,
             mishearing_candidates=_candidates_for(item),
             selected_mishearing=item.selected_mishearing,
-            situation_update=item.situation_update,
             bot_response=item.bot_response,
         ).with_inputs(
             "current_situation",

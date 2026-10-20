@@ -1040,7 +1040,6 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         interaction_mode="narrative",
         mishearing_candidates=[],
         selected_mishearing="none",
-        situation_update=SituationUpdate(),
         bot_response=HONEY_EATEN_RESPONSE,
     ).with_inputs(
         "current_situation",
@@ -1078,7 +1077,6 @@ EEYORE_BIRTHDAY_RESPONSE_EXAMPLES.append(
         interaction_mode="narrative",
         mishearing_candidates=[],
         selected_mishearing="none",
-        situation_update=SituationUpdate(),
         bot_response=HONEY_GIFT_COMMITTED_RESPONSE,
     ).with_inputs(
         "current_situation",

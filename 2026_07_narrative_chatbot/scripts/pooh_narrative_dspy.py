@@ -77,7 +77,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v45"
+PROGRAM_VERSION = "pooh-structured-state-v46"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -223,12 +223,6 @@ class GeneratePoohResponse(dspy.Signature):
     selected_mishearing: str = dspy.OutputField(desc=(
             "使用した候補のheard_as。候補が空の場合のみnone。"
         ))
-    situation_update: SituationUpdate = dspy.OutputField(
-        desc=(
-            "このターンで実際に生じた差分だけ。変更しない項目はnullまたは空リスト。"
-            "現在状態の保持と差分の適用はPythonが行う。"
-        )
-    )
     bot_response: str = dspy.OutputField(
         desc=(
             "参加者に提示する短く自然で穏やかなセリフ。一人称は常に「ぼく」。"
@@ -248,7 +242,7 @@ DISALLOWED_QUESTION_KINDS = {"new_idea", "delegate"}
 
 
 class InterpretTurn(dspy.Signature):
-    """確定したこのターンのやり取りから、物語上の判断だけを構造化する。セリフは書かない。
+    """確定したこのターンのやり取りから、物語上の判断と状態の差分を構造化する。セリフは書かない。
 
     参加者の入力とプーの応答の両方を踏まえ、実際に起きたことだけを返す。
     提案・候補・質問の段階と、決まったことを区別する。迷ったら何も返さない。
@@ -261,6 +255,12 @@ class InterpretTurn(dspy.Signature):
         desc="参加者の入力とは別に、既に確定・適用された世界の出来事。通常ターンは空文字列。"
     )
     bot_response: str = dspy.InputField(desc="このターンのプーの応答。確定済み。")
+    situation_update: SituationUpdate = dspy.OutputField(
+        desc=(
+            "このターンのやり取り(参加者の入力とbot_response)で実際に生じた状態の差分だけ。変更しない項目はnullまたは空リスト。"
+            "現在状態の保持と差分の適用はPythonが行う。"
+        )
+    )
     narrative_actions: list[NarrativeAction] = dspy.OutputField(
         desc=(
             "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
@@ -636,8 +636,6 @@ class PoohNarrativeAgent(dspy.Module):
             response = stream_response(self.respond, feed.feed, **respond_inputs)
         else:
             response = self.respond(**respond_inputs)
-        situation_update = SituationUpdate.model_validate(response.situation_update)
-        updated_situation = apply_situation_update(current_situation, situation_update)
         selected_mishearing = response.selected_mishearing
         # Keep the raw LM response here.  Compile-time metrics must see model
         # failures so BootstrapFewShot can learn from them; the optional
@@ -674,6 +672,10 @@ class PoohNarrativeAgent(dspy.Module):
             world_event=world_event,
             bot_response=bot_response,
         )
+        # The state delta is read from the final line, as the decisions are,
+        # so writing the line does not wait for it.
+        situation_update = SituationUpdate.model_validate(interpretation.situation_update)
+        updated_situation = apply_situation_update(current_situation, situation_update)
         narrative_actions = [str(action) for action in interpretation.narrative_actions]
         question_kind = str(interpretation.question_kind)
         settled_details = [
