@@ -439,6 +439,16 @@ def wrap_text(text: str, px: int, width: int, measure: Measure = default_measure
     return lines
 
 
+def text_after(text: str, lines: list[str]) -> str:
+    """What is left of ``text`` once its first ``lines`` are written: a
+    sentence of 分かち書き may end in a quote that has no spaces, so the
+    rest is cut from the text rather than joined back from its lines."""
+    rest = text.strip()
+    for line in lines:
+        rest = rest.lstrip()[len(line):]
+    return rest.lstrip()
+
+
 def _wrap_paragraph(text: str, px: int, width: int, measure: Measure) -> list[str]:
     lines: list[str] = []
     rest = text.strip()
@@ -622,10 +632,8 @@ class StoryBuilder:
                     # A long passage starts here and runs on in the next
                     # column or overleaf.
                     put(page, head)
-                    rest = wrap_text(entry.text, head.px, head.w, self.measure)[len(head.lines):]
-                    # 分かち書き broke at its spaces; speech broke between characters.
-                    joiner = " " if " " in entry.text else ""
-                    entry = StoryEntry(entry.style, joiner.join(rest), entry.speaker)
+                    entry = StoryEntry(entry.style, text_after(entry.text, head.lines),
+                                       entry.speaker)
                 elif page.cursor is None:
                     # Too long for an empty column and not splittable.
                     put(page, self._fit(page, entry, force=True))

@@ -125,6 +125,11 @@ class NarrationTest(unittest.TestCase):
             user_text="「はちみつ どうぞ」と言って、はちみつの壺をプーの左手に手渡す"), EEYORE)
         self.assertEqual(entries[0].text, "「はちみつ どうぞ」と、あなたは いいました。")
 
+    def test_a_passage_run_on_overleaf_keeps_its_quote_whole(self):
+        text = "プーは うれしそうな かおで いいました。「" + "あいうえお" * 12 + "」"
+        lines = wrap_text(text, 10, 100, full_width)
+        self.assertEqual(storybook.text_after(text, lines[:2]), "".join(lines[2:]))
+
     def test_observed_record_from_the_log(self):
         turn = storybook.turn_from_record({
             "source": "observed", "observed_actions": ["参加者がプーのおなかに触れた"]})
