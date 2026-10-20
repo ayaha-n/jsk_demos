@@ -111,19 +111,82 @@ class NarrationTest(unittest.TestCase):
         self.assertIsNone(beat)
         self.assertEqual(
             [(e.style, e.text) for e in entries],
-            [("narration", "あなたは プーの左手をなでました。"),
-             ("narration", "あなたは はちみつの壺をプーの左手にてわたしました。")],
+            [("narration", "あなたは プーの ひだりてを なでて、"
+                           "はちみつの壺を プーの ひだりてに てわたしました。")],
         )
 
     def test_held_out_object_is_retold(self):
         self.assertEqual(storybook.observed_sentence("参加者がはちみつの壺をプーに差し出した"),
-                         "あなたは はちみつの壺をプーにさしだしました。")
+                         "あなたは はちみつの壺を プーに さしだしました。")
+        self.assertEqual(storybook.observed_sentence("参加者がプーのおなかに触れた"),
+                         "あなたは プーの おなかに さわりました。")
+
+    def test_an_unknown_verb_is_kept_as_its_own_sentence(self):
+        entries = storybook.participant_entries(
+            ["参加者がプーの左手をなでた", "参加者がプーに手を振った"], "またね")
+        self.assertEqual(
+            [e.text for e in entries],
+            ["あなたは プーの ひだりてを なでました。",
+             "あなたは プーに手を振った。",
+             "「またね」と、あなたは いいました。"],
+        )
 
     def test_a_seen_handover_turn_quotes_only_what_was_said(self):
         _, entries = narrate(StoryTurn(
             "participant", "ありがとう。",
             user_text="「はちみつ どうぞ」と言って、はちみつの壺をプーの左手に手渡す"), EEYORE)
         self.assertEqual(entries[0].text, "「はちみつ どうぞ」と、あなたは いいました。")
+
+    def test_a_seen_handover_and_its_words_make_one_sentence(self):
+        builder = StoryBuilder(EEYORE, measure=full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        self.assertEqual(builder.add(StoryTurn(
+            "observed", "", observed_actions=("参加者が風船をプーに差し出した",),
+            with_speech=True)), [])
+        builder.add(StoryTurn("participant", "ありがとう。",
+                              user_text="「どうぞ」と言って、風船をプーに差し出す"))
+        texts = [placed.entry.text for page in builder.pages for placed in page.placed]
+        self.assertIn("あなたは 風船を プーに さしだしながら、「どうぞ」と いいました。", texts)
+        self.assertNotIn("「どうぞ」と、あなたは いいました。", texts)
+
+    def test_a_touch_is_not_joined_to_the_next_words(self):
+        # A touch, or a handover whose words were dropped while Pooh was
+        # busy, comes on its own; later words are about something else.
+        builder = StoryBuilder(EEYORE, measure=full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        self.assertTrue(builder.add(StoryTurn(
+            "observed", "", observed_actions=("参加者がプーのおなかに触れた",))))
+        builder.add(StoryTurn("participant", "うん。", user_text="げんき？"))
+        texts = [placed.entry.text for page in builder.pages for placed in page.placed]
+        self.assertEqual(texts[-3:], ["あなたは プーの おなかに さわりました。",
+                                      "「げんき？」と、あなたは いいました。", "「うん。」"])
+
+    def test_seen_words_never_answered_are_retold_before_the_end(self):
+        builder = StoryBuilder(EEYORE, measure=full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.add(StoryTurn("observed", "", observed_actions=("参加者が風船をプーに差し出した",),
+                              with_speech=True))
+        builder.finish()
+        texts = [placed.entry.text for page in builder.pages for placed in page.placed]
+        self.assertEqual(texts[-2:], ["あなたは 風船を プーに さしだしました。", EEYORE.closing])
+
+    def test_touches_one_after_another_go_on_from_each_other(self):
+        builder = StoryBuilder(EEYORE, measure=full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        for action in ("参加者がプーの左足に触れた", "参加者がプーの左足に触れた",
+                       "参加者がプーのおなかをなでた"):
+            builder.add(StoryTurn("observed", "", observed_actions=(action,)))
+        builder.add(StoryTurn("participant", "くすぐったいよ。", user_text="えい"))
+        builder.add(StoryTurn("observed", "", observed_actions=("参加者がプーの右手を握った",)))
+        texts = [placed.entry.text for page in builder.pages for placed in page.placed]
+        self.assertEqual(texts[-6:], [
+            "あなたは プーの ひだりあしに さわりました。",
+            "もう いちど、プーの ひだりあしに さわりました。",
+            "それから、プーの おなかを なでました。",
+            "「えい」と、あなたは いいました。",
+            "「くすぐったいよ。」",
+            "あなたは プーの みぎてを にぎりました。",
+        ])
 
     def test_a_passage_run_on_overleaf_keeps_its_quote_whole(self):
         text = "プーは うれしそうな かおで いいました。「" + "あいうえお" * 12 + "」"
@@ -135,6 +198,10 @@ class NarrationTest(unittest.TestCase):
             "source": "observed", "observed_actions": ["参加者がプーのおなかに触れた"]})
         self.assertEqual((turn.pooh_text, turn.user_text), ("", ""))
         self.assertEqual(turn.observed_actions, ("参加者がプーのおなかに触れた",))
+        self.assertFalse(turn.with_speech)
+        self.assertTrue(storybook.turn_from_record({
+            "source": "observed", "observed_actions": ["参加者が風船をプーに差し出した"],
+            "with_speech": True}).with_speech)
 
     def test_world_event_opens_its_beat_with_narration(self):
         beat, entries = narrate(

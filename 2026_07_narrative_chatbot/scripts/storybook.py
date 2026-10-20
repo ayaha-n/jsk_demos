@@ -20,7 +20,7 @@ import json
 import hashlib
 import os
 import random
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -213,8 +213,10 @@ class StoryTurn:
     motion: dict[str, str] = field(default_factory=dict)
     ends_story: bool = False
     situation: dict[str, Any] = field(default_factory=dict)
-    # What the robot saw the participant do (source "observed")
+    # What the robot saw the participant do (source "observed"), and
+    # whether it came with the participant's next words
     observed_actions: tuple[str, ...] = ()
+    with_speech: bool = False
 
 
 def illustration_situation(value: Any) -> dict[str, Any]:
@@ -241,6 +243,7 @@ def turn_from_output(output: Any) -> StoryTurn:
         ends_story=output.source == "session_close" or output.interaction_mode == "exit",
         situation=illustration_situation(getattr(output, "updated_situation", None)),
         observed_actions=tuple(getattr(output, "observed_actions", ())),
+        with_speech=bool(getattr(output, "observed_with_speech", False)),
     )
 
 
@@ -259,6 +262,7 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
         ends_story=source == "session_close" or record.get("interaction_mode") == "exit",
         situation=illustration_situation(record.get("updated_situation")),
         observed_actions=tuple(str(a) for a in record.get("observed_actions") or ()),
+        with_speech=bool(record.get("with_speech")),
     )
 
 
@@ -312,18 +316,87 @@ def spoken_part(user_text: str) -> str:
     return user_text
 
 
+# The verbs the ROS side words what it saw with, in the book's hiragana: as
+# a link in a chain (て), alongside speech (ながら), and to end on (ました).
+OBSERVED_VERBS = (
+    ("手渡した", "てわたして", "てわたしながら", "てわたしました"),
+    ("差し出した", "さしだして", "さしだしながら", "さしだしました"),
+    ("見せた", "みせて", "みせながら", "みせました"),
+    ("なでた", "なでて", "なでながら", "なでました"),
+    ("触れた", "さわって", "さわりながら", "さわりました"),
+    ("握った", "にぎって", "にぎりながら", "にぎりました"),
+)
+# Where Pooh is touched (pooh_body's touch sensors), as the book spells it.
+BODY_PLACES = {"左手": "ひだりて", "右手": "みぎて", "左足": "ひだりあし",
+               "右足": "みぎあし", "手": "て", "足": "あし"}
+
+
+def observed_clause(action: str) -> tuple[str, str, str] | None:
+    """「参加者がプーの左手をなでた」 -> (「プーの ひだりてを なでて」,
+    「… なでながら」, 「… なでました」), or None for a verb not known here."""
+    body = action.strip().rstrip("。").removeprefix("参加者が")
+    for plain, te, nagara, past in OBSERVED_VERBS:
+        if body.endswith(plain):
+            body = body.removesuffix(plain)
+            break
+    else:
+        return None
+    body = body.replace("をプー", "を プー").replace("プーの", "プーの ")
+    for place, reading in sorted(BODY_PLACES.items(), key=lambda item: -len(item[0])):
+        if f"プーの {place}" in body:
+            body = body.replace(f"プーの {place}", f"プーの {reading}")
+            break
+    return tuple(f"{body} {verb}" for verb in (te, nagara, past))
+
+
 def observed_sentence(action: str) -> str:
-    """「参加者がプーの左手をなでた」 -> 「あなたは プーの左手をなでました。」"""
-    action = action.strip().rstrip("。")
-    if action.startswith("参加者が"):
-        action = "あなたは " + action.removeprefix("参加者が")
-    for plain, polite in (("手渡した", "てわたしました"), ("差し出した", "さしだしました"),
-                          ("見せた", "みせました"),
-                          ("なでた", "なでました"), ("触れた", "さわりました"),
-                          ("握った", "にぎりました")):
-        if action.endswith(plain):
-            return action.removesuffix(plain) + polite + "。"
-    return action + "。"
+    """「参加者がプーの左手をなでた」 -> 「あなたは プーの ひだりてを なでました。」"""
+    clause = observed_clause(action)
+    if clause is not None:
+        return f"あなたは {clause[2]}。"
+    return "あなたは " + action.strip().rstrip("。").removeprefix("参加者が") + "。"
+
+
+def participant_entries(
+    actions: Iterable[str], said: str = "", after: tuple[str, ...] = ()
+) -> list[StoryEntry]:
+    """What the participant did and said, retold as one sentence where the
+    verbs allow: 「あなたは プーの ひだりてを なでて、はちみつの壺を プーに
+    さしだしながら、「どうぞ」と いいました。」 rather than a line for each.
+    ``after``: what was retold just before, so the next touch goes on from
+    it (「それから、…」, 「もう いちど、…」) instead of starting over."""
+    actions = list(actions)
+    entries: list[StoryEntry] = []
+    chain: list[tuple[str, str, str]] = []
+    subject = "あなたは "
+    if after and not said:
+        subject = "もう いちど、" if actions[:1] == [after[-1]] else "それから、"
+
+    def end_chain() -> None:
+        nonlocal subject
+        if chain:
+            links = [clause[0] for clause in chain[:-1]] + [chain[-1][2]]
+            entries.append(StoryEntry("narration", subject + "、".join(links) + "。"))
+            subject = "あなたは "
+            chain.clear()
+
+    for action in actions:
+        clause = observed_clause(action)
+        if clause is None:
+            end_chain()
+            entries.append(StoryEntry("narration", observed_sentence(action)))
+            subject = "あなたは "
+        else:
+            chain.append(clause)
+    if not said:
+        end_chain()
+    elif chain:
+        links = [clause[0] for clause in chain[:-1]] + [chain[-1][1]]
+        entries.append(StoryEntry(
+            "speech", "あなたは " + "、".join(links) + f"、「{said}」と いいました。", "participant"))
+    else:
+        entries.append(StoryEntry("speech", f"「{said}」と、あなたは いいました。", "participant"))
+    return entries
 
 
 def narrate(turn: StoryTurn, config: StoryConfig) -> tuple[str | None, list[StoryEntry]]:
@@ -339,12 +412,8 @@ def narrate(turn: StoryTurn, config: StoryConfig) -> tuple[str | None, list[Stor
     beat = config.beats.get(beat_id or "")
     if beat is not None and beat.narration:
         entries.append(StoryEntry("narration", beat.narration))
-    for action in turn.observed_actions:
-        entries.append(StoryEntry("narration", observed_sentence(action)))
-    if turn.user_text:
-        entries.append(StoryEntry(
-            "speech", f"「{spoken_part(turn.user_text)}」と、あなたは いいました。", "participant"
-        ))
+    entries.extend(participant_entries(
+        turn.observed_actions, spoken_part(turn.user_text) if turn.user_text else ""))
     sentence = motion_sentence(turn.motion, config.motion_phrases)
     if sentence:
         entries.append(StoryEntry("narration", sentence))
@@ -543,12 +612,33 @@ class StoryBuilder:
         self.measure = measure
         self.pages: list[StoryPage] = []
         self.finished = False
+        # What the robot saw with the participant's words (a handover seen
+        # as 「どうぞ」 was said), kept to be retold with them: the session
+        # records the two one after the other.
+        self._seen: tuple[str, ...] = ()
+        # What was just retold on its own, for a touch that follows it.
+        self._just_seen: tuple[str, ...] = ()
 
     def add(self, turn: StoryTurn) -> list[PageEvent]:
         if self.finished:
             return []
-        beat_id, entries = narrate(turn, self.config)
         events: list[PageEvent] = []
+        if turn.source == "observed" and turn.with_speech:
+            events.extend(self._retell_seen())
+            self._seen = turn.observed_actions
+            return events
+        if turn.source == "participant":
+            turn = replace(turn, observed_actions=self._seen + turn.observed_actions)
+            self._seen = ()
+        else:
+            events.extend(self._retell_seen())
+        if turn.source == "observed":
+            # A touch, or what was done while Pooh was busy and the words
+            # were dropped, is retold on its own, as it happens.
+            events.extend(self._retell_on_its_own(turn.observed_actions))
+            return events
+        self._just_seen = ()
+        beat_id, entries = narrate(turn, self.config)
         if not self.pages or (beat_id is not None and not self._continue_in_next_column(beat_id)):
             events.append(self._new_page(beat_id))
         events.extend(self._place(entries))
@@ -560,8 +650,21 @@ class StoryBuilder:
         if self.finished or not self.pages:
             self.finished = True
             return []
+        events = self._retell_seen()
         self.finished = True
-        return self._place([StoryEntry("closing", self.config.closing)])
+        return events + self._place([StoryEntry("closing", self.config.closing)])
+
+    def _retell_seen(self) -> list[PageEvent]:
+        """What was seen with words that never got answered, on its own."""
+        seen, self._seen = self._seen, ()
+        return self._retell_on_its_own(seen)
+
+    def _retell_on_its_own(self, actions: tuple[str, ...]) -> list[PageEvent]:
+        if not actions or not self.pages:
+            return []
+        entries = participant_entries(actions, after=self._just_seen)
+        self._just_seen = actions
+        return self._place(entries)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -693,8 +796,6 @@ def build_book(
     measure: Measure = default_measure,
 ) -> StoryBuilder:
     """The whole book of a finished (or interrupted) session log."""
-    from dataclasses import replace
-
     records = list(records)
     config = load_story_config(scenario)
     if records:

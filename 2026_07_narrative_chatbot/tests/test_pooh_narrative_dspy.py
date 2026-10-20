@@ -653,7 +653,12 @@ class RegressionTests(unittest.TestCase):
         logged = record.call_args.args[1]
         self.assertEqual(logged["source"], "observed")
         self.assertEqual(logged["observed_actions"], ["参加者がはちみつの壺をプーの左手に手渡した"])
+        self.assertFalse(logged["with_speech"])
         self.assertIsNone(session.observe([]))
+        with patch.object(pooh, "append_session_record") as record:
+            output = session.observe(["参加者が風船をプーに差し出した"], with_speech=True)
+        self.assertTrue(output.observed_with_speech)
+        self.assertTrue(record.call_args.args[1]["with_speech"])
 
     def test_narrative_relay_receive_poll_allows_timed_event_checks(self):
         publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")

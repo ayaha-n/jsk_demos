@@ -973,6 +973,7 @@ class SessionOutput:
     streamed: bool = False
     # For source "observed": what the robot saw the participant do.
     observed_actions: list[str] = field(default_factory=list)
+    observed_with_speech: bool = False
 
     @property
     def motion(self) -> dict[str, str]:
@@ -1364,13 +1365,17 @@ class NarrativeSession:
         self._publish(output)
         return output
 
-    def observe(self, actions: Sequence[str]) -> SessionOutput | None:
+    def observe(self, actions: Sequence[str], with_speech: bool = False) -> SessionOutput | None:
         """Record what the robot saw the participant do, without a reply.
 
         The actions (e.g. 「参加者がはちみつの壺をプーの左手に手渡した」) join
         the story's events, so the next answer can take them up; they are
         logged with source "observed" and retold in the picture book, but
-        nothing is sent to the robot.
+        nothing is sent to the robot.  ``with_speech`` marks actions that
+        came with the utterance about to be answered (「どうぞ」 said while
+        handing), as opposed to a touch, or speech dropped while Pooh was
+        busy, reported on their own; the book retells the former together
+        with what was said.
         """
         actions = [action for action in actions if action]
         if self.ended or not actions:
@@ -1382,6 +1387,7 @@ class NarrativeSession:
             "session_id": self.session_id,
             "source": "observed",
             "observed_actions": actions,
+            "with_speech": with_speech,
             "updated_situation": self.current_situation.model_dump(),
         })
         output = SessionOutput(
@@ -1391,6 +1397,7 @@ class NarrativeSession:
             scene_id="none",
             updated_situation=self.current_situation,
             observed_actions=actions,
+            observed_with_speech=with_speech,
         )
         self._notify_listeners(output)
         return output
@@ -1726,7 +1733,7 @@ def run_chat(
                 print(pooh_line(closing.bot_response))
             break
         observed = ros_publisher.take_observed_actions() if ros_publisher else []
-        if session.observe(observed) is not None:
+        if session.observe(observed, with_speech=bool(user_input)) is not None:
             print(f"[観察された行為] {'、'.join(observed)}")
         if user_input is None:
             continue
