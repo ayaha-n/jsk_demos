@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import select
 import sys
 import time
@@ -33,6 +34,7 @@ os.environ.setdefault(
 
 try:
     import dspy
+    from dspy.streaming import StreamListener, StreamResponse
     from dspy.teleprompt import BootstrapFewShot
 except ImportError:
     print("DSPy がありません。Python 3.12環境で `pip install dspy==3.2.1` を実行してください。")
@@ -440,6 +442,65 @@ def enforce_response_invariants(
     return bot_response
 
 
+# A sentence ends at 。！？ (or a run of them, with any closing bracket);
+# the line is handed on sentence by sentence as it streams in.
+SENTENCE_END = re.compile(r"[。！？!?…]+[」』）)]*")
+
+
+class SentenceFeed:
+    """Hands on the sentences of a line as its text streams in.
+
+    ``send`` gets each sentence once it is complete, then whatever of the
+    final line is left; together they make the line.  An end mark only counts
+    once more text follows, as the next chunk may extend it (「！」 to 「！？」).
+    """
+
+    def __init__(self, send: Callable[[str], None]) -> None:
+        self.send = send
+        self.text = ""
+        self.sent = 0
+
+    def feed(self, chunk: str) -> None:
+        self.text += chunk
+        for match in SENTENCE_END.finditer(self.text, self.sent):
+            if match.end() < len(self.text):
+                self.send(self.text[self.sent:match.end()])
+                self.sent = match.end()
+
+    def finish(self, line: str) -> bool:
+        """Send the rest of the final line; False if it does not continue
+        what was already sent (then nothing more is sent)."""
+        already = self.text[:self.sent]
+        if not line.startswith(already):
+            return False
+        if line[len(already):]:
+            self.send(line[len(already):])
+        return True
+
+
+def stream_response(predictor: Any, on_text: Callable[[str], None], **inputs: Any) -> Any:
+    """Call the respond stage, passing on bot_response as it is written.
+
+    A predictor that is not a DSPy module (a test double) is just called.
+    A cached answer comes back whole, without any streamed text.
+    """
+    if not isinstance(predictor, dspy.Module):
+        return predictor(**inputs)
+    # A listener keeps its state after one line, so each call gets its own.
+    streaming = dspy.streamify(
+        predictor,
+        stream_listeners=[StreamListener(signature_field_name="bot_response")],
+        async_streaming=False,
+    )
+    result = None
+    for item in streaming(**inputs):
+        if isinstance(item, StreamResponse):
+            on_text(item.chunk)
+        elif isinstance(item, dspy.Prediction):
+            result = item
+    return result
+
+
 def warn_if_response_repeated(bot_response: str, previous_bot_response: str | None) -> None:
     """Flag an exact repeat of the immediately preceding Pooh line.
 
@@ -478,9 +539,11 @@ class PoohNarrativeAgent(dspy.Module):
         on_response: Callable[[str], None] | None = None,
         fixed_line_for: Callable[[list[str]], str | None] | None = None,
     ) -> Any:
-        """``on_response(bot_response)``, if given, receives the line as soon
-        as it is written, before interpret, so the robot can start speaking.
-        An exit's line is replaced by the ending, so it is not passed.
+        """``on_response(text)``, if given, receives the line before interpret,
+        so the robot can start speaking: sentence by sentence while the line
+        is written, then the rest of it.  A meta turn's line may be replaced
+        by the technical-term guard, so it is passed whole once checked; an
+        exit's line is replaced by the ending, so it is not passed.
 
         ``fixed_line_for(honey_requests)``, if given, returns the fixed line
         Pooh answers those requests with in the current state, or None; with
@@ -549,7 +612,7 @@ class PoohNarrativeAgent(dspy.Module):
                     candidates = [uncertain_candidate_for(technical_terms[0])]
             elif prior_mentions == 1:
                 candidates = [uncertain_candidate_for(technical_terms[0])]
-        response = self.respond(
+        respond_inputs = dict(
             current_situation=current_situation,
             user_action=user_action,
             history=history,
@@ -559,6 +622,15 @@ class PoohNarrativeAgent(dspy.Module):
             interaction_mode=mode,
             mishearing_candidates=candidates,
         )
+        feed = (
+            SentenceFeed(on_response)
+            if on_response is not None and mode not in ("meta", "exit")
+            else None
+        )
+        if feed is not None:
+            response = stream_response(self.respond, feed.feed, **respond_inputs)
+        else:
+            response = self.respond(**respond_inputs)
         situation_update = SituationUpdate.model_validate(response.situation_update)
         updated_situation = apply_situation_update(current_situation, situation_update)
         selected_mishearing = response.selected_mishearing
@@ -581,7 +653,14 @@ class PoohNarrativeAgent(dspy.Module):
                 "ぼくにはよくわからないけれど、"
                 "いま、きみとお茶会をしているのはわかるよ。"
             )
-        if on_response is not None and mode != "exit":
+        if feed is not None:
+            if not feed.finish(bot_response):
+                print(
+                    f"警告: 送信済みの文が応答の冒頭と一致しません: "
+                    f"{feed.text[:feed.sent]!r} -> {bot_response!r}",
+                    file=sys.stderr,
+                )
+        elif on_response is not None and mode != "exit":
             on_response(bot_response)
         interpretation = self.interpret(
             current_situation=current_situation,
@@ -1544,10 +1623,15 @@ class NarrativeSession:
         turn_id = f"{self.session_id[:8]}-{len(self.turns) + 1}"
         sent_early: list[str] = []
 
-        def send_early(line: str) -> None:
-            # The robot starts speaking while interpret still runs.
-            if self.ros_publisher.publish_chunk(turn_id=turn_id, index=0, text=line):
-                sent_early.append(line)
+        def send_early(text: str) -> None:
+            # The robot starts speaking while the line is still being written
+            # and interpret still runs; each part follows the one before.
+            if self.ros_publisher.publish_chunk(
+                turn_id=turn_id, index=len(sent_early), text=text
+            ):
+                sent_early.append(text)
+            elif sent_early:
+                print(f"警告: 応答の続きを送れませんでした: {text!r}", file=sys.stderr)
 
         early = (
             self.ros_publisher is not None

@@ -54,8 +54,12 @@ fake.configure = lambda **kwargs: None
 fake.context = lambda **kwargs: __import__("contextlib").nullcontext()
 teleprompt = types.ModuleType("dspy.teleprompt")
 teleprompt.BootstrapFewShot = _Module
+streaming = types.ModuleType("dspy.streaming")
+streaming.StreamListener = _Module
+streaming.StreamResponse = type("StreamResponse", (), {})
 sys.modules.setdefault("dspy", fake)
 sys.modules.setdefault("dspy.teleprompt", teleprompt)
+sys.modules.setdefault("dspy.streaming", streaming)
 
 import pooh_narrative_dspy as pooh
 import pooh_examples
@@ -2221,6 +2225,46 @@ class EarlyResponseTests(unittest.TestCase):
         self.assertEqual(received, ["ロボットのことだね。"])
         self.assertLess(order.index("sent"), order.index("InterpretTurn"))
 
+    def test_line_is_sent_sentence_by_sentence_while_written(self):
+        def stream(predictor, on_text, **inputs):
+            for chunk in ("ロボット", "のことだね。ぼく", "も！", "？知り", "たいな"):
+                on_text(chunk)
+            return SimpleNamespace(
+                selected_mishearing="none", situation_update=SituationUpdate(),
+                bot_response="ロボットのことだね。ぼくも！？知りたいな",
+            )
+        with patch.object(pooh, "stream_response", side_effect=stream):
+            received, order = self.run_forward()
+        self.assertEqual(received, ["ロボットのことだね。", "ぼくも！？", "知りたいな"])
+        self.assertLess(order.index("sent"), order.index("InterpretTurn"))
+
+    def test_sentence_feed_sends_the_whole_line_when_nothing_streamed(self):
+        sent = []
+        feed = pooh.SentenceFeed(sent.append)
+        self.assertTrue(feed.finish("うん。いいね。"))
+        self.assertEqual(sent, ["うん。いいね。"])
+
+    def test_sentence_feed_keeps_a_closing_bracket_with_its_sentence(self):
+        sent = []
+        feed = pooh.SentenceFeed(sent.append)
+        for chunk in ("「いいね。", "」って", "言ったよ。"):
+            feed.feed(chunk)
+        self.assertTrue(feed.finish("「いいね。」って言ったよ。"))
+        self.assertEqual(sent, ["「いいね。」", "って言ったよ。"])
+
+    def test_sentence_feed_stops_when_the_final_line_differs(self):
+        sent = []
+        feed = pooh.SentenceFeed(sent.append)
+        feed.feed("うん。いい")
+        self.assertFalse(feed.finish("ちがう。いいね。"))
+        self.assertEqual(sent, ["うん。"])
+
+    def test_meta_turn_is_not_streamed(self):
+        with patch.object(pooh, "stream_response") as stream:
+            received, _ = self.run_forward(mode="meta", technical_terms=["ロボット"])
+        stream.assert_not_called()
+        self.assertEqual(len(received), 1)
+
     def test_technical_term_guard_applies_before_sending(self):
         received, _ = self.run_forward(mode="meta", technical_terms=["ロボット"])
         self.assertEqual(len(received), 1)
@@ -2261,6 +2305,32 @@ class EarlyResponseTests(unittest.TestCase):
         final = publisher.publish.call_args.kwargs
         self.assertTrue(final["streamed"])
         self.assertEqual(final["turn_id"], "abcdef01-1")
+
+    def test_parts_of_a_line_are_numbered_in_order(self):
+        scenario = pooh.get_scenario("tea_party")
+
+        def agent(**kwargs):
+            kwargs["on_response"]("ケーキ、いいね。")
+            kwargs["on_response"]("ぼくも食べたいな。")
+            return SimpleNamespace(
+                interaction_mode="narrative", current_scene="none", narrative_actions=[],
+                bot_response="ケーキ、いいね。ぼくも食べたいな。",
+                updated_situation=scenario.initial_situation,
+            )
+        publisher = self.publisher()
+        session = pooh.NarrativeSession(
+            agent, "model", "program", scenario, ros_publisher=publisher,
+            session_id="abcdef0123",
+        )
+        session.start()
+        with patch.object(pooh, "append_log"):
+            output = session.submit("ケーキを持ってきたよ")
+        self.assertEqual(
+            [call.kwargs for call in publisher.publish_chunk.call_args_list],
+            [{"turn_id": "abcdef01-1", "index": 0, "text": "ケーキ、いいね。"},
+             {"turn_id": "abcdef01-1", "index": 1, "text": "ぼくも食べたいな。"}],
+        )
+        self.assertTrue(output.streamed)
 
     def test_line_the_relay_did_not_take_is_sent_whole(self):
         scenario, agent = self.line_agent("ケーキ、いいね。")
