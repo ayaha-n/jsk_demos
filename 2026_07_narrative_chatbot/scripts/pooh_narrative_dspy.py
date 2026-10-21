@@ -77,7 +77,7 @@ from narrative_relay import NarrativeRelayPublisher
 from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
 
 
-PROGRAM_VERSION = "pooh-structured-state-v44"
+PROGRAM_VERSION = "pooh-structured-state-v45"
 METRIC_VERSION = "structured-state-judge-v20"
 EXPECTED_DSPY_VERSION = "3.2.1"
 # gpt-4o follows the questioning and agency guidance far better than
@@ -522,7 +522,12 @@ class PoohNarrativeAgent(dspy.Module):
         super().__init__()
         self.classify = predictor_factory(AnalyzeInteraction)
         self.plan = predictor_factory(PlanMishearing)
-        self.respond = predictor_factory(GeneratePoohResponse)
+        # The line is written without a reasoning field in front of it, so it
+        # reaches the robot sooner; the other stages keep their reasoning.
+        respond_factory = (
+            dspy.Predict if predictor_factory is dspy.ChainOfThought else predictor_factory
+        )
+        self.respond = respond_factory(GeneratePoohResponse)
         # Structured decisions are judged separately from writing the line, so
         # this stage's demos are all about decisions and it reads the final text.
         self.interpret = predictor_factory(InterpretTurn)
