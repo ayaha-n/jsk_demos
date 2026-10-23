@@ -1866,13 +1866,17 @@ def run_chat_on_mode(
     scenario: Scenario,
     ros_publisher: NarrativeRelayPublisher,
     output_listeners: Sequence[OutputListener] = (),
+    other_scenarios: dict[str, tuple[Any, str, Scenario]] | None = None,
 ) -> None:
     """A session each time the robot enters the narrative mode; leaving the
-    mode ends the session, as does the participant.
+    mode ends the session, as does the participant. The story is of the
+    scenario the ROS side names, among ``scenario`` and ``other_scenarios``
+    (key -> agent, program id, scenario), or else of ``scenario``.
 
-    The ROS side reports the mode (``interaction_mode``). Entering it again
-    (the dashboard button) starts a running story over, without the ending
-    line. Until
+    The ROS side reports the mode (``interaction_mode``); the bridge enters
+    it on hearing one of the scenario's ``start_cues`` outside it. Entering
+    it again (the dashboard button) starts a running story over, without the
+    ending line. Until
     the relay is up, and after it goes, it is connected to again, so the
     chatbot may be started before the bridge; Ctrl+C ends it.
     """
@@ -1890,8 +1894,11 @@ def run_chat_on_mode(
         except KeyboardInterrupt:
             return
         started = ros_publisher.narrative_entries
+        story_agent, story_program_id, story = (other_scenarios or {}).get(
+            ros_publisher.narrative_scenario, (agent, program_id, scenario))
+        ros_publisher.scenario_key = story.key
         if not run_chat(
-            agent, model_name, program_id, scenario,
+            story_agent, model_name, story_program_id, story,
             input_fn=ros_publisher.receive_user_input,
             ros_publisher=ros_publisher,
             output_listeners=output_listeners,
@@ -1946,6 +1953,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8765,
         help="ROS中継のTCPポート（デフォルト: 8765）。",
+    )
+    parser.add_argument(
+        "--extra-scenario",
+        action="append",
+        default=[],
+        choices=sorted(SCENARIOS),
+        help="--start-on-mode と使う。ROS側が選べるシナリオを追加する（複数可）。"
+             "それぞれコンパイル済みであること。",
     )
     parser.add_argument(
         "--no-idle-close",
@@ -2005,10 +2020,11 @@ def main() -> int:
     args = parse_args()
     try:
         validate_environment()
-        scenario = get_scenario(args.scenario)
+        scenarios = [get_scenario(key) for key in [args.scenario, *args.extra_scenario]]
         if getattr(args, "no_idle_close", False):
             # Timings are not part of the compiled program, so no recompiling.
-            scenario = replace(scenario, idle_close_after_wrap_up_seconds=None)
+            scenarios = [replace(s, idle_close_after_wrap_up_seconds=None) for s in scenarios]
+        scenario = scenarios[0]
         train_lm, judge_lm, train_model, judge_model = configure_models()
         if args.mode == "compile":
             target = compile_program(train_lm, judge_lm, train_model, judge_model, scenario)
@@ -2019,7 +2035,8 @@ def main() -> int:
             run_comparison(compiled, scenario)
         else:
             ros_publisher = (
-                NarrativeRelayPublisher(args.ros_relay_host, args.ros_relay_port, scenario.key)
+                NarrativeRelayPublisher(args.ros_relay_host, args.ros_relay_port, scenario.key,
+                                        start_cues={s.key: s.start_cues for s in scenarios})
                 if args.ros_relay
                 else None
             )
@@ -2033,6 +2050,11 @@ def main() -> int:
                         scenario,
                         ros_publisher,
                         output_listeners=listeners,
+                        other_scenarios={
+                            s.key: (load_compiled_program(train_model, judge_model, s),
+                                    cache_hash(train_model, judge_model, s), s)
+                            for s in scenarios[1:]
+                        },
                     )
                 else:
                     run_chat(

@@ -760,6 +760,40 @@ class RegressionTests(unittest.TestCase):
         # The press ends the first story and starts the second at once.
         self.assertEqual(stops, [None, "restarted", None])
 
+    def test_narrative_relay_sends_the_start_cues_on_connecting(self):
+        class FakeSocket:
+            def __init__(self):
+                self.sent = []
+
+            def sendall(self, data):
+                self.sent.append(json.loads(data.decode("utf-8")))
+
+        socket = FakeSocket()
+        publisher = pooh.NarrativeRelayPublisher(
+            "127.0.0.1", 8765, "eeyore_birthday",
+            start_cues={"eeyore_birthday": (("困", "どうした"),), "tea_party": ()})
+        with patch("narrative_relay.socket.create_connection", return_value=socket):
+            publisher._connect()
+        self.assertEqual(socket.sent, [{"type": "start_cues", "cues": {
+            "eeyore_birthday": [["困", "どうした"]], "tea_party": []}}])
+
+    def test_run_chat_on_mode_starts_the_scenario_the_ros_side_names(self):
+        eeyore = pooh.get_scenario("eeyore_birthday")
+        tea = pooh.get_scenario("tea_party")
+        publisher = self._mode_publisher([])
+        publisher.narrative_scenario = "tea_party"
+        tea_agent = Mock()
+        stories = []
+
+        def fake_run_chat(agent, _model, program_id, scenario, **_kwargs):
+            stories.append((agent, program_id, scenario.key, publisher.scenario_key))
+            return True
+
+        with patch("builtins.print"), patch.object(pooh, "run_chat", side_effect=fake_run_chat):
+            pooh.run_chat_on_mode(Mock(), "m", "eeyore-program", eeyore, publisher,
+                                  other_scenarios={"tea_party": (tea_agent, "tea-program", tea)})
+        self.assertEqual(stories, [(tea_agent, "tea-program", "tea_party", "tea_party")])
+
     def test_session_records_observed_actions_without_a_reply(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         agent = Mock()

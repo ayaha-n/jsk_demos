@@ -17,13 +17,19 @@ RECEIVE_POLL_SECONDS = 0.2
 class NarrativeRelayPublisher:
     """Exchange participant input and narrative turns with the ROS relay."""
 
-    def __init__(self, host: str, port: int, scenario_key: str) -> None:
+    def __init__(self, host: str, port: int, scenario_key: str,
+                 start_cues: dict[str, tuple[tuple[str, ...], ...]] | None = None) -> None:
         self.host = host
         self.port = port
         self.scenario_key = scenario_key
         self._socket: socket.socket | None = None
         self._receive_buffer = b""
         self._observed: list[str] = []
+        # Sent on connecting, by scenario, for the ROS side to start a story
+        # when heard.
+        self.start_cues = start_cues or {}
+        # The scenario of the story the ROS side asked for, if it said.
+        self.narrative_scenario: str | None = None
         # The robot's interaction mode (/pooh_interaction_mode) as the ROS
         # side last reported it; None until it does.
         self.narrative_mode: bool | None = None
@@ -46,6 +52,12 @@ class NarrativeRelayPublisher:
             if self._unreachable_reported:
                 print(f"ROS中継({self.host}:{self.port})に接続しました", file=sys.stderr)
             self._unreachable_reported = False
+            if self.start_cues:
+                self._socket.sendall((json.dumps(
+                    {"type": "start_cues", "cues": {
+                        key: [list(cue) for cue in cues] for key, cues in self.start_cues.items()
+                    }}, ensure_ascii=False
+                ) + "\n").encode("utf-8"))
         except OSError as error:
             if not self._unreachable_reported:
                 print(
@@ -157,6 +169,7 @@ class NarrativeRelayPublisher:
                     return None
                 if payload.get("type") == "interaction_mode":
                     self.narrative_mode = bool(payload.get("narrative"))
+                    self.narrative_scenario = payload.get("scenario")
                     if self.narrative_mode:
                         self.narrative_entries += 1
                     return None
