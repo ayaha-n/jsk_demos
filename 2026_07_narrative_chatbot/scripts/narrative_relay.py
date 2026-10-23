@@ -24,6 +24,18 @@ class NarrativeRelayPublisher:
         self._socket: socket.socket | None = None
         self._receive_buffer = b""
         self._observed: list[str] = []
+        # The robot's interaction mode (/pooh_interaction_mode) as the ROS
+        # side last reported it; None until it does.
+        self.narrative_mode: bool | None = None
+        # How many times the narrative mode has been reported: each is a
+        # request for a new story (the dashboard button pressed again too).
+        self.narrative_entries = 0
+        # Reported once until the relay is reached, as it is retried.
+        self._unreachable_reported = False
+
+    @property
+    def connected(self) -> bool:
+        return self._socket is not None
 
     def _connect(self) -> socket.socket | None:
         if self._socket is not None:
@@ -31,11 +43,16 @@ class NarrativeRelayPublisher:
         try:
             self._socket = socket.create_connection((self.host, self.port), timeout=2.0)
             self._receive_buffer = b""
+            if self._unreachable_reported:
+                print(f"ROS中継({self.host}:{self.port})に接続しました", file=sys.stderr)
+            self._unreachable_reported = False
         except OSError as error:
-            print(
-                f"ROS中継({self.host}:{self.port})に接続できません: {error}",
-                file=sys.stderr,
-            )
+            if not self._unreachable_reported:
+                print(
+                    f"ROS中継({self.host}:{self.port})に接続できません: {error}",
+                    file=sys.stderr,
+                )
+                self._unreachable_reported = True
             self._socket = None
         return self._socket
 
@@ -137,6 +154,11 @@ class NarrativeRelayPublisher:
                     continue
                 if payload.get("type") == "observed_actions":
                     self._keep_observed(payload)
+                    return None
+                if payload.get("type") == "interaction_mode":
+                    self.narrative_mode = bool(payload.get("narrative"))
+                    if self.narrative_mode:
+                        self.narrative_entries += 1
                     return None
                 if payload.get("type") != "user_input":
                     continue
