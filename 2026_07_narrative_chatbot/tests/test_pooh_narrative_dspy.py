@@ -637,6 +637,163 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(publisher.take_observed_actions(), ["参加者が風船をプーに手渡した"])
         self.assertEqual(publisher.take_observed_actions(), [])
 
+    def test_narrative_relay_follows_the_interaction_mode(self):
+        class FakeSocket:
+            def __init__(self):
+                self.chunks = [(
+                    '{"type":"interaction_mode","mode":"free_talk","narrative":false}\n'
+                    '{"type":"interaction_mode","mode":"narrative","narrative":true}\n'
+                    '{"type":"interaction_mode","mode":"narrative","narrative":true}\n'
+                    '{"type":"interaction_mode","mode":"greeting","narrative":false}\n'
+                    '{"type":"interaction_mode","mode":"narrative","narrative":true}\n'
+                ).encode()]
+
+            def recv(self, _size):
+                return self.chunks.pop(0) if self.chunks else b""
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
+        publisher._socket = FakeSocket()
+        self.assertIsNone(publisher.narrative_mode)
+        seen = []
+        with patch(
+            "narrative_relay.select.select",
+            return_value=([publisher._socket], [], []),
+        ):
+            for _ in range(5):
+                self.assertIsNone(publisher.receive_user_input())
+                seen.append((publisher.narrative_mode, publisher.narrative_entries))
+        # The narrative mode reported again (the button pressed again) asks
+        # for a new story too.
+        self.assertEqual(seen, [(False, 0), (True, 1), (True, 2), (False, 2), (True, 3)])
+
+    def test_run_chat_ends_the_story_when_stopped(self):
+        scenario = pooh.get_scenario("tea_party")
+        for reason, spoken in (("mode_changed", True), ("restarted", False)):
+            agent = Mock()
+            publisher = Mock()
+            publisher.take_observed_actions.return_value = []
+            stop = iter([None, reason])
+            with patch("builtins.print"), patch.object(pooh, "append_log"):
+                still_open = pooh.run_chat(
+                    agent, "test-model", "test-program", scenario,
+                    input_fn=lambda _prompt: None,
+                    ros_publisher=publisher,
+                    stop_fn=lambda: next(stop),
+                )
+            self.assertTrue(still_open)
+            agent.assert_not_called()
+            sources = [call.kwargs["source"] for call in publisher.publish.call_args_list]
+            # The opening line, then the ending line unless started over.
+            self.assertEqual(sources, ["session_open", "session_close"] if spoken else ["session_open"])
+
+    def test_run_chat_reports_closed_input(self):
+        scenario = pooh.get_scenario("tea_party")
+
+        def closed(_prompt):
+            raise EOFError
+
+        with patch("builtins.print"), patch.object(pooh, "append_log"):
+            self.assertFalse(pooh.run_chat(Mock(), "m", "p", scenario, input_fn=closed))
+
+    def test_run_chat_on_mode_starts_a_story_at_each_entry(self):
+        scenario = pooh.get_scenario("tea_party")
+        publisher = Mock(narrative_entries=0, narrative_mode=None)
+        publisher.take_observed_actions.return_value = []
+        # While waiting: the relay not up yet, nothing, the first entry;
+        # after that story, the second entry; then Ctrl+C.
+        arrivals = iter(["down", None, 1, 2])
+
+        def receive(*_args):
+            entries = next(arrivals, "interrupted")
+            if entries == "down":
+                raise EOFError
+            if entries == "interrupted":
+                raise KeyboardInterrupt
+            if entries is not None:
+                publisher.narrative_entries = entries
+
+        publisher.receive_user_input.side_effect = receive
+        stories = []
+
+        def fake_run_chat(*_args, stop_fn, **_kwargs):
+            stories.append(publisher.narrative_entries)
+            return True
+
+        with patch("builtins.print"), patch.object(pooh, "run_chat", side_effect=fake_run_chat), \
+                patch.object(pooh.time, "sleep") as sleep:
+            pooh.run_chat_on_mode(Mock(), "m", "p", scenario, publisher)
+        sleep.assert_called_once_with(pooh.RELAY_RETRY_SECONDS)
+        self.assertEqual(stories, [1, 2])
+
+    def _mode_publisher(self, arrivals):
+        """A relay already in the narrative mode once; ``arrivals`` are what
+        it receives while no story runs, then Ctrl+C."""
+        publisher = Mock(narrative_entries=1, narrative_mode=True)
+        publisher.take_observed_actions.return_value = []
+        arrivals = iter(arrivals)
+
+        def receive(*_args):
+            item = next(arrivals, KeyboardInterrupt)
+            if item is KeyboardInterrupt:
+                raise KeyboardInterrupt
+            if callable(item):
+                return item(publisher)
+            return item
+
+        publisher.receive_user_input.side_effect = receive
+        return publisher
+
+    def test_run_chat_on_mode_restarts_when_the_mode_is_entered_again(self):
+        scenario = pooh.get_scenario("tea_party")
+        publisher = self._mode_publisher([])
+        stops = []
+
+        def fake_run_chat(*_args, stop_fn, **_kwargs):
+            stops.append(stop_fn())
+            if len(stops) == 1:
+                publisher.narrative_entries += 1  # the button pressed again
+                stops.append(stop_fn())
+            return True
+
+        with patch("builtins.print"), patch.object(pooh, "run_chat", side_effect=fake_run_chat):
+            pooh.run_chat_on_mode(Mock(), "m", "p", scenario, publisher)
+        # The press ends the first story and starts the second at once.
+        self.assertEqual(stops, [None, "restarted", None])
+
+    def test_narrative_relay_sends_the_start_cues_on_connecting(self):
+        class FakeSocket:
+            def __init__(self):
+                self.sent = []
+
+            def sendall(self, data):
+                self.sent.append(json.loads(data.decode("utf-8")))
+
+        socket = FakeSocket()
+        publisher = pooh.NarrativeRelayPublisher(
+            "127.0.0.1", 8765, "eeyore_birthday",
+            start_cues={"eeyore_birthday": (("困", "どうした"),), "tea_party": ()})
+        with patch("narrative_relay.socket.create_connection", return_value=socket):
+            publisher._connect()
+        self.assertEqual(socket.sent, [{"type": "start_cues", "cues": {
+            "eeyore_birthday": [["困", "どうした"]], "tea_party": []}}])
+
+    def test_run_chat_on_mode_starts_the_scenario_the_ros_side_names(self):
+        eeyore = pooh.get_scenario("eeyore_birthday")
+        tea = pooh.get_scenario("tea_party")
+        publisher = self._mode_publisher([])
+        publisher.narrative_scenario = "tea_party"
+        tea_agent = Mock()
+        stories = []
+
+        def fake_run_chat(agent, _model, program_id, scenario, **_kwargs):
+            stories.append((agent, program_id, scenario.key, publisher.scenario_key))
+            return True
+
+        with patch("builtins.print"), patch.object(pooh, "run_chat", side_effect=fake_run_chat):
+            pooh.run_chat_on_mode(Mock(), "m", "eeyore-program", eeyore, publisher,
+                                  other_scenarios={"tea_party": (tea_agent, "tea-program", tea)})
+        self.assertEqual(stories, [(tea_agent, "tea-program", "tea_party", "tea_party")])
+
     def test_session_records_observed_actions_without_a_reply(self):
         scenario = pooh.get_scenario("eeyore_birthday")
         agent = Mock()

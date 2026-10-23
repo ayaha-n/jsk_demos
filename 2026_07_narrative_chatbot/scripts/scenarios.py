@@ -63,6 +63,10 @@ class Scenario:
     event_quiet_seconds: float = 0.0
     awaiting_reply_quiet_seconds: float | None = None
     idle_close_after_wrap_up_seconds: float | None = None
+    # Heard outside the robot's narrative mode, these start the story
+    # (``--start-on-mode``): each the words that must all be heard, kept
+    # apart from the mode keywords of pooh_body's speech_mode_rules.yaml.
+    start_cues: tuple[tuple[str, ...], ...] = ()
     # Keyed by the unresolved-item label the preference answers (e.g. the
     # balloon-color unresolved text); only entries matching the CURRENT
     # unresolved list are ever surfaced to the model (see
@@ -98,6 +102,7 @@ def _tea_party() -> Scenario:
         initial_situation=INITIAL_SITUATION,
         opening_line=TEA_PARTY_OPENING_LINE,
         ending_line=fixed_utterance("tea_party.ending"),
+        start_cues=(("お茶会", "しよう"),),
         trainset=TRAINSET,
         mode_examples=MODE_EXAMPLES,
         mishearing_examples=MISHEARING_EXAMPLES,
@@ -152,6 +157,8 @@ def _eeyore_birthday() -> Scenario:
         awaiting_reply_quiet_seconds=EEYORE_AWAITING_REPLY_QUIET_SECONDS,
         idle_close_after_wrap_up_seconds=EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS,
         pooh_preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
+        # 「プー、今日はイーヨーについて相談したいことがあるんだよね」
+        start_cues=(("イーヨ", "相談"),),
     )
 
 

@@ -17,7 +17,7 @@ import re
 import select
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -1424,18 +1424,20 @@ class NarrativeSession:
         self._publish(output)
         return output
 
-    def close(self, reason: str = "requested") -> SessionOutput | None:
-        """Close once with the scenario's fixed ending line."""
+    def close(self, reason: str = "requested", ending_line: bool = True) -> SessionOutput | None:
+        """Close once with the scenario's fixed ending line, or without one
+        (``ending_line=False``, the story started over), sent to no robot."""
         if self.ended:
             return None
         self.ended = True
+        line = self.scenario.ending_line if ending_line else ""
         output = SessionOutput(
             source="session_close",
-            bot_response=self.scenario.ending_line,
+            bot_response=line,
             interaction_mode="exit",
             scene_id="none",
             updated_situation=self.current_situation,
-            fixed_utterance_id=fixed_utterance_id(self.scenario.ending_line),
+            fixed_utterance_id=fixed_utterance_id(line) if line else None,
         )
         if self.log_path.exists():
             # Only a session that has logged turns gets its ending recorded,
@@ -1450,7 +1452,10 @@ class NarrativeSession:
                 "bot_response": output.bot_response,
                 "fixed_utterance_id": output.fixed_utterance_id,
             })
-        self._publish(output)
+        if ending_line:
+            self._publish(output)
+        else:
+            self._notify_listeners(output)
         return output
 
     def observe(self, actions: Sequence[str], with_speech: bool = False) -> SessionOutput | None:
@@ -1784,7 +1789,11 @@ def run_chat(
     event_controller: HoneyGiftEventController | None = None,
     ros_publisher: NarrativeRelayPublisher | None = None,
     output_listeners: Sequence[OutputListener] = (),
-) -> None:
+    stop_fn: Callable[[], str | None] | None = None,
+) -> bool:
+    """One session; ``stop_fn`` returning a reason ends it: with the ending
+    line (the robot left the narrative mode), or without it for "restarted".
+    False once the input has closed (end of input, Ctrl+C, or the relay gone)."""
     session = NarrativeSession(
         agent,
         model_name,
@@ -1824,10 +1833,16 @@ def run_chat(
             closing = session.close("input_closed")
             if closing is not None:
                 print(pooh_line(closing.bot_response))
-            break
+            return False
         observed = ros_publisher.take_observed_actions() if ros_publisher else []
         if session.observe(observed, with_speech=bool(user_input)) is not None:
             print(f"[観察された行為] {'、'.join(observed)}")
+        stop = stop_fn() if stop_fn is not None else None
+        if stop:
+            closing = session.close(stop, ending_line=stop != "restarted")
+            if closing is not None and closing.bot_response:
+                print(pooh_line(closing.bot_response))
+            break
         if user_input is None:
             continue
         if not user_input:
@@ -1845,6 +1860,60 @@ def run_chat(
         follow_up = session.follow_up()
         if follow_up is not None:
             print_result("Timed Event", follow_up, scenario, situation_before_event)
+    return True
+
+
+RELAY_RETRY_SECONDS = 2.0
+
+
+def run_chat_on_mode(
+    agent: Any,
+    model_name: str,
+    program_id: str,
+    scenario: Scenario,
+    ros_publisher: NarrativeRelayPublisher,
+    output_listeners: Sequence[OutputListener] = (),
+    other_scenarios: dict[str, tuple[Any, str, Scenario]] | None = None,
+) -> None:
+    """A session each time the robot enters the narrative mode; leaving the
+    mode ends the session, as does the participant. The story is of the
+    scenario the ROS side names, among ``scenario`` and ``other_scenarios``
+    (key -> agent, program id, scenario), or else of ``scenario``.
+
+    The ROS side reports the mode (``interaction_mode``); the bridge enters
+    it on hearing one of the scenario's ``start_cues`` outside it. Entering
+    it again (the dashboard button) starts a running story over, without the
+    ending line. Until
+    the relay is up, and after it goes, it is connected to again, so the
+    chatbot may be started before the bridge; Ctrl+C ends it.
+    """
+    started = 0
+    print("ナラティブモードを待っています。")
+    while True:
+        try:
+            while ros_publisher.narrative_entries <= started:
+                try:
+                    ros_publisher.receive_user_input()  # speech outside a story is dropped
+                except EOFError:
+                    time.sleep(RELAY_RETRY_SECONDS)
+                    continue
+                ros_publisher.take_observed_actions()
+        except KeyboardInterrupt:
+            return
+        started = ros_publisher.narrative_entries
+        story_agent, story_program_id, story = (other_scenarios or {}).get(
+            ros_publisher.narrative_scenario, (agent, program_id, scenario))
+        ros_publisher.scenario_key = story.key
+        if not run_chat(
+            story_agent, model_name, story_program_id, story,
+            input_fn=ros_publisher.receive_user_input,
+            ros_publisher=ros_publisher,
+            output_listeners=output_listeners,
+            stop_fn=lambda: ("restarted" if ros_publisher.narrative_entries > started
+                             else None if ros_publisher.narrative_mode else "mode_changed"),
+        ) and ros_publisher.connected:
+            return  # Ctrl+C; a closed relay is waited for again
+        print("\nナラティブモードを待っています。")
 
 
 def run_comparison(compiled: Any, scenario: Scenario) -> None:
@@ -1892,6 +1961,26 @@ def parse_args() -> argparse.Namespace:
         default=8765,
         help="ROS中継のTCPポート（デフォルト: 8765）。",
     )
+    parser.add_argument(
+        "--extra-scenario",
+        action="append",
+        default=[],
+        choices=sorted(SCENARIOS),
+        help="--start-on-mode と使う。ROS側が選べるシナリオを追加する（複数可）。"
+             "それぞれコンパイル済みであること。",
+    )
+    parser.add_argument(
+        "--no-idle-close",
+        action="store_true",
+        help="締めのあと沈黙が続いても物語を終えない。参加者のお別れや、"
+             "--start-on-mode ではモードを抜けたときに終わる。",
+    )
+    parser.add_argument(
+        "--start-on-mode",
+        action="store_true",
+        help="--ros-relay と使う。ロボットがナラティブモードに入るたびに物語を始め、"
+             "抜けると終わりのセリフで終える（中継が閉じるまで繰り返す）。",
+    )
     add_storybook_arguments(parser)
     return parser.parse_args()
 
@@ -1938,7 +2027,11 @@ def main() -> int:
     args = parse_args()
     try:
         validate_environment()
-        scenario = get_scenario(args.scenario)
+        scenarios = [get_scenario(key) for key in [args.scenario, *args.extra_scenario]]
+        if getattr(args, "no_idle_close", False):
+            # Timings are not part of the compiled program, so no recompiling.
+            scenarios = [replace(s, idle_close_after_wrap_up_seconds=None) for s in scenarios]
+        scenario = scenarios[0]
         train_lm, judge_lm, train_model, judge_model = configure_models()
         if args.mode == "compile":
             target = compile_program(train_lm, judge_lm, train_model, judge_model, scenario)
@@ -1949,21 +2042,37 @@ def main() -> int:
             run_comparison(compiled, scenario)
         else:
             ros_publisher = (
-                NarrativeRelayPublisher(args.ros_relay_host, args.ros_relay_port, scenario.key)
+                NarrativeRelayPublisher(args.ros_relay_host, args.ros_relay_port, scenario.key,
+                                        start_cues={s.key: s.start_cues for s in scenarios})
                 if args.ros_relay
                 else None
             )
             listeners = create_storybook_listeners(args)
             try:
-                run_chat(
-                    compiled,
-                    train_model,
-                    cache_hash(train_model, judge_model, scenario),
-                    scenario,
-                    input_fn=ros_publisher.receive_user_input if ros_publisher else None,
-                    ros_publisher=ros_publisher,
-                    output_listeners=listeners,
-                )
+                if args.start_on_mode and ros_publisher is not None:
+                    run_chat_on_mode(
+                        compiled,
+                        train_model,
+                        cache_hash(train_model, judge_model, scenario),
+                        scenario,
+                        ros_publisher,
+                        output_listeners=listeners,
+                        other_scenarios={
+                            s.key: (load_compiled_program(train_model, judge_model, s),
+                                    cache_hash(train_model, judge_model, s), s)
+                            for s in scenarios[1:]
+                        },
+                    )
+                else:
+                    run_chat(
+                        compiled,
+                        train_model,
+                        cache_hash(train_model, judge_model, scenario),
+                        scenario,
+                        input_fn=ros_publisher.receive_user_input if ros_publisher else None,
+                        ros_publisher=ros_publisher,
+                        output_listeners=listeners,
+                    )
             finally:
                 # Let the picture book write the ending before exiting.
                 for listener in listeners:
