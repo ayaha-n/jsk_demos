@@ -1403,6 +1403,7 @@ class NarrativeSession:
             fixed_utterance_id=output.fixed_utterance_id,
             turn_id=output.turn_id,
             streamed=output.streamed,
+            interaction_mode=output.interaction_mode,
         )
 
     def start(self) -> SessionOutput | None:

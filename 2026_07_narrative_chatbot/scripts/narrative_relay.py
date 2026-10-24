@@ -79,6 +79,7 @@ class NarrativeRelayPublisher:
         fixed_utterance_id: str | None = None,
         turn_id: str | None = None,
         streamed: bool = False,
+        interaction_mode: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "type": "narrative_response",
@@ -88,6 +89,9 @@ class NarrativeRelayPublisher:
             "scene_id": scene_id,
             "source": source,
         }
+        if interaction_mode is not None:
+            # "exit" tells the bridge the participant has left the story.
+            payload["interaction_mode"] = interaction_mode
         if turn_id is not None:
             payload["turn_id"] = turn_id
         if streamed:
