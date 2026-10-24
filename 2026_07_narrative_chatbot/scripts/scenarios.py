@@ -157,8 +157,10 @@ def _eeyore_birthday() -> Scenario:
         awaiting_reply_quiet_seconds=EEYORE_AWAITING_REPLY_QUIET_SECONDS,
         idle_close_after_wrap_up_seconds=EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS,
         pooh_preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
-        # 「プー、今日はイーヨーについて相談したいことがあるんだよね」
-        start_cues=(("イーヨ", "相談"),),
+        # 「プー、今日はイーヨーについて相談したいことがあるんだよね」;
+        # the recognizer also hears イーヨー as イオン, いいよう or いーよ.
+        start_cues=(("イーヨ", "相談"), ("イオン", "相談"), ("いいよう", "相談"),
+                    ("いーよ", "相談")),
     )
 
 
