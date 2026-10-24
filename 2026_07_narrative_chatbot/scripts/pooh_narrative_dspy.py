@@ -483,6 +483,9 @@ def stream_response(predictor: Any, on_text: Callable[[str], None], **inputs: An
 
     A predictor that is not a DSPy module (a test double) is just called.
     A cached answer comes back whole, without any streamed text.
+    When streaming ends without an answer (its producer thread failed and
+    printed its traceback), the stage is called again without streaming; a
+    line that does not continue what was sent is not sent (SentenceFeed).
     """
     if not isinstance(predictor, dspy.Module):
         return predictor(**inputs)
@@ -498,6 +501,10 @@ def stream_response(predictor: Any, on_text: Callable[[str], None], **inputs: An
             on_text(item.chunk)
         elif isinstance(item, dspy.Prediction):
             result = item
+    if result is None:
+        print("Warning: streaming returned no response; generating it again",
+              file=sys.stderr)
+        result = predictor(**inputs)
     return result
 
 
