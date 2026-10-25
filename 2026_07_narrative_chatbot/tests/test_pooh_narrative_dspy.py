@@ -260,6 +260,23 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(payload["source"], "session_close")
         self.assertEqual(payload["fixed_utterance_id"], "eeyore_birthday.ending")
         self.assertEqual(payload["motion"], fixed_utterance_motion("eeyore_birthday.ending"))
+        self.assertNotIn("arm_next", payload)  # the ending lists none
+
+    def test_narrative_relay_publisher_sends_the_arm_gestures_of_a_long_fixed_line(self):
+        sent = []
+
+        class FakeSocket:
+            def sendall(self, data):
+                sent.append(data)
+
+        publisher = pooh.NarrativeRelayPublisher("127.0.0.1", 8765, "eeyore_birthday")
+        publisher._socket = FakeSocket()
+        spec = dict(FIXED_UTTERANCES["eeyore_birthday.opening"], arm_next=["onegai"])
+        with patch.dict(FIXED_UTTERANCES, {"eeyore_birthday.opening": spec}):
+            publisher.publish(bot_response="いまね…", narrative_actions=[], scene_id="none",
+                              source="session_open",
+                              fixed_utterance_id="eeyore_birthday.opening")
+        self.assertEqual(json.loads(sent[0].decode("utf-8"))["arm_next"], ["onegai"])
 
     def test_fixed_utterance_registry_has_unique_ids_text_and_wav_names(self):
         self.assertEqual(

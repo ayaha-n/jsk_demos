@@ -8,7 +8,7 @@ import socket
 import sys
 from typing import Any
 
-from narrative_events import fixed_utterance_motion
+from narrative_events import fixed_utterance_arm_next, fixed_utterance_motion
 
 
 RECEIVE_POLL_SECONDS = 0.2
@@ -106,6 +106,9 @@ class NarrativeRelayPublisher:
             motion = fixed_utterance_motion(fixed_utterance_id)
             if motion:
                 payload["motion"] = motion
+            arm_next = fixed_utterance_arm_next(fixed_utterance_id)
+            if arm_next:
+                payload["arm_next"] = arm_next
         self._send(payload)
 
     def publish_chunk(self, *, turn_id: str, index: int, text: str) -> bool:

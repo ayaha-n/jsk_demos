@@ -41,7 +41,13 @@ def _load_fixed_utterances() -> dict[str, dict[str, Any]]:
             isinstance(part, str) and isinstance(name, str) for part, name in motion.items()
         ):
             raise ValueError(f"fixed utterance {utterance_id!r} has an invalid motion")
-        result[utterance_id] = {"text": text, "wav": wav, "motion": motion}
+        # Optional arm gestures for the rest of a long line, after the one in
+        # motion: the robot holds each a few seconds while it speaks.
+        arm_next = spec.get("arm_next", [])
+        if not isinstance(arm_next, list) or not all(isinstance(arm, str) for arm in arm_next):
+            raise ValueError(f"fixed utterance {utterance_id!r} has an invalid arm_next")
+        result[utterance_id] = {"text": text, "wav": wav, "motion": motion,
+                                "arm_next": arm_next}
     return result
 
 
@@ -55,6 +61,11 @@ def fixed_utterance(utterance_id: str) -> str:
 def fixed_utterance_motion(utterance_id: str) -> dict[str, str]:
     """The body motion registered for a fixed line; empty when it has none."""
     return dict(FIXED_UTTERANCES.get(utterance_id, {}).get("motion", {}))
+
+
+def fixed_utterance_arm_next(utterance_id: str) -> list[str]:
+    """The arm gestures after the first for a long fixed line; often none."""
+    return list(FIXED_UTTERANCES.get(utterance_id, {}).get("arm_next", []))
 
 
 def fixed_utterance_id(text: str) -> str | None:
