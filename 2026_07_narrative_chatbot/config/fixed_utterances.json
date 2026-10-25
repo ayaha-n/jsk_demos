@@ -22,7 +22,8 @@
       "eyebrow": "sad",
 	"arm": "left_hand_chin",
 	"neck": "tilt"
-    }
+    },
+      "arm_next": ["onegai", "right_hand_mouth", "onegai"]
   },
   "eeyore_birthday.ending": {
     "text": "またね。イーヨーのお祝いをいっしょに考えてくれて、ありがとう。",
@@ -70,7 +71,8 @@
       "motion": {
 	  "arm": "left_hand_chin",
 	  "neck": "tilt"
-      }
+      },
+      "arm_next": ["onegai", "left_hand_chin"]
   },
   "eeyore_birthday.honey_tasted.follow_up": {
     "text": "あ、そういえば。みつのツボを持ってるなんて、運が良かったなあ。ちょっと一口やるものを持ってるなんて。…さあて、ぼくはなにをするんだっけ？",
@@ -78,7 +80,8 @@
       "motion": {
 	  "arm": "left_hand_chin",
 	  "neck": "tilt"
-      }
+      },
+      "arm_next": ["onegai", "left_hand_chin"]
 
   },
   "eeyore_birthday.honey_eaten": {
@@ -87,7 +90,8 @@
       "motion": {
 	  "eyebrow": "surprised",
 	  "arm": "onegai"
-      }
+      },
+      "arm_next": ["right_hand_mouth", "onagai"]
   },
   "eeyore_birthday.story_wrap_up": {
     "text": "よかった。これでイーヨーも、きっとにっこりしてくれるよ。ほかにも、なにかぼくとおはなししたいこと、ある？",
@@ -96,7 +100,8 @@
 	  "eyebrow": "happy",
 	  "arm": "left_hand_chin",
 	  "neck": "tilt"
-      }
+      },
+      "arm_next": ["onegai"]
   },
   "eeyore_birthday.honey_gift_kept": {
     "text": "そっか。でも、やっぱりぼくからは、ハチミツの壺もあげようかな。甘いものをたべると、しあわせな気持ちになるもの。",
@@ -105,7 +110,8 @@
 	  "eyebrow": "happy",
 	  "arm": "left_hand_chin",
 	  "neck": "tilt"
-      }
+      },
+      "arm_next": ["right_hand_mouth"]
   },
   "eeyore_birthday.no_promise": {
     "text": "だいじょうぶ、だいじょうぶ。ちょっと味見するだけだもの。",
