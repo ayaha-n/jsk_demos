@@ -120,6 +120,22 @@ class EinkBackend:
         self._book_start = True
         self._page_number = 0
         self._drop_incomplete_events()
+        self._blank()
+
+    def _blank(self) -> None:
+        """Blank the panel as the book starts (the robot enters its
+        narrative mode), so the previous book is not left up while the
+        first page's illustration is on its way: an event that clears and
+        writes nothing."""
+        try:
+            self.push.push_text(
+                [""], x=0, y=0, w=1, clear_first=True, layout=self.layout.name,
+                clear_hold_ms=PAGE_CLEAR_HOLD_MS, event_id=self._next_id(),
+                app_dir=self.app_dir, extra=self._extra(),
+            )
+            self._book_start = False
+        except Exception as exc:
+            _report(self, exc)
 
     def _drop_incomplete_events(self) -> None:
         """Remove event dirs a stopped run left without READY: the viewer

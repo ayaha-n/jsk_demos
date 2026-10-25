@@ -647,6 +647,7 @@ class EinkBackendTest(WithIllustrations):
         backend = storybook_live.EinkBackend(push)
         builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
         backend.begin_book(builder.layout)
+        push.calls.clear()  # the blank the book starts with
         events = builder.add(StoryTurn("session_open", "やあ。"))
         with self.assertRaises(OSError):
             backend.new_page(events[0])
@@ -660,6 +661,7 @@ class EinkBackendTest(WithIllustrations):
         backend = storybook_live.EinkBackend(push)
         builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
         backend.begin_book(builder.layout)
+        push.calls.clear()  # the blank the book starts with
         for event in builder.add(StoryTurn("session_open", "やあ。")):
             if isinstance(event, NewPage):
                 backend.new_page(event)
@@ -678,6 +680,7 @@ class EinkBackendTest(WithIllustrations):
         backend = storybook_live.EinkBackend(push)
         builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
         backend.begin_book(builder.layout)
+        push.calls.clear()  # the blank the book starts with
         for event in builder.add(StoryTurn("participant", "やあ。", user_text="こんにちは")):
             if isinstance(event, NewPage):
                 backend.new_page(event)
@@ -703,6 +706,7 @@ class EinkBackendTest(WithIllustrations):
         backend = storybook_live.EinkBackend(push)
         builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
         backend.begin_book(builder.layout)
+        push.calls.clear()  # the blank the book starts with
         with patch.object(storybook_live, "DRAIN_POLL_SEC", 0):
             backend.new_page(builder._new_page(None))
             backend.new_page(builder._new_page(None))
@@ -718,6 +722,7 @@ class EinkBackendTest(WithIllustrations):
         backend = storybook_live.EinkBackend(push)
         builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
         backend.begin_book(builder.layout)
+        push.calls.clear()  # the blank the book starts with
         for event in builder.add(StoryTurn("participant", "やあ。", user_text="こんにちは")):
             if isinstance(event, WriteEntries):
                 backend.write(event, storybook_live.BASE_POINTS_PER_STEP)
@@ -748,6 +753,16 @@ class EinkBackendTest(WithIllustrations):
         self.assertTrue(all(call[2]["app_dir"] == storybook_live.STORYBOOK_APP_DIR
                             for call in push.calls))
 
+    def test_entering_the_story_blanks_the_panel_first(self):
+        push = FakePush()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
+        backend.begin_book(builder.layout)
+        kind, paragraphs, kwargs = push.calls[0]
+        self.assertEqual((kind, paragraphs), ("text", [""]))
+        self.assertTrue(kwargs["clear_first"])
+        self.assertEqual(kwargs["extra"], {"book_start": True})
+
     def test_book_start_survives_a_failed_first_push(self):
         class FlakyText(FakePush):
             failures = 1
@@ -761,11 +776,9 @@ class EinkBackendTest(WithIllustrations):
         push = FlakyText()
         backend = storybook_live.EinkBackend(push)
         builder = StoryBuilder(EEYORE, LAYOUTS["portrait"], full_width)
-        backend.begin_book(builder.layout)
+        backend.begin_book(builder.layout)  # its blank fails
         events = builder.add(StoryTurn("participant", "やあ。", user_text="こんにちは"))
         backend.new_page(events[0])
-        with self.assertRaises(OSError):
-            backend.write(events[1], 12)
         backend.write(events[1], 12)
         self.assertEqual(push.calls[0][2]["extra"], {"book_start": True})
         backend.write(events[1], 12)
