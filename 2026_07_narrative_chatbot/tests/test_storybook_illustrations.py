@@ -12,8 +12,9 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 import storybook
 from storybook import StoryTurn
-from storybook_illustrations import (MODERATION_RETRIES, SIMPLER_SCENE, SessionIllustrations,
-                                     reference_descriptions, scene_context)
+from storybook_illustrations import (MODERATION_RETRIES, NO_READER_HAND, READER_HAND, SIMPLER_SCENE,
+                                     SessionIllustrations, reader_acted, reference_descriptions,
+                                     scene_context, scene_prompt)
 
 EEYORE = storybook.load_story_config("eeyore_birthday")
 
@@ -39,6 +40,29 @@ class SceneContextTest(unittest.TestCase):
     def test_the_reader_s_hand_may_be_drawn(self):
         self.assertIn("hand", EEYORE.participant_presence)
         self.assertNotIn("no face, body or hands", EEYORE.participant_presence)
+
+    def test_only_a_scene_where_the_reader_did_something_has_their_hand(self):
+        tasting = [
+            StoryTurn("session_open", "やあ。"),
+            StoryTurn("observed", "", observed_actions=("参加者がプーの左手をなでた",)),
+            StoryTurn("world_event", "あれ？", world_event_id="pooh_tastes_honey"),
+            StoryTurn("participant", "うん。", user_text="たべちゃだめ"),
+        ]
+        # What was done in an earlier scene does not count.
+        self.assertFalse(reader_acted(EEYORE, "pooh_tastes_honey", tasting))
+        touched = tasting + [StoryTurn("observed", "", observed_actions=("参加者がプーのおなかに触れた",))]
+        self.assertTrue(reader_acted(EEYORE, "pooh_tastes_honey", touched))
+
+    def test_without_the_reader_doing_anything_no_hand_is_asked_for(self):
+        for edit in (False, True):
+            without = scene_prompt(EEYORE, "クマが壺を抱えている。", edit_existing=edit, reader_hand=False)
+            self.assertIn(NO_READER_HAND, without)
+            self.assertNotIn(READER_HAND, without)
+            self.assertNotIn("reader's hand", without.replace(NO_READER_HAND, ""))
+            self.assertNotIn(EEYORE.participant_presence, without)
+            with_hand = scene_prompt(EEYORE, "クマが壺を受け取る。", edit_existing=edit)
+            self.assertIn(READER_HAND, with_hand)
+            self.assertNotIn(NO_READER_HAND, with_hand)
 
 
 class Blocked(Exception):
