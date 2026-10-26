@@ -35,7 +35,7 @@ import storybook
 
 REFERENCE_IMAGE = storybook.ILLUSTRATION_ROOT / "bear-reference.png"
 STYLE_REFERENCE_IMAGE = storybook.ILLUSTRATION_ROOT / "eeyore_birthday" / "opening.png"
-MODEL = "gpt-image-1"
+MODEL = "gpt-image-1.5"
 
 
 @dataclass(frozen=True)
