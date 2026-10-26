@@ -326,6 +326,14 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
     return SceneSummary(reference_descriptions(description.strip()), needed, balloon_color)
 
 
+# Holding several props and a touching hand, the bear tends to grow an extra arm.
+ANATOMY = (
+    "The bear has exactly two arms and two legs. Every visible paw belongs to "
+    "one of them; if the bear holds two things, each arm holds only one. The "
+    "reader's hand is a separate human hand, never a bear paw."
+)
+
+
 def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existing: bool = False) -> str:
     """The image API receives only the visual summary and shared drawing rules."""
     if edit_existing:
@@ -339,6 +347,7 @@ def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existi
             "hand only as described in the following scene. Keep the whole bear and objects "
             "inside the frame with clear margins. No extra objects, characters, "
             "writing, speech bubbles, scenery or colored backdrop.\nScene: " + description
+            + "\n" + ANATOMY
         )
     return reference_descriptions("\n".join(filter(None, (
         "Illustrate the following single scene using the bear in the reference "
@@ -347,7 +356,7 @@ def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existi
         "speech bubbles or thought bubbles. Do not visualize imagined events or "
         "offscreen friends. Keep the background fully transparent, not filled "
         "with a yellow or sepia color; draw only a small patch of ground.",
-        "Scene: " + description,
+        "Scene: " + description, ANATOMY,
         config.participant_presence, config.illustration_style,
     ))))
 
