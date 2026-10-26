@@ -36,6 +36,12 @@ import storybook
 REFERENCE_IMAGE = storybook.ILLUSTRATION_ROOT / "bear-reference.png"
 STYLE_REFERENCE_IMAGE = storybook.ILLUSTRATION_ROOT / "eeyore_birthday" / "opening.png"
 MODEL = "gpt-image-1.5"
+# The output check rejects some drawings of the same prompt and passes others.
+MODERATION_RETRIES = 2
+SIMPLER_SCENE = (
+    "\nKeep this picture simple: draw only the props essential to the bear's "
+    "action and leave out other jars, balloons, ribbons and decorations."
+)
 
 
 @dataclass(frozen=True)
@@ -388,6 +394,20 @@ class SessionIllustrations:
         finally:
             promise.set_result(None)
 
+    def _draw(self, beat_id, prompt, output, **references):
+        """Redraw a picture blocked at the output check, the last time with fewer props."""
+        for attempt in range(MODERATION_RETRIES + 1):
+            try:
+                return self.generate_image(prompt + (SIMPLER_SCENE if attempt == MODERATION_RETRIES else ""),
+                                           output, **references)
+            except Exception as exc:
+                diagnostics = error_diagnostics(exc)
+                if (attempt == MODERATION_RETRIES or diagnostics.get("code") != "moderation_blocked"
+                        or diagnostics["moderation_stage"] != "output"):
+                    raise
+                print(f"[絵本] {beat_id}: 出力段階で拒否されたため描き直します（{attempt + 1}/{MODERATION_RETRIES}）",
+                      file=sys.stderr)
+
     def _generate(self, config, beat_id, turns, name, force):
         diagnostic_path = (storybook.ILLUSTRATION_ROOT / name).with_suffix(".error.json")
         scene_path = (storybook.ILLUSTRATION_ROOT / name).with_suffix(".scene.json")
@@ -457,10 +477,10 @@ class SessionIllustrations:
                 reference = storybook.find_illustration(reference_name)
                 if reference is None:
                     raise FileNotFoundError("編集元の挿絵がありません")
-                self.generate_image(prompt, storybook.ILLUSTRATION_ROOT / name,
-                                    reference=REFERENCE_IMAGE, style_reference=reference)
+                self._draw(beat_id, prompt, storybook.ILLUSTRATION_ROOT / name,
+                           reference=REFERENCE_IMAGE, style_reference=reference)
             else:
-                self.generate_image(prompt, storybook.ILLUSTRATION_ROOT / name)
+                self._draw(beat_id, prompt, storybook.ILLUSTRATION_ROOT / name)
             metadata["image_description"] = description
             scene_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
             succeeded = True

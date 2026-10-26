@@ -12,7 +12,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 import storybook
 from storybook import StoryTurn
-from storybook_illustrations import reference_descriptions, scene_context
+from storybook_illustrations import (MODERATION_RETRIES, SIMPLER_SCENE, SessionIllustrations,
+                                     reference_descriptions, scene_context)
 
 EEYORE = storybook.load_story_config("eeyore_birthday")
 
@@ -40,11 +41,48 @@ class SceneContextTest(unittest.TestCase):
         self.assertNotIn("no face, body or hands", EEYORE.participant_presence)
 
 
+class Blocked(Exception):
+    """Shaped like the API's error for a picture rejected by the output check."""
+
+    def __init__(self, stage="output"):
+        super().__init__("blocked")
+        self.body = {"code": "moderation_blocked", "moderation_details": {"moderation_stage": stage}}
+
+
 class ModerationTest(unittest.TestCase):
     def test_a_honey_pot_is_drawn_as_a_ceramic_jar(self):
         self.assertEqual(reference_descriptions("プーはハチミツの壺と蜂蜜つぼを持つ"),
                          "参照画像のクマは茶色い陶器の壺と茶色い陶器の壺を持つ")
         self.assertEqual(reference_descriptions("an empty honey pot"), "an empty brown ceramic jar")
+
+    def draw(self, failures):
+        prompts = []
+
+        def generate(prompt, output, **references):
+            prompts.append(prompt)
+            if failures:
+                raise failures.pop(0)
+
+        illustrations = SessionIllustrations(generate_image=generate)
+        try:
+            illustrations._draw("story_wrap_up", "scene", Path("out.png"))
+        finally:
+            illustrations.close()
+        return prompts
+
+    def test_a_picture_blocked_at_output_is_redrawn_the_last_time_with_fewer_props(self):
+        prompts = self.draw([Blocked()] * MODERATION_RETRIES)
+        self.assertEqual(prompts, ["scene"] * MODERATION_RETRIES + ["scene" + SIMPLER_SCENE])
+
+    def test_redrawing_stops_after_the_last_try(self):
+        with self.assertRaises(Blocked):
+            self.draw([Blocked()] * (MODERATION_RETRIES + 1))
+
+    def test_other_errors_are_not_retried(self):
+        for error in (Blocked(stage="input"), ValueError("bad")):
+            with self.assertRaises(type(error)):
+                self.draw([error, error])
+
 
 if __name__ == "__main__":
     unittest.main()
