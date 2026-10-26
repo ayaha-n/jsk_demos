@@ -186,6 +186,9 @@ def reference_descriptions(text: str) -> str:
         ("イーヨー", "友だちのロバ"),
         (r"\b(?:Winnie[- ]the[- ])?Pooh\b", "the bear in the reference image"),
         (r"\bEeyore\b", "a donkey friend"),
+        # A yellow bear with a honey pot reads as Pooh to the output check.
+        ("(?:ハチミツ|はちみつ|蜂蜜)の?(?:壺|つぼ|ツボ)", "茶色い陶器の壺"),
+        (r"\bhoney[- ]?pots?\b", "brown ceramic jar"),
     ):
         text = re.sub(name, description, text, flags=re.IGNORECASE)
     return text

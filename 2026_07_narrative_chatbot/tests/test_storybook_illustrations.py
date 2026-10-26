@@ -12,7 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 import storybook
 from storybook import StoryTurn
-from storybook_illustrations import scene_context
+from storybook_illustrations import reference_descriptions, scene_context
 
 EEYORE = storybook.load_story_config("eeyore_birthday")
 
@@ -39,6 +39,12 @@ class SceneContextTest(unittest.TestCase):
         self.assertIn("hand", EEYORE.participant_presence)
         self.assertNotIn("no face, body or hands", EEYORE.participant_presence)
 
+
+class ModerationTest(unittest.TestCase):
+    def test_a_honey_pot_is_drawn_as_a_ceramic_jar(self):
+        self.assertEqual(reference_descriptions("プーはハチミツの壺と蜂蜜つぼを持つ"),
+                         "参照画像のクマは茶色い陶器の壺と茶色い陶器の壺を持つ")
+        self.assertEqual(reference_descriptions("an empty honey pot"), "an empty brown ceramic jar")
 
 if __name__ == "__main__":
     unittest.main()
