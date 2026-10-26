@@ -233,7 +233,7 @@ def scene_cache_key(config, beat_id, turns):
         "model": os.getenv("STORYBOOK_SCENE_MODEL", "gpt-4o-mini"),
         "fixed_beats": sorted(storybook.FIXED_ILLUSTRATION_BEATS),
         "closing_fallback_beats": sorted(storybook.CLOSING_FALLBACK_BEATS),
-        "summary_policy": 4,
+        "summary_policy": 5,
     }
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
@@ -267,6 +267,14 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                 "from the participant dialogue and current state, not the goodbye "
                 "alone or an earlier scripted incident. For example a later "
                 "agreed gift replaces an earlier honey-pot proposal. "
+                "When is_closing=true and current_state.decided is not empty, "
+                "the picture is the gift as decided there. Each entry is "
+                "'question：answer'. Show every decided gift item with its decided "
+                "color and decoration (for example a ribbon), held by the bear. "
+                "Leave out anything decided against (an answer such as あげない or "
+                "なし), anything only proposed, and the table, cups, plates and "
+                "other leftovers of earlier scenes. The friend the gift is for "
+                "is not in the picture: do not mention who it is for. "
                 "previous_illustration is for duplicate comparison ONLY; never "
                 "copy its scene or props into the new description. "
                 "Use prior context only to resolve established details. The scene_start "
