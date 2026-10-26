@@ -100,6 +100,11 @@
     },
     "eeyore_birthday": {
       "title": "イーヨーの おたんじょうび",
+      "cover": {
+        "illustration": "eeyore_birthday/cover.png",
+        "bubble": [736, 222],
+        "bubble_beat": "story_wrap_up"
+      },
       "beats": {
         "opening": {
           "narration": "100エーカーの もりの あきちで、プーが テーブルの ところに すわって いました。",

@@ -65,6 +65,13 @@ PAGE_TURN_CLEAR_MS = 1000
 # Sending a page's end mark, which reading back depends on.
 END_MARK_ATTEMPTS = 3
 END_MARK_RETRY_SEC = 2.0
+# How long a finished scene's page waits for its picture (generated from
+# the scene once it is over, ~50 s on 2026-10-26) before the book goes on
+# without it; the picture is still in the saved PDF if it came by then.
+ILLUSTRATION_WAIT_SEC = 90.0
+# How often, between turns, to look whether the scene's picture has come
+# (the closing scene's is drawn while it goes on).
+PICTURE_POLL_SEC = 1.0
 # Where the storybook viewer is installed on the tablet (see its README).
 STORYBOOK_APP_DIR = "/home/root/xovi/exthome/appload/storybook_viewer"
 
@@ -74,6 +81,7 @@ class Backend(Protocol):
     def begin_book(self, layout: PageLayout) -> None: ...
     def new_page(self, event: NewPage) -> None: ...
     def write(self, event: WriteEntries, points_per_step: int) -> None: ...
+    def add_picture(self, page: storybook.StoryPage) -> None: ...
     def end_book(self) -> None: ...
 
 
@@ -165,18 +173,47 @@ class EinkBackend:
         # set, so the text does not end up over the previous page.
         self._clear_pending = True
         self._page_open = True
-        path = find_illustration(event.page.illustration) if event.page.illustration else None
-        if path is not None:
-            x, y, w, h = self.layout.picture_box
-            with rgba_copy(path) as image:
-                self.push.push_memory(
-                    str(image), x + w // 2, y + h // 2, target_w=w, max_h=h,
-                    clear_first=True, page_start=True, layout=self.layout.name,
-                    clear_hold_ms=PAGE_CLEAR_HOLD_MS, event_id=self._next_id(),
-                    app_dir=self.app_dir, extra=self._extra(),
-                )
+        if event.page.frame_margin is not None:
+            self._push_frame(event.page.frame_margin)
+        if self._push_picture(event.page, start=self._clear_pending):
             self._clear_pending = False
-            self._book_start = False
+
+    def _push_frame(self, margin: int) -> None:
+        """The cover's frame first, starting the page: drawn later, its
+        picture (blank inside) would wipe out what is already there."""
+        width, height = self.layout.size
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "frame.png"
+            storybook.frame_image(self.layout.size, margin).save(path)
+            self.push.push_memory(
+                str(path), width // 2, height // 2, target_w=width - 2 * margin + 8,
+                max_h=height - 2 * margin + 8, clear_first=True, page_start=True,
+                layout=self.layout.name, clear_hold_ms=PAGE_CLEAR_HOLD_MS,
+                event_id=self._next_id(), app_dir=self.app_dir, extra=self._extra(),
+            )
+        self._clear_pending = False
+        self._book_start = False
+
+    def add_picture(self, page: storybook.StoryPage) -> None:
+        """Draw a picture that came after its page was started into the
+        picture box, over nothing (the text is beside it)."""
+        self._push_picture(page, start=self._clear_pending)
+        self._clear_pending = False
+
+    def _push_picture(self, page: storybook.StoryPage, start: bool) -> bool:
+        path = find_illustration(page.illustration) if page.illustration else None
+        if path is None:
+            return False
+        x, y, w, h = page.picture_box or self.layout.picture_box
+        with rgba_copy(path) as image:
+            self.push.push_memory(
+                str(image), x + w // 2, y + h // 2, target_w=w, max_h=h,
+                clear_first=start, page_start=start, layout=self.layout.name,
+                clear_hold_ms=PAGE_CLEAR_HOLD_MS, event_id=self._next_id(),
+                app_dir=self.app_dir, extra=self._extra(),
+            )
+        self._book_start = False
+        return True
 
     def write(self, event: WriteEntries, points_per_step: int) -> None:
         # What the tablet has yet to draw is the real backlog: pushes return
@@ -187,6 +224,7 @@ class EinkBackend:
             # The lines are already wrapped; the slack keeps the viewer's own
             # measurement from wrapping them again, split on both sides so a
             # centered line stays centered.
+            pen = {"pen_r": first.pen_r} if first.pen_r else {}
             self.push.push_text(
                 ["\n".join(item.lines) for item in group],
                 x=first.x - WRAP_SLACK_PX // 2, y=first.y,
@@ -194,7 +232,7 @@ class EinkBackend:
                 clear_first=self._clear_pending, page_start=self._clear_pending,
                 layout=self.layout.name, points_per_step=points_per_step,
                 clear_hold_ms=PAGE_CLEAR_HOLD_MS, event_id=self._next_id(),
-                app_dir=self.app_dir, extra=self._extra(),
+                app_dir=self.app_dir, extra=self._extra(), **pen,
             )
             self._clear_pending = False
             self._book_start = False
@@ -304,13 +342,18 @@ class PreviewBackend:
     def write(self, event: WriteEntries, points_per_step: int) -> None:
         self._save(event.page)
 
+    def add_picture(self, page: storybook.StoryPage) -> None:
+        self._save(page)
+
     def end_book(self) -> None:
         pass
 
     def _save(self, page: storybook.StoryPage) -> None:
         from storybook_render import render_page
 
-        render_page(page, self.layout).save(self.book_dir / f"page_{page.index + 1:02d}.png")
+        # The cover (index -1) is page_00.
+        render_page(page, self.layout, page_number=page.index >= 0).save(
+            self.book_dir / f"page_{page.index + 1:02d}.png")
 
 
 _STOP = object()
@@ -335,6 +378,9 @@ class LiveStorybook:
         self.session_id: str | None = None
         self._latest_session_id: str | None = None
         self.builder: StoryBuilder | None = None
+        # The page of the scene going on, whose picture is generated once
+        # the scene is over.
+        self._awaited_page: storybook.StoryPage | None = None
         self.saved: list[Path] = []  # PDFs of finished books
         self._log_path: Path | None = None
         self._lock = threading.Lock()
@@ -376,7 +422,11 @@ class LiveStorybook:
 
     def _run(self) -> None:
         while True:
-            item = self._queue.get()
+            try:
+                item = self._queue.get(timeout=PICTURE_POLL_SEC)
+            except queue.Empty:
+                self._draw_arrived_picture()
+                continue
             if item is _STOP:
                 try:
                     self._end_book()
@@ -405,24 +455,81 @@ class LiveStorybook:
             scenario, self._log_path, session_id = value
             layout = LAYOUTS[self._read_orientation()]
             config = replace(storybook.load_story_config(scenario), session_id=session_id)
-            self.builder = StoryBuilder(config, layout)
+            self.builder = StoryBuilder(config, layout, awaits_illustration=self._awaits(config),
+                                        compose_cover=True)
+            self._awaited_page = None
             self._each_backend(lambda backend: backend.begin_book(layout))
             return
         if self.builder is None or self.builder.finished:
             return
-        if self.illustrations is not None:
-            beat_id, _ = storybook.narrate(value, self.builder.config)
-            if beat_id:
-                session_id = self.builder.config.session_id
-                self.illustrations.wait(
-                    session_id, beat_id,
-                    cancelled=lambda: self._latest_session_id != session_id,
-                )
+        beat_id, _ = storybook.narrate(value, self.builder.config)
+        if beat_id:
+            # The scene before is over: its picture is being generated now.
+            self._finish_awaited_page()
         for event in self.builder.add(value):
             self._draw(event)
         if self.builder.finished:
+            self._finish_awaited_page()
+            self.builder.refresh_cover()  # with the closing picture in its bubble
+            self._draw_cover()
             self._each_backend(lambda backend: backend.end_book())
             self._save()
+
+    def _awaits(self, config: storybook.StoryConfig) -> Any:
+        """Whether a beat's picture is still to be generated (see
+        SessionIllustrations: once its scene is over)."""
+        def awaits(beat_id: str) -> bool:
+            if self.illustrations is None or not config.session_id or beat_id not in config.beats \
+                    or beat_id in storybook.FIXED_ILLUSTRATION_BEATS:
+                return False
+            name = storybook.generated_illustration_name(config.scenario, config.session_id, beat_id)
+            return storybook.find_illustration(name) is None
+        return awaits
+
+    def _finish_awaited_page(self, wait: bool = True) -> None:
+        """Wait (a while) for the finished scene's picture and draw it beside
+        the scene's text, before the book goes on."""
+        page, self._awaited_page = self._awaited_page, None
+        if page is None or self.builder is None:
+            return
+        if wait and self.illustrations is not None:
+            session_id = self.builder.config.session_id
+            deadline = time.monotonic() + ILLUSTRATION_WAIT_SEC
+            self.illustrations.wait(
+                session_id, page.beat_id,
+                cancelled=lambda: (self._latest_session_id != session_id
+                                   or time.monotonic() > deadline),
+            )
+            if time.monotonic() > deadline:
+                print(f"[絵本] {page.beat_id}: 挿絵が{ILLUSTRATION_WAIT_SEC:.0f}秒で届かなかったので先に進みます",
+                      file=sys.stderr)
+        if self.builder.attach_illustration(page) and page is self.builder.pages[-1]:
+            self._each_backend(lambda backend: backend.add_picture(page))
+
+    def _draw_arrived_picture(self) -> None:
+        """Draw the scene's picture as soon as it has come, while the scene
+        goes on."""
+        page = self._awaited_page
+        done = getattr(self.illustrations, "done", None)
+        if page is None or self.builder is None or done is None:
+            return
+        try:
+            if done(self.builder.config.session_id, page.beat_id):
+                self._finish_awaited_page(wait=False)
+        except Exception as exc:
+            print(f"[絵本] 挿絵を描き足せませんでした: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    def _draw_cover(self) -> None:
+        cover = self.builder.cover if self.builder is not None else None
+        if cover is None:
+            return
+        if self._latest_session_id != self.builder.config.session_id:
+            # The next story has begun: its book goes on the tablet now, and
+            # the cover is only in the PDF (the panel draws events in order,
+            # so drawing it would hold the new book back).
+            return
+        self._draw(NewPage(cover))
+        self._draw(WriteEntries(cover, list(cover.placed)))
 
     def _end_book(self, save: bool = True) -> None:
         """Close an unfinished book: on shutdown (saved, as far as the
@@ -430,6 +537,12 @@ class LiveStorybook:
         if self.builder is not None and not self.builder.finished:
             for event in self.builder.finish():
                 self._draw(event)
+            if save:
+                # Shutting down: whatever picture there is now, and the cover.
+                self._finish_awaited_page(wait=False)
+                self.builder.refresh_cover()
+                self._draw_cover()
+            self._awaited_page = None
             self._each_backend(lambda backend: backend.end_book())
             if save:
                 self._save()
@@ -440,6 +553,14 @@ class LiveStorybook:
         if self.builder is None or self._log_path is None:
             return
         from storybook_render import default_pdf_path, write_pdf
+
+        # A picture that came too late for the tablet still goes in the PDF.
+        late = [page for page in self.builder.pages
+                if page.awaits_illustration and page.illustration is None]
+        for page in late:
+            self.builder.attach_illustration(page)
+        if late:
+            self.builder.refresh_cover()
 
         try:
             path = write_pdf(self.builder, default_pdf_path(Path(self._log_path)))
@@ -453,6 +574,8 @@ class LiveStorybook:
         # Turns still waiting mean the conversation is ahead of the pen.
         pace = pace_for_backlog(self._queue.qsize())
         if isinstance(event, NewPage):
+            if event.page.awaits_illustration:
+                self._awaited_page = event.page
             self._each_backend(lambda backend: backend.new_page(event))
         else:
             self._each_backend(lambda backend: backend.write(event, pace))

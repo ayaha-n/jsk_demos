@@ -197,7 +197,7 @@ function appendStoryPage(page, book, container = logViewer) {
   sheet.className = "story-page";
   sheet.style.aspectRatio = `${width} / ${height}`;
   if (page.illustration) {
-    const [x, y, w, h] = book.picture_box;
+    const [x, y, w, h] = page.picture_box || book.picture_box;
     const picture = document.createElement("div");
     picture.className = "story-picture";
     Object.assign(picture.style, {

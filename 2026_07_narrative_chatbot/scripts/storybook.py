@@ -20,6 +20,7 @@ import json
 import hashlib
 import os
 import random
+import sys
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -33,6 +34,10 @@ STORYBOOK_CONFIG_PATH = PROJECT_ROOT / "config" / "storybook.json"
 # (e.g. "eeyore_birthday/opening.png").
 ILLUSTRATION_ROOT = PROJECT_ROOT / "assets" / "storybook"
 FIXED_ILLUSTRATION_BEATS = frozenset({"opening", "pooh_ate_honey"})
+# Generated when the scene starts rather than once it is over: what it shows
+# (the gift decided in the story state) is known by then, and the scene runs
+# on to the end of the session.
+ILLUSTRATED_AT_START_BEATS = frozenset({"story_wrap_up"})
 CLOSING_FALLBACK_BEATS = frozenset({"story_wrap_up"})
 PLUSH_MEMORY_DIR = Path(
     os.getenv("PLUSH_MEMORY_DIR", str(PROJECT_ROOT.parents[1] / "plush_memory"))
@@ -51,6 +56,15 @@ PARAGRAPH_GAP = 0.6
 BODY_PX = 56
 TITLE_PX = 80
 CLOSING_MARGIN = 40
+# The cover, after plush_memory's (scripts/eink_hook.py): a hand-drawn
+# double frame just inside the panel edge, the title written large with a
+# broad pen, the picture under it, and 「めくる→」 in the frame's
+# bottom-right corner, since the tablet ends a book on its cover and a tap
+# on the right turns to the first page.
+COVER_HINT = "めくる→"
+COVER_INNER_FRAME_INSET = 16  # the frame's inner line, inside its outer one
+COVER_PADDING = 40  # between the inner line and what is inside it
+COVER_TITLE_PEN_R = 4
 # A passage too long for the rest of the page starts there only if at least
 # this many of its lines fit; otherwise it moves to the next page whole.
 MIN_SPLIT_LINES = 3
@@ -86,6 +100,11 @@ class StoryConfig:
     illustration_style: str = ""
     participant_presence: str = ""
     session_id: str = ""
+    # The cover picture, a point inside its empty thought bubble (in the
+    # picture's pixels), and the beat whose picture is drawn into it.
+    cover_illustration: str | None = None
+    cover_bubble: tuple[int, int] | None = None
+    cover_bubble_beat: str | None = None
 
     def illustration_name(self, beat_id: str | None) -> str | None:
         beat = self.beats.get(beat_id or "")
@@ -173,6 +192,72 @@ def generated_fallback_candidates(scenario: str, beat_id: str) -> list[dict[str,
     return available
 
 
+# How far a picture drawn into the cover's bubble may run over the bubble's
+# outline, in the cover picture's pixels; faint parts (its soft shadow) may
+# go further.
+COVER_BUBBLE_OVERFLOW = 40
+COVER_BUBBLE_SOLID_ALPHA = 128
+
+
+def compose_cover(cover: str, bubble: tuple[int, int], inner: str,
+                  create: bool = True) -> str | None:
+    """The cover picture with ``inner`` drawn as large as it fits inside the
+    thought bubble around ``bubble``, saved once under generated/ (named by
+    its inputs) and returned by name; None if it cannot be made, or is not
+    made yet and ``create`` is false."""
+    key = hashlib.sha256(json.dumps([cover, list(bubble), inner]).encode()).hexdigest()
+    name = f"generated/cover-{key}.png"
+    if find_illustration(name):
+        return name
+    if not create:
+        return None
+    base_path, inner_path = find_illustration(cover), find_illustration(inner)
+    if base_path is None or inner_path is None:
+        return None
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+
+    base = Image.open(base_path).convert("RGBA")
+    # The bubble: the opaque white region around the point, and a little
+    # past its outline.
+    rgba = np.asarray(base)
+    white = (rgba[..., 3] > 200) & (rgba[..., :3].min(axis=2) > 235)
+    # (A copy: an image made from an array is read-only, and the fill would
+    # then quietly change nothing.)
+    region = Image.fromarray((white * 255).astype("uint8")).copy()
+    ImageDraw.floodfill(region, tuple(bubble), 128)
+    region = region.point(lambda v: 255 if v == 128 else 0)
+    centre = np.asarray(region) > 0
+    region = region.filter(ImageFilter.MaxFilter(2 * COVER_BUBBLE_OVERFLOW + 1))
+    inside = np.asarray(region) > 0
+    if not centre.any():
+        return None
+    ys, xs = np.nonzero(centre)
+    cx, cy = xs.mean(), ys.mean()
+    picture = Image.open(inner_path).convert("RGBA")
+    bbox = picture.getchannel("A").getbbox()
+    if bbox:
+        picture = picture.crop(bbox)
+    # Shrink from the bubble's width until the picture's opaque part fits.
+    scale = (xs.max() - xs.min() + 1) / picture.width
+    while scale * min(picture.size) >= 8:
+        size = (max(1, round(picture.width * scale)), max(1, round(picture.height * scale)))
+        x, y = round(cx - size[0] / 2), round(cy - size[1] / 2)
+        if x >= 0 and y >= 0 and x + size[0] <= base.width and y + size[1] <= base.height:
+            resized = picture.resize(size, Image.LANCZOS)
+            opaque = np.asarray(resized.getchannel("A")) >= COVER_BUBBLE_SOLID_ALPHA
+            if inside[y:y + size[1], x:x + size[0]][opaque].all():
+                base.alpha_composite(resized, (x, y))
+                path = ILLUSTRATION_ROOT / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = path.with_suffix(".tmp.png")
+                base.save(temporary)
+                temporary.replace(path)
+                return name
+        scale *= 0.95
+    return None
+
+
 def find_illustration(name: str) -> Path | None:
     """The PNG at ``name`` under ``ILLUSTRATION_ROOT``, never outside it."""
     root = ILLUSTRATION_ROOT.resolve()
@@ -185,6 +270,7 @@ def find_illustration(name: str) -> Path | None:
 def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> StoryConfig:
     data = json.loads(path.read_text(encoding="utf-8"))
     spec = data["scenarios"].get(scenario, {})
+    cover = spec.get("cover", {})
     beats = {
         beat_id: StoryBeat(beat_id=beat_id, **beat)
         for beat_id, beat in spec.get("beats", {}).items()
@@ -197,6 +283,9 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
         motion_phrases=data.get("motion_phrases", {}),
         illustration_style=data.get("illustration_style", ""),
         participant_presence=data.get("participant_presence", ""),
+        cover_illustration=cover.get("illustration"),
+        cover_bubble=tuple(cover["bubble"]) if cover.get("bubble") else None,
+        cover_bubble_beat=cover.get("bubble_beat"),
     )
 
 
@@ -284,7 +373,7 @@ def turns_from_log(records: Iterable[dict[str, Any]], opening_line: str) -> list
 
 @dataclass(frozen=True)
 class StoryEntry:
-    style: str  # "title" | "narration" | "speech" | "closing"
+    style: str  # "title" | "narration" | "speech" | "closing" | "hint"
     text: str
     speaker: str = ""  # "pooh" | "participant" for speech
 
@@ -452,6 +541,54 @@ class PageLayout:
     # continuation page without one.
     text_columns: tuple[Box, ...]
     plain_text_columns: tuple[Box, ...]
+    # Where a picture still to be generated goes, and the text beside it:
+    # the text is written first, from where a reader starts.
+    late_picture_box: Box | None = None
+    late_text_columns: tuple[Box, ...] | None = None
+
+
+@dataclass(frozen=True)
+class CoverLayout:
+    frame_margin: int  # from the panel edge to the frame's outer line
+    title_y: int
+    title_px: int
+    picture_box: Box
+
+
+COVER_LAYOUTS = {
+    "portrait": CoverLayout(frame_margin=50, title_y=170, title_px=150,
+                            picture_box=(160, 480, 1300, 1430)),
+    "landscape": CoverLayout(frame_margin=50, title_y=120, title_px=120,
+                             picture_box=(380, 340, 1400, 1080)),
+}
+
+
+def frame_image(size: tuple[int, int], margin: int) -> Any:
+    """plush_memory's cover frame: a hand-drawn-looking double rectangle
+    just inside the panel edge, transparent elsewhere."""
+    from PIL import Image, ImageDraw
+
+    w, h = size
+    image = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+    rnd = random.Random(7)  # the same wobble every time
+
+    def wobbly_rect(inset: int, width: int) -> None:
+        x0, y0, x1, y1 = margin + inset, margin + inset, w - margin - inset, h - margin - inset
+        corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+        points = []
+        for (ax, ay), (bx, by) in zip(corners, corners[1:]):
+            n = max(2, int(max(abs(bx - ax), abs(by - ay)) / 60))
+            for i in range(n):
+                t = i / n
+                points.append((ax + (bx - ax) * t + rnd.uniform(-1.5, 1.5),
+                               ay + (by - ay) * t + rnd.uniform(-1.5, 1.5)))
+        points.append(points[0])
+        draw.line(points, fill=(0, 0, 0, 255), width=width, joint="curve")
+
+    wobbly_rect(0, 5)
+    wobbly_rect(COVER_INNER_FRAME_INSET, 2)
+    return image
 
 
 LAYOUTS = {
@@ -462,12 +599,15 @@ LAYOUTS = {
         text_columns=((90, 1130, 1440, 960),),
         plain_text_columns=((90, 110, 1440, 1950),),
     ),
-    # The open-book spread: picture on the left page, text on the right;
-    # without a picture, the text runs on from the left page to the right.
+    # The open-book spread: picture on the left page, text on the right; a
+    # picture still to be generated goes on the right, after the text; without
+    # a picture, the text runs on from the left page to the right.
     "landscape": PageLayout(
         "landscape", (2160, 1620),
         picture_box=(60, 120, 980, 1380),
         text_columns=((1120, 100, 980, 1440),),
+        late_picture_box=(1120, 120, 980, 1380),
+        late_text_columns=((60, 100, 980, 1440),),
         plain_text_columns=((60, 100, 980, 1440), (1120, 100, 980, 1440)),
     ),
 }
@@ -565,6 +705,7 @@ class PlacedEntry:
     w: int
     px: int
     align: str | None = None
+    pen_r: int | None = None  # a broader pen than the viewer's own (a cover's title)
 
     @property
     def bottom(self) -> int:
@@ -580,6 +721,13 @@ class StoryPage:
     placed: list[PlacedEntry] = field(default_factory=list)
     column: int = 0  # the column being filled
     cursor: int | None = None  # bottom of its last entry; None at its top
+    # Its picture is generated from the scene once the scene is over, so the
+    # page is laid out around the picture box and the picture comes later
+    # (StoryBuilder.attach_illustration).
+    awaits_illustration: bool = False
+    # The cover's own picture box, and its frame (frame_image).
+    picture_box: Box | None = None
+    frame_margin: int | None = None
 
     @property
     def text_box(self) -> Box:
@@ -590,6 +738,7 @@ class StoryPage:
             "index": self.index,
             "beat_id": self.beat_id,
             "illustration": self.illustration,
+            **({"picture_box": list(self.picture_box)} if self.picture_box else {}),
             "entries": [
                 {**asdict(item.entry), "lines": item.lines, "x": item.x, "y": item.y,
                  "w": item.w, "px": item.px, "align": item.align}
@@ -620,11 +769,22 @@ class StoryBuilder:
         config: StoryConfig,
         layout: PageLayout = LAYOUTS["portrait"],
         measure: Measure = default_measure,
+        awaits_illustration: Callable[[str], bool] | None = None,
+        compose_cover: bool = False,
     ) -> None:
         self.config = config
         self.layout = layout
         self.measure = measure
+        # Whether a beat's picture is still to be generated (the live book);
+        # without it, pages take whatever picture there is now.
+        self.awaits_illustration = awaits_illustration or (lambda beat_id: False)
+        # Draw the ending into the cover's bubble (the live book); otherwise
+        # (a book read back from its log) only a cover drawn then is used.
+        self.compose_cover = compose_cover
         self.pages: list[StoryPage] = []
+        # Made when the book finishes: the tablet ends on it, the PDF opens
+        # with it.
+        self.cover: StoryPage | None = None
         self.finished = False
         # What the robot saw with the participant's words (a handover seen
         # as 「どうぞ」 was said), kept to be retold with them: the session
@@ -666,7 +826,71 @@ class StoryBuilder:
             return []
         events = self._retell_seen()
         self.finished = True
+        self.cover = self._cover_page()
         return events + self._place([StoryEntry("closing", self.config.closing)])
+
+    def refresh_cover(self) -> None:
+        """Make the cover again, once a picture it shows has come."""
+        if self.cover is not None:
+            self.cover = self._cover_page()
+
+    def _cover_illustration(self) -> str | None:
+        """The cover picture, thinking of how the story ended: the picture
+        of the bubble's beat in its bubble, or the beat's bundled one when
+        the book has none (the story stopped before it, or it was not drawn)
+        rather than another scene's."""
+        cover = self.config.cover_illustration
+        if not cover or find_illustration(cover) is None:
+            return None
+        if self.config.cover_bubble is None:
+            return cover
+        ending = next((page.illustration for page in reversed(self.pages)
+                       if page.illustration and page.beat_id == self.config.cover_bubble_beat), None)
+        if ending is None:
+            beat = self.config.beats.get(self.config.cover_bubble_beat or "")
+            if beat is not None and beat.illustration and find_illustration(beat.illustration):
+                ending = beat.illustration
+        if ending is None:
+            return cover
+        try:
+            return compose_cover(cover, self.config.cover_bubble, ending,
+                                 create=self.compose_cover) or cover
+        except Exception as exc:
+            print(f"[絵本] 表紙を合成できませんでした: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return cover
+
+    def attach_illustration(self, page: StoryPage) -> str | None:
+        """Give a page laid out around a picture still to come the picture
+        its beat has now (generated, or the bundled one if that failed)."""
+        name = self.config.illustration_name(page.beat_id)
+        if not name or find_illustration(name) is None:
+            name = None
+        previous = next((p.illustration for p in reversed(self.pages[:page.index])
+                         if p.illustration), None)
+        page.illustration = None if name == previous else name
+        return page.illustration
+
+    def _cover_page(self) -> StoryPage:
+        """In the frame: the title at the top, the cover picture under it and
+        「めくる→」 in the bottom-right corner."""
+        cover = COVER_LAYOUTS[self.layout.name]
+        width, height = self.layout.size
+        inner = cover.frame_margin + COVER_INNER_FRAME_INSET + COVER_PADDING
+        page = StoryPage(
+            index=-1, beat_id=None, illustration=self._cover_illustration(),
+            text_columns=((inner, inner, width - 2 * inner, height - 2 * inner),),
+            picture_box=cover.picture_box, frame_margin=cover.frame_margin,
+        )
+        if self.config.title:
+            lines = wrap_text(self.config.title, cover.title_px, width - 2 * inner, self.measure)
+            page.placed.append(PlacedEntry(
+                StoryEntry("title", self.config.title), lines, inner, cover.title_y,
+                width - 2 * inner, cover.title_px, "center", COVER_TITLE_PEN_R))
+        hint_w = int(self.measure(COVER_HINT, BODY_PX)) + 1
+        page.placed.append(PlacedEntry(
+            StoryEntry("hint", COVER_HINT), [COVER_HINT], width - inner - hint_w,
+            height - inner - line_height(BODY_PX), hint_w, BODY_PX))
+        return page
 
     def _retell_seen(self) -> list[PageEvent]:
         """What was seen with words that never got answered, on its own."""
@@ -695,7 +919,7 @@ class StoryBuilder:
         empty column (the right page of a spread) instead of turning the
         page, so the spread is not left half blank."""
         page = self.pages[-1]
-        if self._illustration_for_beat(beat_id) is not None:
+        if self._illustration_for_beat(beat_id) is not None or self.awaits_illustration(beat_id):
             return False
         if page.column + 1 >= len(page.text_columns):
             return False
@@ -706,17 +930,24 @@ class StoryBuilder:
 
     def _new_page(self, beat_id: str | None) -> NewPage:
         beat = self.config.beats.get(beat_id or "")
-        # Until a beat's illustration exists, its page is all text, rather
-        # than a blank half on the tablet.
-        picture = self._illustration_for_beat(beat_id)
-        has_picture = picture is not None
+        # A picture still to be generated keeps its box free; a beat without
+        # any picture has an all-text page, rather than a blank half on the
+        # tablet.
+        awaited = beat_id is not None and self.awaits_illustration(beat_id)
+        picture = None if awaited else self._illustration_for_beat(beat_id)
+        if awaited:
+            text_columns = self.layout.late_text_columns or self.layout.text_columns
+        elif picture is not None:
+            text_columns = self.layout.text_columns
+        else:
+            text_columns = self.layout.plain_text_columns
         page = StoryPage(
             index=len(self.pages),
             beat_id=beat_id,
             illustration=picture,
-            text_columns=(
-                self.layout.text_columns if has_picture else self.layout.plain_text_columns
-            ),
+            text_columns=text_columns,
+            awaits_illustration=awaited,
+            picture_box=self.layout.late_picture_box if awaited else None,
         )
         self.pages.append(page)
         return NewPage(page)

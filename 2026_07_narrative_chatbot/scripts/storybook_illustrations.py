@@ -573,8 +573,11 @@ class SessionIllustrations:
                          session_id=session.session_id)
         beat_id, _ = storybook.narrate(turn, config)
         completed = None
+        started = False
         # Finalize a scene after hearing its dialogue, rather than illustrating
         # the opening before the participant has had a chance to say anything.
+        # A closing scene runs on to the end of the session, and what it shows
+        # is decided by the time it starts, so it is drawn right away.
         with self._lock:
             turns = self._turns.setdefault(session.session_id, [])
             active = self._active.get(session.session_id)
@@ -585,6 +588,7 @@ class SessionIllustrations:
                 name = storybook.generated_illustration_name(config.scenario, config.session_id, beat_id)
                 if beat_id not in storybook.FIXED_ILLUSTRATION_BEATS and not storybook.find_illustration(name):
                     self._promises.setdefault((config.session_id, beat_id), Future())
+                    started = beat_id in storybook.ILLUSTRATED_AT_START_BEATS
             turns.append(turn)
             snapshot = list(turns)
             if turn.ends_story:
@@ -594,8 +598,17 @@ class SessionIllustrations:
                 active = None
         if completed:
             self.submit(*completed)
+        if started:
+            self.submit(config, beat_id, snapshot)
         if active:
             self.submit(active[0], active[1], snapshot)
+
+    def done(self, session_id, beat_id):
+        """Whether the scene's picture has been dealt with (drawn, or given
+        up on), without waiting."""
+        with self._lock:
+            job = self._promises.get((session_id, beat_id))
+        return job is not None and job.done()
 
     def wait(self, session_id, beat_id, cancelled=None):
         with self._lock:

@@ -62,14 +62,18 @@ def place_illustration(path: Path, box: storybook.Box) -> tuple[Image.Image, sto
 
 def render_page(page: StoryPage, layout: PageLayout, *, page_number: bool = True) -> Image.Image:
     canvas = Image.new("RGB", layout.size, BG)
+    if page.frame_margin is not None:
+        frame = storybook.frame_image(layout.size, page.frame_margin)
+        canvas.paste(frame, (0, 0), frame)
     draw = ImageDraw.Draw(canvas)
+    box = page.picture_box or layout.picture_box
     if page.illustration:
         path = find_illustration(page.illustration)
         if path is not None:
-            image, origin = fit_illustration(path, layout.picture_box)
+            image, origin = fit_illustration(path, box)
             canvas.paste(image, origin)
         else:
-            x, y, w, h = layout.picture_box
+            x, y, w, h = box
             draw.rectangle((x, y, x + w, y + h), outline=PLACEHOLDER, width=4)
             draw.text((x + 30, y + 30), f"(さしえ: {page.illustration})",
                       font=storybook._font(40), fill=PLACEHOLDER)
@@ -111,7 +115,8 @@ def build_from_log(path: Path, layout: str = "portrait") -> storybook.StoryBuild
 
 
 def write_pdf(builder: storybook.StoryBuilder, path: Path) -> Path:
-    """The book as a PDF, one page per tablet page, 1 pt per panel pixel."""
+    """The book as a PDF, one page per tablet page, 1 pt per panel pixel,
+    opening with its cover (unnumbered) once the book is finished."""
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
@@ -123,10 +128,17 @@ def write_pdf(builder: storybook.StoryBuilder, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     pdf = canvas.Canvas(str(path), pagesize=(width, height))
     pdf.setTitle(builder.config.title or "絵本")
-    for page in builder.pages:
+    cover = [builder.cover] if builder.cover is not None else []
+    for page in cover + builder.pages:
+        if page.frame_margin is not None:
+            encoded = io.BytesIO()
+            storybook.frame_image(builder.layout.size, page.frame_margin).save(encoded, "PNG")
+            encoded.seek(0)
+            pdf.drawImage(ImageReader(encoded), 0, 0, width, height, mask="auto")
         illustration = find_illustration(page.illustration) if page.illustration else None
         if illustration is not None:
-            image, (x, y, w, h) = place_illustration(illustration, builder.layout.picture_box)
+            image, (x, y, w, h) = place_illustration(illustration,
+                                                     page.picture_box or builder.layout.picture_box)
             # At the panel's own resolution, as JPEG: the PDF stays small.
             encoded = io.BytesIO()
             image.resize((w, h), Image.LANCZOS).save(encoded, "JPEG", quality=90)
@@ -145,10 +157,11 @@ def write_pdf(builder: storybook.StoryBuilder, path: Path) -> Path:
                     pdf.drawCentredString(item.x + item.w / 2, baseline, text)
                 else:
                     pdf.drawString(item.x, baseline, text)
-        pdf.setFont("Yomogi", 26)
-        pdf.setFillGray(0.75)
-        pdf.drawCentredString(width / 2, 30, str(page.index + 1))
-        pdf.setFillGray(0)
+        if page is not builder.cover:
+            pdf.setFont("Yomogi", 26)
+            pdf.setFillGray(0.75)
+            pdf.drawCentredString(width / 2, 30, str(page.index + 1))
+            pdf.setFillGray(0)
         pdf.showPage()
     pdf.save()
     return path

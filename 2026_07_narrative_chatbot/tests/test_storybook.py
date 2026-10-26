@@ -403,6 +403,131 @@ class BuilderTest(WithIllustrations):
         self.assertEqual(len(builder.pages), 2)
         self.assertIsNotNone(builder.pages[1].illustration)
 
+    def test_landscape_picture_is_left_unless_it_comes_after_the_text(self):
+        layout = LAYOUTS["landscape"]
+        (text_x, _, _, _), = layout.text_columns
+        x, _, w, _ = layout.picture_box
+        self.assertLessEqual(x + w, text_x)
+        (late_x, _, late_w, _), = layout.late_text_columns
+        self.assertLessEqual(late_x + late_w, layout.late_picture_box[0])
+
+    def test_page_with_its_picture_ready_has_it_on_the_left(self):
+        builder = StoryBuilder(EEYORE, LAYOUTS["landscape"], full_width,
+                               awaits_illustration=lambda beat: beat == "pooh_tastes_honey")
+        builder.add(StoryTurn("session_open", "やあ。"))
+        page = builder.pages[0]
+        self.assertIsNone(page.picture_box)
+        self.assertEqual(page.text_columns, LAYOUTS["landscape"].text_columns)
+        self.assertNotIn("picture_box", page.to_dict())
+
+    def test_page_awaiting_its_picture_keeps_the_box_free(self):
+        builder = StoryBuilder(EEYORE, LAYOUTS["landscape"], full_width,
+                               awaits_illustration=lambda beat: beat == "pooh_tastes_honey")
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.add(StoryTurn("world_event", "あれ？", world_event_id="pooh_tastes_honey"))
+        page = builder.pages[-1]
+        self.assertTrue(page.awaits_illustration)
+        self.assertIsNone(page.illustration)
+        self.assertEqual(page.text_columns, LAYOUTS["landscape"].late_text_columns)
+        self.assertEqual(page.picture_box, LAYOUTS["landscape"].late_picture_box)
+        self.assertEqual(page.to_dict()["picture_box"], list(LAYOUTS["landscape"].late_picture_box))
+        self.assertEqual(builder.attach_illustration(page),
+                         EEYORE.beats["pooh_tastes_honey"].illustration)
+
+    def test_awaited_scene_turns_the_page_even_with_no_picture_yet(self):
+        with patch.object(storybook, "ILLUSTRATION_ROOT", Path("/nonexistent")):
+            builder = StoryBuilder(EEYORE, LAYOUTS["landscape"], full_width,
+                                   awaits_illustration=lambda beat: beat == "pooh_tastes_honey")
+            builder.add(StoryTurn("session_open", "やあ。"))
+            builder.add(StoryTurn("world_event", "あれ？", world_event_id="pooh_tastes_honey"))
+            self.assertEqual(len(builder.pages), 2)
+            self.assertIsNone(builder.attach_illustration(builder.pages[1]))
+
+    def test_finished_book_gets_a_cover(self):
+        from dataclasses import replace
+
+        config = replace(EEYORE, cover_illustration=EEYORE.beats["story_wrap_up"].illustration)
+        builder = StoryBuilder(config, LAYOUTS["landscape"], full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        self.assertIsNone(builder.cover)
+        builder.finish()
+        cover = builder.cover
+        self.assertEqual(cover.illustration, config.cover_illustration)
+        title, hint = cover.placed
+        layout = storybook.COVER_LAYOUTS["landscape"]
+        self.assertEqual((title.entry.text, title.align, title.pen_r),
+                         (EEYORE.title, "center", storybook.COVER_TITLE_PEN_R))
+        # Title on top, the picture under it, all inside the frame.
+        x, y, w, h = layout.picture_box
+        self.assertEqual(cover.picture_box, layout.picture_box)
+        self.assertEqual(cover.frame_margin, layout.frame_margin)
+        self.assertLessEqual(title.bottom, y)
+        width, height = LAYOUTS["landscape"].size
+        inner = layout.frame_margin + storybook.COVER_INNER_FRAME_INSET
+        self.assertEqual(hint.lines, [storybook.COVER_HINT])
+        self.assertLess(hint.x + hint.w, width - inner)
+        self.assertLess(hint.bottom, height - inner)
+        self.assertTrue(hint.x >= x + w or hint.y >= y + h)
+
+    def test_cover_thinks_of_the_ending_in_its_bubble(self):
+        from dataclasses import replace
+        from PIL import Image, ImageDraw
+
+        root = storybook.ILLUSTRATION_ROOT
+        cover = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(cover)
+        draw.ellipse((60, 10, 190, 130), fill="white", outline="black", width=3)
+        cover.save(root / "cover.png")
+        Image.new("RGBA", (40, 30), "red").save(root / "ending.png")
+        config = replace(EEYORE, cover_illustration="cover.png", cover_bubble=(125, 70),
+                         cover_bubble_beat="story_wrap_up")
+        builder = StoryBuilder(config, LAYOUTS["landscape"], full_width, compose_cover=True)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.add(StoryTurn("world_event", "じゃあね。", world_event_id="story_wrap_up"))
+        builder.pages[-1].illustration = "ending.png"
+        builder.finish()
+        name = builder.cover.illustration
+        self.assertTrue(name.startswith("generated/cover-"))
+        composed = Image.open(storybook.find_illustration(name)).convert("RGBA")
+        red = [(x, y) for x in range(200) for y in range(200)
+               if composed.getpixel((x, y)) == (255, 0, 0, 255)]
+        self.assertIn((125, 70), red)
+        # Over the bubble, running at most a little past its outline.
+        reach = storybook.COVER_BUBBLE_OVERFLOW + 1
+        self.assertTrue(all(60 - reach <= x <= 190 + reach and 10 - reach <= y <= 130 + reach
+                            for x, y in red))
+        # Made once: the same inputs give the same picture.
+        self.assertEqual(storybook.compose_cover("cover.png", (125, 70), "ending.png"), name)
+
+    def test_cover_without_a_picture_to_think_of_keeps_its_empty_bubble(self):
+        from dataclasses import replace
+        from PIL import Image
+
+        Image.new("RGBA", (20, 20), "white").save(storybook.ILLUSTRATION_ROOT / "cover.png")
+        config = replace(EEYORE, cover_illustration="cover.png", cover_bubble=(10, 10),
+                         cover_bubble_beat=None)
+        with patch.object(storybook, "compose_cover") as compose:
+            builder = StoryBuilder(config, LAYOUTS["landscape"], full_width)
+            builder._new_page(None)
+            builder.finish()
+        compose.assert_not_called()
+        self.assertEqual(builder.cover.illustration, "cover.png")
+
+    def test_story_stopped_before_its_ending_thinks_of_the_bundled_ending(self):
+        from dataclasses import replace
+        from PIL import Image
+
+        Image.new("RGBA", (20, 20), "white").save(storybook.ILLUSTRATION_ROOT / "cover.png")
+        config = replace(EEYORE, cover_illustration="cover.png", cover_bubble=(10, 10),
+                         cover_bubble_beat="story_wrap_up")
+        with patch.object(storybook, "compose_cover", return_value="generated/cover-x.png") as compose:
+            builder = StoryBuilder(config, LAYOUTS["landscape"], full_width)
+            builder.add(StoryTurn("session_open", "やあ。"))
+            builder.add(StoryTurn("world_event", "ああ。", world_event_id="pooh_ate_honey"))
+            builder.finish()
+        # Not the last scene's picture (the honey eaten).
+        self.assertEqual(compose.call_args.args[2], EEYORE.beats["story_wrap_up"].illustration)
+
     def test_runs_break_at_a_column_change(self):
         builder = StoryBuilder(EEYORE, LAYOUTS["landscape"], full_width)
         builder.add(StoryTurn("session_open", ""))
@@ -510,6 +635,9 @@ class FakeBackend:
     def write(self, event, points_per_step):
         self.calls.append(("write", len(event.placed)))
 
+    def add_picture(self, page):
+        self.calls.append(("picture", page.beat_id, page.illustration))
+
     def end_book(self):
         self.calls.append(("end",))
 
@@ -534,6 +662,10 @@ def drain(live, timeout=2.0):
 
 class LiveStorybookTest(unittest.TestCase):
     def setUp(self):
+        # The real cover would be composed into assets/storybook/generated.
+        patcher = patch.object(storybook, "compose_cover", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.backend = FakeBackend("landscape")
         self.live = storybook_live.LiveStorybook([self.backend])
 
@@ -610,6 +742,138 @@ class LiveStorybookTest(unittest.TestCase):
         finally:
             live.close()
         self.assertIn(("page", "opening"), self.backend.calls)
+
+
+class FakeIllustrations:
+    """SessionIllustrations' wait, recorded; never done unless told."""
+
+    def __init__(self, done=True, ready=()):
+        self.finished = done
+        self.ready = set(ready)  # what done() says has come
+        self.waits = []
+
+    def wait(self, session_id, beat_id, cancelled=None):
+        self.waits.append(beat_id)
+        while not self.finished and not (cancelled and cancelled()):
+            time.sleep(0.01)
+
+    def done(self, session_id, beat_id):
+        return beat_id in self.ready
+
+
+class LiveIllustrationTest(WithIllustrations):
+    def live(self, illustrations):
+        backend = FakeBackend("landscape")
+        live = storybook_live.LiveStorybook([backend], illustrations)
+        self.addCleanup(live.close)
+        return live, backend
+
+    def test_scene_is_written_before_its_picture_comes(self):
+        illustrations = FakeIllustrations()
+        live, backend = self.live(illustrations)
+        session = fake_session("j" * 32)
+        live(session, fake_output("session_open"))
+        live(session, fake_output("world_event", "あれ？", event="pooh_tastes_honey"))
+        live(session, fake_output("participant", "うん。", user="たべちゃだめ"))
+        drain(live)
+        self.assertEqual(illustrations.waits, [])
+        live(session, fake_output("world_event", "ああ。", event="pooh_ate_honey"))
+        drain(live)
+        self.assertEqual(illustrations.waits, ["pooh_tastes_honey"])
+        calls = [call for call in backend.calls if call[0] != "write"]
+        tasting = EEYORE.beats["pooh_tastes_honey"].illustration
+        self.assertEqual(calls[-3:], [("page", "pooh_tastes_honey"),
+                                      ("picture", "pooh_tastes_honey", tasting),
+                                      ("page", "pooh_ate_honey")])
+
+    def test_book_goes_on_when_the_picture_is_late(self):
+        illustrations = FakeIllustrations(done=False)
+        live, backend = self.live(illustrations)
+        session = fake_session("k" * 32)
+        with patch.object(storybook_live, "ILLUSTRATION_WAIT_SEC", 0.05):
+            live(session, fake_output("session_open"))
+            live(session, fake_output("world_event", "あれ？", event="pooh_tastes_honey"))
+            live(session, fake_output("world_event", "ああ。", event="pooh_ate_honey"))
+            deadline = time.monotonic() + 3.0
+            while ("page", "pooh_ate_honey") not in backend.calls and time.monotonic() < deadline:
+                time.sleep(0.01)
+        self.assertIn(("page", "pooh_ate_honey"), backend.calls)
+
+    def test_picture_that_comes_during_its_scene_is_drawn_then(self):
+        illustrations = FakeIllustrations(ready={"story_wrap_up"})
+        live, backend = self.live(illustrations)
+        session = fake_session("m" * 32)
+        with patch.object(storybook_live, "PICTURE_POLL_SEC", 0.02):
+            live(session, fake_output("session_open"))
+            live(session, fake_output("world_event", "じゃあね。", event="story_wrap_up"))
+            live(session, fake_output("participant", "うん。", user="まだはなそう"))
+            deadline = time.monotonic() + 2.0
+            while not any(call[0] == "picture" for call in backend.calls) \
+                    and time.monotonic() < deadline:
+                time.sleep(0.01)
+        self.assertIn(("picture", "story_wrap_up", EEYORE.beats["story_wrap_up"].illustration),
+                      backend.calls)
+        self.assertNotIn(("end",), backend.calls)  # the scene goes on
+        self.assertEqual(illustrations.waits, [])
+
+    def test_closing_scene_is_illustrated_as_it_starts(self):
+        from storybook_illustrations import SessionIllustrations
+
+        illustrations = SessionIllustrations()
+        session = fake_session("n" * 32)
+        with patch.object(illustrations, "submit") as submit:
+            def submitted():
+                return [call.args[1] for call in submit.call_args_list]
+
+            illustrations(session, fake_output("session_open"))
+            illustrations(session, fake_output("world_event", "あれ？", event="pooh_tastes_honey"))
+            # A scene is drawn once it is over (the opening's is fixed).
+            self.assertNotIn("pooh_tastes_honey", submitted())
+            illustrations(session, fake_output("world_event", "じゃあね。", event="story_wrap_up"))
+            self.assertEqual(submitted()[-2:], ["pooh_tastes_honey", "story_wrap_up"])
+            illustrations.close()  # still without generating anything
+
+    def test_book_ends_on_its_cover(self):
+        live, backend = self.live(FakeIllustrations())
+        session = fake_session("l" * 32)
+        live(session, fake_output("session_open"))
+        live(session, fake_output("world_event", "じゃあね。", event="story_wrap_up"))
+        live(session, fake_output("session_close", "またね。", mode="exit"))
+        drain(live)
+        calls = [call for call in backend.calls if call[0] != "write"]
+        self.assertEqual(calls[-4:], [("page", "story_wrap_up"),
+                                      ("picture", "story_wrap_up",
+                                       EEYORE.beats["story_wrap_up"].illustration),
+                                      ("page", None), ("end",)])
+        self.assertIsNotNone(live.builder.cover)
+
+    def test_cover_is_not_drawn_once_the_next_story_has_begun(self):
+        illustrations = FakeIllustrations(done=False)
+        live, backend = self.live(illustrations)
+        first, second = fake_session("o" * 32), fake_session("p" * 32)
+        live(first, fake_output("session_open"))
+        live(first, fake_output("world_event", "じゃあね。", event="story_wrap_up"))
+        drain(live)
+        # The next story begins while the book waits for its closing picture.
+        live(first, fake_output("session_close", "またね。", mode="exit"))
+        live(second, fake_output("session_open"))
+        drain(live, timeout=3.0)
+        pages = [call[1] for call in backend.calls if call[0] == "page"]
+        self.assertNotIn(None, pages)  # no cover
+        self.assertEqual(pages[-1], "opening")
+        self.assertEqual(backend.calls.count(("begin", "landscape")), 2)
+
+    def test_pdf_opens_with_the_cover(self):
+        builder = StoryBuilder(EEYORE, LAYOUTS["landscape"], full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.finish()
+        from storybook_render import write_pdf
+
+        with tempfile.TemporaryDirectory() as directory:
+            pdf = write_pdf(builder, Path(directory) / "book.pdf").read_bytes()
+        import re
+
+        self.assertEqual(len(re.findall(rb"/Type\s*/Page[^s]", pdf)), len(builder.pages) + 1)
 
 
 class FakePush:
@@ -863,6 +1127,50 @@ class EinkBackendTest(WithIllustrations):
         [command] = push.commands
         self.assertIn(f"{storybook_live.STORYBOOK_APP_DIR}/events", command)
         self.assertIn("READY", command)
+
+    def test_cover_starts_with_its_frame_then_its_picture(self):
+        from dataclasses import replace
+
+        push = FakePush()
+        backend = storybook_live.EinkBackend(push)
+        config = replace(EEYORE, cover_illustration=EEYORE.beats["opening"].illustration)
+        builder = StoryBuilder(config, LAYOUTS["landscape"], full_width)
+        backend.begin_book(builder.layout)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.finish()
+        push.calls.clear()
+        backend.new_page(NewPage(builder.cover))
+        backend.write(WriteEntries(builder.cover, builder.cover.placed), 12)
+        kinds = [(call[0], call[2].get("clear_first")) for call in push.calls]
+        self.assertEqual(kinds, [("memory", True), ("memory", False), ("text", False), ("text", False)])
+        frame, picture, title = push.calls[0], push.calls[1], push.calls[2]
+        self.assertEqual(frame[1], "frame.png")
+        x, y, w, h = storybook.COVER_LAYOUTS["landscape"].picture_box
+        self.assertEqual(picture[2]["target_w"], w)
+        self.assertEqual(title[2]["pen_r"], storybook.COVER_TITLE_PEN_R)
+        self.assertNotIn("pen_r", push.calls[3][2])
+
+    def test_late_picture_is_drawn_beside_the_text_without_clearing(self):
+        push = FakePush()
+        backend = storybook_live.EinkBackend(push)
+        builder = StoryBuilder(EEYORE, LAYOUTS["landscape"], full_width,
+                               awaits_illustration=lambda beat: beat == "pooh_tastes_honey")
+        backend.begin_book(builder.layout)
+        for turn in (StoryTurn("session_open", "やあ。"),
+                     StoryTurn("world_event", "あれ？", world_event_id="pooh_tastes_honey")):
+            for event in builder.add(turn):
+                if isinstance(event, NewPage):
+                    backend.new_page(event)
+                else:
+                    backend.write(event, 12)
+        push.calls.clear()
+        page = builder.pages[-1]
+        builder.attach_illustration(page)
+        backend.add_picture(page)
+        [(kind, _, kwargs)] = push.calls
+        self.assertEqual(kind, "memory")
+        self.assertFalse(kwargs["clear_first"])
+        self.assertFalse(kwargs["page_start"])
 
     def test_new_page_ends_the_previous_one(self):
         push = FakePush()
