@@ -2435,6 +2435,24 @@ class EarlyResponseTests(unittest.TestCase):
         self.assertFalse(feed.finish("ちがう。いいね。"))
         self.assertEqual(sent, ["うん。"])
 
+    def test_line_written_again_is_read_as_what_was_said(self):
+        def stream(predictor, on_text, **inputs):
+            for chunk in ("クリームのケーキ", "がいいな。楽しく", "なるから"):
+                on_text(chunk)
+            return SimpleNamespace(
+                selected_mishearing="none", situation_update=SituationUpdate(),
+                bot_response="イチゴのケーキだよ。甘いね。",
+            )
+        agent, order = self.agent()
+        received = []
+        with patch.object(pooh, "stream_response", side_effect=stream):
+            result = agent.forward(
+                current_situation=pooh.get_scenario("tea_party").initial_situation,
+                user_action="どんなケーキ？", history="", on_response=received.append,
+            )
+        self.assertEqual(received, ["クリームのケーキがいいな。"])
+        self.assertEqual(result.bot_response, "クリームのケーキがいいな。")
+
     def test_meta_turn_is_not_streamed(self):
         with patch.object(pooh, "stream_response") as stream:
             received, _ = self.run_forward(mode="meta", technical_terms=["ロボット"])

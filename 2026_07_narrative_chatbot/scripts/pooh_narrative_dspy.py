@@ -670,6 +670,10 @@ class PoohNarrativeAgent(dspy.Module):
                     f"{feed.text[:feed.sent]!r} -> {bot_response!r}",
                     file=sys.stderr,
                 )
+                # The line was written twice (e.g. DSPy retried with another
+                # adapter after streaming the first try); what Pooh said is
+                # what was sent, so the turn is read and logged from that.
+                bot_response = feed.text[:feed.sent]
         elif on_response is not None and mode != "exit":
             on_response(bot_response)
         interpretation = self.interpret(
