@@ -10,10 +10,11 @@ examples) changes per scenario.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 import dspy
 
-from narrative_events import fixed_utterance
+from narrative_events import NarrativeEventController, fixed_utterance
 from narrative_state import NarrativeSituation
 
 
@@ -57,12 +58,14 @@ class Scenario:
     response_examples: list[dspy.Example]
     interpret_examples: list[dspy.Example]
     scenes: tuple[SceneDefinition, ...] = ()
-    gift_decision_delay_seconds: float | None = None
-    honey_tasting_delay_seconds: float | None = None
-    honey_eating_delay_seconds: float | None = None
-    event_quiet_seconds: float = 0.0
-    awaiting_reply_quiet_seconds: float | None = None
-    idle_close_after_wrap_up_seconds: float | None = None
+    # Builds this scenario's timed-event controller given a clock, or None
+    # for a scenario with no automatic, time-driven story beats (like
+    # tea_party). See narrative_events.NarrativeEventController and
+    # eeyore_birthday_events.HoneyGiftEventController for the shape a new
+    # scenario's own controller should follow.
+    event_controller_factory: (
+        Callable[[Callable[[], float]], NarrativeEventController] | None
+    ) = None
     # Heard outside the robot's narrative mode, these start the story
     # (``--start-on-mode``): each the words that must all be heard, kept
     # apart from the mode keywords of pooh_body's speech_mode_rules.yaml.
@@ -112,6 +115,8 @@ def _tea_party() -> Scenario:
 
 
 def _eeyore_birthday() -> Scenario:
+    from eeyore_birthday_events import HoneyGiftEventController
+    from narrative_events import estimate_speech_seconds
     from pooh_eeyore_examples import (
         EEYORE_BIRTHDAY_INTERPRET_EXAMPLES,
         EEYORE_BIRTHDAY_MODE_EXAMPLES,
@@ -150,12 +155,16 @@ def _eeyore_birthday() -> Scenario:
             SceneDefinition("5", "場面5：贈り物の詳細を相談する"),
             SceneDefinition("6", "場面6：贈り物を振り返る・会話を続ける"),
         ),
-        gift_decision_delay_seconds=EEYORE_GIFT_DECISION_DELAY_SECONDS,
-        honey_tasting_delay_seconds=EEYORE_HONEY_TASTING_DELAY_SECONDS,
-        honey_eating_delay_seconds=EEYORE_HONEY_EATING_DELAY_SECONDS,
-        event_quiet_seconds=EEYORE_EVENT_QUIET_SECONDS,
-        awaiting_reply_quiet_seconds=EEYORE_AWAITING_REPLY_QUIET_SECONDS,
-        idle_close_after_wrap_up_seconds=EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS,
+        event_controller_factory=lambda clock: HoneyGiftEventController(
+            EEYORE_GIFT_DECISION_DELAY_SECONDS,
+            EEYORE_HONEY_TASTING_DELAY_SECONDS,
+            EEYORE_HONEY_EATING_DELAY_SECONDS,
+            clock=clock,
+            quiet_seconds=EEYORE_EVENT_QUIET_SECONDS,
+            idle_close_seconds=EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS,
+            speech_seconds=estimate_speech_seconds,
+            awaiting_quiet_seconds=EEYORE_AWAITING_REPLY_QUIET_SECONDS,
+        ),
         pooh_preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
         # 「プー、今日はイーヨーについて相談したいことがあるんだよね」;
         # the recognizer also hears イーヨー as イオン, いいよう or いーよ.

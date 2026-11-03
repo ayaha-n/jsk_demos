@@ -1,11 +1,11 @@
 """Curated full-turn examples for the Pooh narrative interaction."""
 
-from typing import Any
+from typing import Any, Callable
 
 import dspy
 
 from mishearing_cases import candidate_for
-from narrative_events import HONEY_REQUESTS, fixed_utterance
+from narrative_events import fixed_utterance
 from narrative_state import (
     NarrativeSituation,
     SituationUpdate,
@@ -313,22 +313,32 @@ MISHEARING_EXAMPLES = [
 ]
 
 
-def build_mode_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:
-    """Derive AnalyzeInteraction examples from any scenario's full-turn trainset."""
-    return [
-        dspy.Example(
+def build_mode_examples(
+    trainset: list[dspy.Example],
+    *,
+    extra_fields: Callable[[dspy.Example], dict[str, Any]] | None = None,
+) -> list[dspy.Example]:
+    """Derive AnalyzeInteraction examples from any scenario's full-turn trainset.
+
+    ``extra_fields(item)``, if given, returns extra fields to add per example
+    (e.g. eeyore_birthday's own ``honey_requests``, for its own
+    EeyoreAnalyzeInteraction subclass); plain AnalyzeInteraction scenarios
+    like tea_party have no use for it.
+    """
+    examples = []
+    for item in trainset:
+        fields = dict(
             current_situation=item.current_situation,
             user_action=item.user_action,
             history=item.history,
             technical_terms=_technical_terms_for(item),
             interaction_mode=item.interaction_mode,
             current_scene=item.current_scene,
-            honey_requests=[
-                action for action in item.narrative_actions if action in HONEY_REQUESTS
-            ],
-        ).with_inputs("current_situation", "user_action", "history")
-        for item in trainset
-    ]
+        )
+        if extra_fields is not None:
+            fields.update(extra_fields(item))
+        examples.append(dspy.Example(**fields).with_inputs("current_situation", "user_action", "history"))
+    return examples
 
 
 def build_interpret_examples(trainset: list[dspy.Example]) -> list[dspy.Example]:

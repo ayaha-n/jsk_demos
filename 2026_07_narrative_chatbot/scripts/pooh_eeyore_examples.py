@@ -9,8 +9,9 @@ multiple named participants).
 
 import dspy
 
-from narrative_events import (
+from eeyore_birthday_events import (
     BALLOON_COLOR_UNRESOLVED,
+    HONEY_REQUESTS,
     NO_PROMISE_AGAIN_RESPONSE,
     NO_PROMISE_RESPONSE,
     HONEY_EATEN_DESCRIPTION,
@@ -24,11 +25,10 @@ from narrative_events import (
     STORY_WRAP_UP_DESCRIPTION,
     STORY_WRAP_UP_EVENT,
     STORY_WRAP_UP_RESPONSE,
-    fixed_utterance,
     EMPTY_JAR_UNRESOLVED,
     GIFT_UNRESOLVED,
-    SettledDetail,
 )
+from narrative_events import fixed_utterance, SettledDetail
 from narrative_state import NarrativeSituation, SituationUpdate, relevant_preferences
 from pooh_examples import (
     build_mode_examples,
@@ -66,7 +66,7 @@ _TURN3_BOT_RESPONSE = (
     "誰だって、風船もらって、不元気になる人なんていないもの。何色の風船にする？"
 )
 
-# 「一口だけのつもりで持ち出す」伏線は narrative_events.HONEY_TASTED_RESPONSE の
+# 「一口だけのつもりで持ち出す」伏線は eeyore_birthday_events.HONEY_TASTED_RESPONSE の
 # 必須auto-fireイベントに一本化した。ここでの手書きexampleは重複防止のため削除済み。
 
 # 以下は話題別の例。場面5は詳細相談、場面6は振り返りで、番号順の進行は必須ではない。
@@ -1006,7 +1006,14 @@ EEYORE_BIRTHDAY_POOH_PREFERENCES = {
 }
 
 
-EEYORE_BIRTHDAY_MODE_EXAMPLES = build_mode_examples(EEYORE_BIRTHDAY_TRAINSET)
+EEYORE_BIRTHDAY_MODE_EXAMPLES = build_mode_examples(
+    EEYORE_BIRTHDAY_TRAINSET,
+    extra_fields=lambda item: {
+        "honey_requests": [
+            action for action in item.narrative_actions if action in HONEY_REQUESTS
+        ],
+    },
+)
 EEYORE_BIRTHDAY_INTERPRET_EXAMPLES = build_interpret_examples(EEYORE_BIRTHDAY_TRAINSET)
 
 

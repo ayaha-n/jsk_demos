@@ -55,12 +55,15 @@ from narrative_state import (
     coerce_situation,
     relevant_preferences,
 )
-from narrative_events import (
-    HoneyGiftEventController,
+from eeyore_birthday_events import (
+    HoneyGiftState,
     HoneyRequest,
     NarrativeAction,
-    SettledDetail,
     HONEY_GIFT_KEPT_RESPONSE,
+)
+from narrative_events import (
+    NarrativeEventController,
+    SettledDetail,
     WorldEvent,
     estimate_speech_seconds,
     fixed_utterance_id,
@@ -127,6 +130,21 @@ class AnalyzeInteraction(dspy.Signature):
             "安定したIDを返す。順序や状態遷移の制御には使わない。該当しなければnone。"
         )
     )
+
+
+# AnalyzeInteraction, extended with eeyore_birthday's own closed vocabulary.
+# No docstring here: dspy.Signature uses a subclass's own docstring as its
+# instructions instead of inheriting the parent's, so adding one would
+# silently replace the real classification instructions above with whatever
+# this comment said. Defined here (not in eeyore_birthday_events.py) only to
+# avoid a circular import: this module imports scenario content from
+# scenarios.py, which in turn loads eeyore_birthday_events.py, so that module
+# cannot import AnalyzeInteraction back from here to subclass it. A scenario
+# with its own narrative actions should follow this same shape: subclass the
+# generic signature right next to it (also without its own docstring),
+# rather than adding its fields to the shared one. See ``signatures_for``
+# for how a scenario's own subclass gets used.
+class EeyoreAnalyzeInteraction(AnalyzeInteraction):
     honey_requests: list[HoneyRequest] = dspy.OutputField(
         desc=(
             "このターンの参加者の発話・行為そのものが次に当たる場合だけ返す。"
@@ -261,21 +279,6 @@ class InterpretTurn(dspy.Signature):
             "現在状態の保持と差分の適用はPythonが行う。"
         )
     )
-    narrative_actions: list[NarrativeAction] = dspy.OutputField(
-        desc=(
-            "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
-            "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
-            "プーまたは参加者が提案したが、まだ決まっていない場合)、"
-            "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると言ったのに、参加者が"
-            "それをいらないと言った、または別の贈り物に置き換えようとした場合)、"
-            "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
-            "または食べないと約束するよう求めた場合)、"
-            "commit_honey_jar_gift、"
-            "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
-            "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
-            "決まった場合。別の贈り物に替える場合など)。該当しなければ空リスト。"
-        )
-    )
     settled_details: list[SettledDetail] = dspy.OutputField(
         desc=(
             "このターンで一つに決まったこと。贈るもの、色、飲み物、ケーキなど何でもよい。"
@@ -301,6 +304,79 @@ class InterpretTurn(dspy.Signature):
             "(例: きみはどう思う？)。"
         )
     )
+
+
+def _signature_field(signature: type, name: str) -> Any:
+    """A declared field's object, whether ``signature`` is a real
+    dspy.Signature (fields live in .input_fields/.output_fields, keyed by
+    name) or tests' fake dspy stub (dspy.Signature = object; fields are
+    just plain class attributes, with no such dict at all)."""
+    for fields in (
+        getattr(signature, "input_fields", {}),
+        getattr(signature, "output_fields", {}),
+    ):
+        if name in fields:
+            return fields[name]
+    return getattr(signature, name)
+
+
+# InterpretTurn, extended with eeyore_birthday's own closed vocabulary.
+#
+# This is NOT a plain subclass: DSPy signature inheritance always appends a
+# subclass's own fields after all inherited ones, but narrative_actions
+# originally sat right after situation_update (second of four output
+# fields), before settled_details/question_kind — generating it earlier,
+# conditioned on less of the rest of the output, than generating it last
+# would. Rebuilt with type() instead, reusing InterpretTurn's own field
+# objects (and its instructions verbatim — see the EeyoreAnalyzeInteraction
+# note on docstrings above) so only the position and the one new field
+# differ from InterpretTurn itself.
+_EEYORE_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
+    desc=(
+        "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
+        "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
+        "プーまたは参加者が提案したが、まだ決まっていない場合)、"
+        "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると言ったのに、参加者が"
+        "それをいらないと言った、または別の贈り物に置き換えようとした場合)、"
+        "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
+        "または食べないと約束するよう求めた場合)、"
+        "commit_honey_jar_gift、"
+        "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
+        "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
+        "決まった場合。別の贈り物に替える場合など)。該当しなければ空リスト。"
+    )
+)
+EeyoreInterpretTurn = type(
+    "EeyoreInterpretTurn",
+    (dspy.Signature,),
+    {
+        # getattr: under tests' fake dspy stub (dspy.Signature = object),
+        # there is no .instructions property at all; __doc__ (identical once
+        # DSPy's own dedenting is accounted for) is close enough there, since
+        # the stub never inspects a signature's rendered instructions anyway.
+        "__doc__": getattr(InterpretTurn, "instructions", InterpretTurn.__doc__),
+        "__annotations__": {
+            "current_situation": NarrativeSituation,
+            "history": str,
+            "user_action": str,
+            "world_event": str,
+            "bot_response": str,
+            "situation_update": SituationUpdate,
+            "narrative_actions": list[NarrativeAction],
+            "settled_details": list[SettledDetail],
+            "question_kind": QuestionKind,
+        },
+        "current_situation": _signature_field(InterpretTurn, "current_situation"),
+        "history": _signature_field(InterpretTurn, "history"),
+        "user_action": _signature_field(InterpretTurn, "user_action"),
+        "world_event": _signature_field(InterpretTurn, "world_event"),
+        "bot_response": _signature_field(InterpretTurn, "bot_response"),
+        "situation_update": _signature_field(InterpretTurn, "situation_update"),
+        "narrative_actions": _EEYORE_NARRATIVE_ACTIONS_FIELD,
+        "settled_details": _signature_field(InterpretTurn, "settled_details"),
+        "question_kind": _signature_field(InterpretTurn, "question_kind"),
+    },
+)
 
 
 class MetaPolicyEvaluator(dspy.Signature):
@@ -400,7 +476,7 @@ HESITATION_MARKERS = ("うーん", "迷", "まよう", "どうしよう", "わ�
 def response_may_be_replaced(
     user_action: str,
     history: str,
-    controller: HoneyGiftEventController | None,
+    controller: NarrativeEventController | None,
 ) -> bool:
     """Whether submit() may swap the generated line once it is complete.
 
@@ -409,9 +485,15 @@ def response_may_be_replaced(
     Judged from the input and state only; keep in step with
     enforce_response_invariants and the replacements in submit(). The fixed
     lines for honey requests are chosen before generation instead.
+
+    The guards below are eeyore_birthday-specific (honey jar / balloon
+    color); scenarios with a different controller state have nothing to
+    swap for, so no line is ever held back.
     """
-    gift_status = controller.state.gift_status if controller is not None else "undecided"
-    if gift_status == "undecided" and any(m in user_action for m in HESITATION_MARKERS):
+    state = controller.state if controller is not None else None
+    if not isinstance(state, HoneyGiftState):
+        return False
+    if state.gift_status == "undecided" and any(m in user_action for m in HESITATION_MARKERS):
         return True
     return user_action.strip() == "いいね" and "風船" not in history
 
@@ -420,9 +502,16 @@ def enforce_response_invariants(
     user_action: str,
     history: str,
     bot_response: str,
-    gift_status: str = "undecided",
+    gift_status: str | None = None,
 ) -> str:
-    """Apply small deterministic guards for requirements LM output may violate."""
+    """Apply small deterministic guards for requirements LM output may violate.
+
+    ``gift_status`` is eeyore_birthday-specific; pass ``None`` (the default)
+    for scenarios without a honey-gift state and both guards below are
+    skipped.
+    """
+    if gift_status is None:
+        return bot_response
     hesitation = any(marker in user_action for marker in HESITATION_MARKERS)
     asks_back = any(
         marker in bot_response for marker in ("？", "?", "どう思う", "何かいいアイデア", "何か思いつ")
@@ -522,12 +611,31 @@ def warn_if_response_repeated(bot_response: str, previous_bot_response: str | No
         )
 
 
+# Which Signature subclass (if any) a scenario's classify/interpret stages
+# use for their own closed vocabulary, keyed by scenario.key. A scenario
+# without an entry here uses the plain, vocabulary-free base Signatures.
+# Kept here, not on Scenario itself, since Scenario (scenarios.py) is loaded
+# by this module and so cannot import these classes back from it.
+SCENARIO_SIGNATURES: dict[str, tuple[type[dspy.Signature], type[dspy.Signature]]] = {
+    "eeyore_birthday": (EeyoreAnalyzeInteraction, EeyoreInterpretTurn),
+}
+
+
+def signatures_for(scenario: Scenario) -> tuple[type[dspy.Signature], type[dspy.Signature]]:
+    return SCENARIO_SIGNATURES.get(scenario.key, (AnalyzeInteraction, InterpretTurn))
+
+
 class PoohNarrativeAgent(dspy.Module):
     """Compiled multi-stage agent; the planner runs only for meta input."""
 
-    def __init__(self, predictor_factory: Any = dspy.ChainOfThought) -> None:
+    def __init__(
+        self,
+        predictor_factory: Any = dspy.ChainOfThought,
+        classify_signature: type[dspy.Signature] = AnalyzeInteraction,
+        interpret_signature: type[dspy.Signature] = InterpretTurn,
+    ) -> None:
         super().__init__()
-        self.classify = predictor_factory(AnalyzeInteraction)
+        self.classify = predictor_factory(classify_signature)
         self.plan = predictor_factory(PlanMishearing)
         # The line is written without a reasoning field in front of it, so it
         # reaches the robot sooner; the other stages keep their reasoning.
@@ -537,7 +645,7 @@ class PoohNarrativeAgent(dspy.Module):
         self.respond = respond_factory(GeneratePoohResponse)
         # Structured decisions are judged separately from writing the line, so
         # this stage's demos are all about decisions and it reads the final text.
-        self.interpret = predictor_factory(InterpretTurn)
+        self.interpret = predictor_factory(interpret_signature)
 
     def forward(
         self,
@@ -687,7 +795,9 @@ class PoohNarrativeAgent(dspy.Module):
         # so writing the line does not wait for it.
         situation_update = SituationUpdate.model_validate(interpretation.situation_update)
         updated_situation = apply_situation_update(current_situation, situation_update)
-        narrative_actions = [str(action) for action in interpretation.narrative_actions]
+        narrative_actions = [
+            str(action) for action in getattr(interpretation, "narrative_actions", []) or []
+        ]
         question_kind = str(interpretation.question_kind)
         settled_details = [
             SettledDetail.model_validate(detail) for detail in interpretation.settled_details
@@ -1008,8 +1118,13 @@ def compile_program(
         max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
         max_labeled_demos=MAX_LABELED_DEMOS,
     )
-    student = PoohNarrativeAgent()
-    teacher = PoohNarrativeAgent()
+    classify_signature, interpret_signature = signatures_for(scenario)
+    student = PoohNarrativeAgent(
+        classify_signature=classify_signature, interpret_signature=interpret_signature,
+    )
+    teacher = PoohNarrativeAgent(
+        classify_signature=classify_signature, interpret_signature=interpret_signature,
+    )
     set_agent_demos(teacher, scenario)
     with dspy.context(lm=train_lm):
         program = optimizer.compile(
@@ -1032,7 +1147,10 @@ def load_compiled_program(train_model: str, judge_model: str, scenario: Scenario
             "`python scripts/pooh_narrative_dspy.py --mode compile"
             f" --scenario {scenario.key}` を先に実行してください。"
         )
-    program = PoohNarrativeAgent()
+    classify_signature, interpret_signature = signatures_for(scenario)
+    program = PoohNarrativeAgent(
+        classify_signature=classify_signature, interpret_signature=interpret_signature,
+    )
     program.load(str(target))
     return program
 
@@ -1280,23 +1398,36 @@ def read_console_input(prompt: str, timeout: float | None) -> str | None:
 def create_event_controller(
     scenario: Scenario,
     clock: Callable[[], float] = time.monotonic,
-) -> HoneyGiftEventController | None:
-    if (
-        scenario.gift_decision_delay_seconds is None
-        or scenario.honey_tasting_delay_seconds is None
-        or scenario.honey_eating_delay_seconds is None
-    ):
+) -> NarrativeEventController | None:
+    if scenario.event_controller_factory is None:
         return None
-    return HoneyGiftEventController(
-        scenario.gift_decision_delay_seconds,
-        scenario.honey_tasting_delay_seconds,
-        scenario.honey_eating_delay_seconds,
-        clock=clock,
-        quiet_seconds=scenario.event_quiet_seconds,
-        idle_close_seconds=scenario.idle_close_after_wrap_up_seconds,
-        speech_seconds=estimate_speech_seconds,
-        awaiting_quiet_seconds=scenario.awaiting_reply_quiet_seconds,
-    )
+    return scenario.event_controller_factory(clock)
+
+
+# The conventional event id a scenario's own required_events uses for "close
+# the session after enough silence once the story is wrapped up"; stripped by
+# --no-idle-close. A scenario without such an event is unaffected.
+IDLE_CLOSE_EVENT_ID = "idle_close_after_wrap_up"
+
+
+def without_idle_close(
+    factory: Callable[[Callable[[], float]], NarrativeEventController] | None,
+) -> Callable[[Callable[[], float]], NarrativeEventController] | None:
+    """Wrap a scenario's event-controller factory (``--no-idle-close``) so
+    the story never auto-closes on silence after its wrap-up; a no-op for a
+    scenario with no event controller, or none named ``IDLE_CLOSE_EVENT_ID``."""
+    if factory is None:
+        return None
+
+    def wrapped(clock: Callable[[], float]) -> NarrativeEventController:
+        controller = factory(clock)
+        controller.required_events = tuple(
+            event for event in controller.required_events
+            if event.event_id != IDLE_CLOSE_EVENT_ID
+        )
+        return controller
+
+    return wrapped
 
 
 def _event_result(
@@ -1364,7 +1495,7 @@ class NarrativeSession:
         program_id: str,
         scenario: Scenario,
         *,
-        event_controller: HoneyGiftEventController | None = None,
+        event_controller: NarrativeEventController | None = None,
         ros_publisher: NarrativeRelayPublisher | None = None,
         session_id: str | None = None,
         output_listeners: Sequence[OutputListener] = (),
@@ -1612,20 +1743,25 @@ class NarrativeSession:
         return output
 
     def _fixed_line_for(self, honey_requests: list[str]) -> str | None:
-        """The fixed line for the participant's honey requests, if any applies now."""
+        """The fixed line for the participant's honey requests, if any applies now.
+
+        ``honey_requests`` only ever comes from EeyoreAnalyzeInteraction, so
+        this is unreachable for other scenarios; the isinstance check below
+        just keeps that assumption explicit instead of relying on it silently.
+        """
         assert self.controller is not None
+        state = self.controller.state
+        if not isinstance(state, HoneyGiftState):
+            return None
         line = None
-        if (
-            "decline_honey_jar_gift" in honey_requests
-            and self.controller.state.honey_jar_is_poohs_gift()
-        ):
+        if "decline_honey_jar_gift" in honey_requests and state.honey_jar_is_poohs_gift():
             # Pooh's own gift stays; a fixed line adds it beside the
             # participant's idea instead of a generated line dropping it.
             line = HONEY_GIFT_KEPT_RESPONSE
         if "ask_pooh_not_to_eat_honey" in honey_requests:
             # The honey is always eaten, so a generated line must not promise
             # otherwise; Pooh sidesteps with a fixed line instead.
-            line = self.controller.state.sidestep_promise_request() or line
+            line = state.sidestep_promise_request() or line
         return line
 
     def submit(self, user_input: str) -> SessionOutput | None:
@@ -1682,7 +1818,8 @@ class NarrativeSession:
             gift_status=(
                 self.controller.state.gift_status
                 if self.controller is not None
-                else "undecided"
+                and isinstance(self.controller.state, HoneyGiftState)
+                else None
             ),
         )
         if str(result.interaction_mode) == "exit":
@@ -1798,7 +1935,7 @@ def run_chat(
     scenario: Scenario,
     *,
     input_fn: Callable[[str], str | None] | None = None,
-    event_controller: HoneyGiftEventController | None = None,
+    event_controller: NarrativeEventController | None = None,
     ros_publisher: NarrativeRelayPublisher | None = None,
     output_listeners: Sequence[OutputListener] = (),
     stop_fn: Callable[[], str | None] | None = None,
@@ -1933,9 +2070,15 @@ def run_comparison(compiled: Any, scenario: Scenario) -> None:
     if not action:
         print("空入力のため比較を終了します。")
         return
-    predict = PoohNarrativeAgent(dspy.Predict)
+    classify_signature, interpret_signature = signatures_for(scenario)
+    predict = PoohNarrativeAgent(
+        dspy.Predict, classify_signature=classify_signature, interpret_signature=interpret_signature,
+    )
     set_agent_demos(predict, scenario)
-    chain = PoohNarrativeAgent(dspy.ChainOfThought)
+    chain = PoohNarrativeAgent(
+        dspy.ChainOfThought,
+        classify_signature=classify_signature, interpret_signature=interpret_signature,
+    )
     set_agent_demos(chain, scenario)
     agents = {"Predict": predict, "ChainOfThought": chain, "Compiled": compiled}
     for label, agent in agents.items():
@@ -2042,7 +2185,10 @@ def main() -> int:
         scenarios = [get_scenario(key) for key in [args.scenario, *args.extra_scenario]]
         if getattr(args, "no_idle_close", False):
             # Timings are not part of the compiled program, so no recompiling.
-            scenarios = [replace(s, idle_close_after_wrap_up_seconds=None) for s in scenarios]
+            scenarios = [
+                replace(s, event_controller_factory=without_idle_close(s.event_controller_factory))
+                for s in scenarios
+            ]
         scenario = scenarios[0]
         train_lm, judge_lm, train_model, judge_model = configure_models()
         if args.mode == "compile":

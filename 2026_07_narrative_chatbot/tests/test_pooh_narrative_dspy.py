@@ -77,8 +77,15 @@ from narrative_state import (
     relevant_preferences,
 )
 from narrative_events import (
-    BALLOON_COLOR_UNRESOLVED,
+    FIXED_UTTERANCES,
+    SettledDetail,
+    RequiredNarrativeEvent,
+    WorldEvent,
+    fixed_utterance_id,
     fixed_utterance_motion,
+)
+from eeyore_birthday_events import (
+    BALLOON_COLOR_UNRESOLVED,
     EMPTY_JAR_UNRESOLVED,
     GIFT_DECISION_UNRESOLVED,
     GIFT_UNRESOLVED,
@@ -92,13 +99,8 @@ from narrative_events import (
     RIBBON_COLOR_UNRESOLVED,
     STORY_WRAP_UP_EVENT,
     STORY_WRAP_UP_RESPONSE,
-    FIXED_UTTERANCES,
     POOH_GIFT_TOPIC,
     HoneyGiftEventController,
-    SettledDetail,
-    RequiredNarrativeEvent,
-    WorldEvent,
-    fixed_utterance_id,
 )
 
 
@@ -1089,9 +1091,20 @@ class RegressionTests(unittest.TestCase):
             user_action="うーん，どうしよう",
             history="",
             bot_response="どうしようかな。きみはどう思う？",
+            gift_status="undecided",
         )
         self.assertIn("ハチミツの入った壺", response)
         self.assertNotIn("どう思う", response)
+
+    def test_response_invariants_without_gift_status_are_a_no_op(self):
+        # gift_status=None (the default) means "not the eeyore_birthday
+        # scenario"; both honey- and balloon-specific guards must be skipped.
+        response = pooh.enforce_response_invariants(
+            user_action="うーん，どうしよう",
+            history="",
+            bot_response="どうしようかな。きみはどう思う？",
+        )
+        self.assertEqual(response, "どうしようかな。きみはどう思う？")
 
     def test_response_invariants_still_apply_while_gift_is_undecided(self):
         response = pooh.enforce_response_invariants(
@@ -1121,6 +1134,7 @@ class RegressionTests(unittest.TestCase):
             user_action="いいね",
             history="プーの応答: ハチミツの入った壺を贈ろう。",
             bot_response="風船も考えてくれたし、素敵なプレゼントだね。",
+            gift_status="undecided",
         )
         self.assertNotIn("風船", response)
 
@@ -1494,10 +1508,9 @@ class RegressionTests(unittest.TestCase):
         scenario = pooh.get_scenario("eeyore_birthday")
         changed_delay = replace(
             scenario,
-            gift_decision_delay_seconds=scenario.gift_decision_delay_seconds + 10,
-            honey_tasting_delay_seconds=scenario.honey_tasting_delay_seconds + 5,
-            honey_eating_delay_seconds=scenario.honey_eating_delay_seconds + 5,
-            event_quiet_seconds=scenario.event_quiet_seconds + 5,
+            event_controller_factory=lambda clock: HoneyGiftEventController(
+                999.0, 999.0, 999.0, clock=clock, quiet_seconds=999.0,
+            ),
         )
         self.assertEqual(
             pooh.cache_hash("model", "judge", scenario),
@@ -2355,7 +2368,9 @@ class EarlyResponseTests(unittest.TestCase):
         # Honey requests get their fixed line before generation instead.
         self.assertFalse(pooh.response_may_be_replaced("食べないでね", "", controller))
         self.assertTrue(pooh.response_may_be_replaced("うーん、どうしよう", "", controller))
-        self.assertTrue(pooh.response_may_be_replaced("いいね", "", None))
+        # No controller (e.g. tea_party) means no honey/balloon guard can ever
+        # fire in enforce_response_invariants, so nothing holds the line back.
+        self.assertFalse(pooh.response_may_be_replaced("いいね", "", None))
         self.assertFalse(pooh.response_may_be_replaced("いいね", "風船", None))
         self.assertFalse(pooh.response_may_be_replaced("ケーキにしよう", "", None))
 
