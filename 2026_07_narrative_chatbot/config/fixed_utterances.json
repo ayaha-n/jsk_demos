@@ -129,5 +129,82 @@
 	  "arm": "left_hand_chin",
 	  "neck": "tilt"
       }
+  },
+  "footprints.opening": {
+    "text": "やあ，ぼくね，いま，何かを追ってるんだ。",
+    "wav": "footprints.opening.wav",
+    "motion": {
+      "eyebrow": "surprised",
+      "arm": "left_hand_chin",
+      "neck": "tilt"
+    }
+  },
+  "footprints.ending": {
+    "text": "またね。足跡の正体、一緒に考えてくれてありがとう。",
+    "wav": "footprints.ending.wav",
+    "motion": {
+      "eyebrow": "happy",
+      "arm": "right_hand_bye"
+    }
+  },
+  "footprints.naming": {
+    "text": "あしあとがぐるぐる渦を巻いてるみたいだね。なんだか、うずうずして落ち着きのない生き物なのかもなあ。よし、「ウズウズ」って呼ぶことにしよう。",
+    "wav": "footprints.naming.wav",
+    "motion": {
+      "eyebrow": "happy",
+      "arm": "left_hand_chin",
+      "neck": "nod"
+    },
+    "arm_next": ["onegai"]
+  },
+  "footprints.start_following": {
+    "text": "よし、ウズウズを追いかけてみよう。きみも一緒に来てくれない？",
+    "wav": "footprints.start_following.wav",
+    "motion": {
+      "eyebrow": "happy",
+      "arm": "left_hand_point",
+      "neck": "nod"
+    }
+  },
+  "footprints.second_animal": {
+    "text": "おかしいな。今、２匹動物がいるみたいだ。これは―それが何であれ―今２匹が一緒になって進んでる。きみ，いっしょにきてくれない？彼らが敵意のある動物だといけないので。",
+    "wav": "footprints.second_animal.wav",
+    "motion": {
+      "eyebrow": "surprised",
+      "arm": "left_hand_chin",
+      "neck": "tilt"
+    }
+  },
+  "footprints.fourth_animal": {
+    "text": "まいったなあ。足跡が４つに増えてるよ。さっきの２匹に、また２匹分くらい加わったみたいだ。",
+    "wav": "footprints.fourth_animal.wav",
+    "motion": {
+      "eyebrow": "surprised",
+      "arm": "onegai"
+    }
+  },
+  "footprints.reveal_prompt": {
+    "text": "ねえ，きみ，なにか気づかない？",
+    "wav": "footprints.reveal_prompt.wav",
+    "motion": {
+      "eyebrow": "surprised",
+      "neck": "tilt"
+    }
+  },
+  "footprints.reveal_hint": {
+    "text": "あれ，このあしあとはぼくのあし，こっちのあしあとはきみのあしとおなじおおきさだね．",
+    "wav": "footprints.reveal_hint.wav",
+    "motion": {
+      "arm": "left_hand_point",
+      "neck": "tilt"
+    }
+  },
+  "footprints.reveal_direct": {
+    "text": "これ，もしかして，ぼくたちのあしあとなんじゃないかっておもうんだけど．",
+    "wav": "footprints.reveal_direct.wav",
+    "motion": {
+      "eyebrow": "surprised",
+      "arm": "left_hand_chin"
+    }
   }
 }

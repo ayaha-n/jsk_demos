@@ -33,6 +33,23 @@ EEYORE_AWAITING_REPLY_QUIET_SECONDS = 30.0
 # 参加者が話し続けている間は終えない。
 EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS = 30.0
 
+# footprintsのテンポはeeyore_birthdayと揃えている。
+# プーが自分で正体に名前をつける（場面2）までの秒数。参加者またはプー自身が
+# 自発的に先に名付けた場合は発火しない。
+FOOTPRINTS_NAMING_DELAY_SECONDS = 20.0
+# 名付けが終わってから、足跡を追いかけ始める（場面4）までの秒数。
+FOOTPRINTS_START_FOLLOWING_DELAY_SECONDS = 30.0
+# 追いかけ始めてから、足跡が２匹分に見えることに気づくまでの秒数。
+FOOTPRINTS_SECOND_ANIMAL_DELAY_SECONDS = 30.0
+# ２匹に気づいてから、４匹に増えたことに気づくまでの秒数。
+FOOTPRINTS_FOURTH_ANIMAL_DELAY_SECONDS = 30.0
+# ４匹に気づいたあと、気づきの誘導（開いた問いかけ→ヒント→直接的な推測）を
+# 畳みかける各段階の秒数。
+FOOTPRINTS_REVEAL_STEP_DELAY_SECONDS = 10.0
+FOOTPRINTS_EVENT_QUIET_SECONDS = 12.0
+FOOTPRINTS_AWAITING_REPLY_QUIET_SECONDS = 30.0
+FOOTPRINTS_IDLE_CLOSE_AFTER_REVEAL_SECONDS = 30.0
+
 
 @dataclass(frozen=True)
 class SceneDefinition:
@@ -173,9 +190,69 @@ def _eeyore_birthday() -> Scenario:
     )
 
 
+def _footprints() -> Scenario:
+    from footprints_events import FootprintsEventController
+    from narrative_events import estimate_speech_seconds
+    from pooh_examples import MISHEARING_EXAMPLES
+    from pooh_footprints_examples import (
+        FOOTPRINTS_INTERPRET_EXAMPLES,
+        FOOTPRINTS_MODE_EXAMPLES,
+        FOOTPRINTS_OPENING_LINE,
+        FOOTPRINTS_POOH_PREFERENCES,
+        FOOTPRINTS_RESPONSE_EXAMPLES,
+        FOOTPRINTS_SITUATION,
+        FOOTPRINTS_TRAINSET,
+    )
+
+    return Scenario(
+        key="footprints",
+        label="あしあとの正体",
+        scene_intro=(
+            "雪が降ったあとの100エーカーの森。小さな茂みのまわりに、"
+            "見慣れない足跡が残っています。プーがそれをのぞきこんでいます。"
+        ),
+        initial_situation=FOOTPRINTS_SITUATION,
+        opening_line=FOOTPRINTS_OPENING_LINE,
+        ending_line=fixed_utterance("footprints.ending"),
+        trainset=FOOTPRINTS_TRAINSET,
+        mode_examples=FOOTPRINTS_MODE_EXAMPLES,
+        mishearing_examples=MISHEARING_EXAMPLES,
+        response_examples=FOOTPRINTS_RESPONSE_EXAMPLES,
+        interpret_examples=FOOTPRINTS_INTERPRET_EXAMPLES,
+        scenes=(
+            SceneDefinition("1", "場面1：足跡を発見する"),
+            SceneDefinition("2", "場面2：正体に名前をつける（参加者の案、またはプー自身の案）"),
+            SceneDefinition("3", "場面3：ウズウズの見た目を参加者と相談する"),
+            SceneDefinition("4", "場面4：足跡を追いかけ始める"),
+            SceneDefinition("5", "場面5：足跡が２匹分になっていることに気づく"),
+            SceneDefinition("6", "場面6：足跡が４匹分に増えたことに気づく"),
+            SceneDefinition("7a", "場面7a：プーが気づきを開いた形で促す"),
+            SceneDefinition("7b", "場面7b：プーが具体的なヒントを出す"),
+            SceneDefinition("7c", "場面7c：プーがより直接的な推測を示す"),
+            SceneDefinition("8", "場面8：自分たちの足跡だったと判明し、会話を続ける"),
+        ),
+        event_controller_factory=lambda clock: FootprintsEventController(
+            FOOTPRINTS_NAMING_DELAY_SECONDS,
+            FOOTPRINTS_START_FOLLOWING_DELAY_SECONDS,
+            FOOTPRINTS_SECOND_ANIMAL_DELAY_SECONDS,
+            FOOTPRINTS_FOURTH_ANIMAL_DELAY_SECONDS,
+            FOOTPRINTS_REVEAL_STEP_DELAY_SECONDS,
+            clock=clock,
+            quiet_seconds=FOOTPRINTS_EVENT_QUIET_SECONDS,
+            idle_close_seconds=FOOTPRINTS_IDLE_CLOSE_AFTER_REVEAL_SECONDS,
+            speech_seconds=estimate_speech_seconds,
+            awaiting_quiet_seconds=FOOTPRINTS_AWAITING_REPLY_QUIET_SECONDS,
+        ),
+        pooh_preferences=FOOTPRINTS_POOH_PREFERENCES,
+        # 「プー，さっき何かを見つけたって言っていたよね．どうしたの？」
+        start_cues=(("見つけた", "どうした"),),
+    )
+
+
 SCENARIOS: dict[str, Scenario] = {
     "tea_party": _tea_party(),
     "eeyore_birthday": _eeyore_birthday(),
+    "footprints": _footprints(),
 }
 
 DEFAULT_SCENARIO = "tea_party"

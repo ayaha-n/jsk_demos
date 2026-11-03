@@ -331,6 +331,31 @@ current_situation の小道具（テーブル、カップ、皿、蜂蜜壺、�
 「ハチミツはやめて、ケーキにしようよ」は `decline_honey_jar_gift` だけになった（会話の流れ
 なしで単独に分類させたときは、2つとも付くことがあった）。
 
+## シナリオ固有のInterpretTurn/AnalyzeInteractionサブクラスが共通ファイルに置かれている
+
+- 記録日: 2026-11-03
+- 状態: 既知の制約として承知のうえ、現時点では踏襲。リファクタリングは保留。
+- 確認対象: `scripts/pooh_narrative_dspy.py` の `EeyoreAnalyzeInteraction`・`EeyoreInterpretTurn`・
+  `FootprintsInterpretTurn`（いずれも定義元コメントに理由あり）。
+
+`AnalyzeInteraction`/`InterpretTurn`（共通の基底Signature）・`QuestionKind`・`_signature_field`は
+`pooh_narrative_dspy.py`に定義されている。一方この同じモジュールが`scenarios.py`経由で
+`eeyore_birthday_events.py`・`footprints_events.py`を読み込むため、これらシナリオ固有ファイルの
+側から基底Signatureを逆輸入してサブクラス化すると循環importになる。そのため
+`EeyoreAnalyzeInteraction`・`EeyoreInterpretTurn`・`FootprintsInterpretTurn`は、本来シナリオ固有の
+語彙（`honey_requests`・`narrative_actions`の説明文など）であるにもかかわらず、回避策として
+共通ファイル`pooh_narrative_dspy.py`の中に書かれている。シナリオが増えるたびにこの共通ファイルに
+シナリオ固有のブロックが積み重なる。
+
+対策の候補:
+
+- `AnalyzeInteraction`・`InterpretTurn`・`QuestionKind`・`_signature_field`など、シナリオに依存
+  しない基底部分だけを独立したモジュール（例: `narrative_signatures.py`）に切り出す。
+  `eeyore_birthday_events.py`・`footprints_events.py`はそこから基底Signatureを読み込んでそれぞれの
+  サブクラスを自分のファイル内に定義できるようになり、`pooh_narrative_dspy.py`側は
+  `SCENARIO_SIGNATURES`を組み立てるために各シナリオのファイルからサブクラスを読み込むだけになる
+  （循環importは起きない）。eeyore側の既存コードも合わせて移動する、やや大きめの変更になる。
+
 ## 応答の差し替えにキーワードの決め打ちが残っている
 
 - 記録日: 2026-10-19

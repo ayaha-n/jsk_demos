@@ -61,6 +61,7 @@ from eeyore_birthday_events import (
     NarrativeAction,
     HONEY_GIFT_KEPT_RESPONSE,
 )
+from footprints_events import FootprintsAction
 from narrative_events import (
     NarrativeEventController,
     SettledDetail,
@@ -379,6 +380,48 @@ EeyoreInterpretTurn = type(
 )
 
 
+# InterpretTurn, extended with footprints' own closed vocabulary — built the
+# same way as EeyoreInterpretTurn above, for the same reason (field order).
+_FOOTPRINTS_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
+    desc=(
+        "Pythonが検証する機械可読な報告。必要なものだけを返す。利用可能: "
+        "started_following(プーと参加者が足跡を追いかけ始めた場合)、"
+        "noticed_second_animal(足跡が２匹分に見えることに気づいた場合)、"
+        "noticed_fourth_animal(足跡がさらに増えて４匹分になったことに気づいた場合。"
+        "２匹分の段階を経ていなくてもよい)、"
+        "realized_own_footprints(足跡が自分たちのものだったとわかった場合)。"
+        "該当しなければ空リスト。"
+    )
+)
+FootprintsInterpretTurn = type(
+    "FootprintsInterpretTurn",
+    (dspy.Signature,),
+    {
+        "__doc__": getattr(InterpretTurn, "instructions", InterpretTurn.__doc__),
+        "__annotations__": {
+            "current_situation": NarrativeSituation,
+            "history": str,
+            "user_action": str,
+            "world_event": str,
+            "bot_response": str,
+            "situation_update": SituationUpdate,
+            "narrative_actions": list[FootprintsAction],
+            "settled_details": list[SettledDetail],
+            "question_kind": QuestionKind,
+        },
+        "current_situation": _signature_field(InterpretTurn, "current_situation"),
+        "history": _signature_field(InterpretTurn, "history"),
+        "user_action": _signature_field(InterpretTurn, "user_action"),
+        "world_event": _signature_field(InterpretTurn, "world_event"),
+        "bot_response": _signature_field(InterpretTurn, "bot_response"),
+        "situation_update": _signature_field(InterpretTurn, "situation_update"),
+        "narrative_actions": _FOOTPRINTS_NARRATIVE_ACTIONS_FIELD,
+        "settled_details": _signature_field(InterpretTurn, "settled_details"),
+        "question_kind": _signature_field(InterpretTurn, "question_kind"),
+    },
+)
+
+
 class MetaPolicyEvaluator(dspy.Signature):
     """メタ入力への候補応答が、物語世界へ接続する方針を守るか評価する。
 
@@ -618,6 +661,7 @@ def warn_if_response_repeated(bot_response: str, previous_bot_response: str | No
 # by this module and so cannot import these classes back from it.
 SCENARIO_SIGNATURES: dict[str, tuple[type[dspy.Signature], type[dspy.Signature]]] = {
     "eeyore_birthday": (EeyoreAnalyzeInteraction, EeyoreInterpretTurn),
+    "footprints": (AnalyzeInteraction, FootprintsInterpretTurn),
 }
 
 
