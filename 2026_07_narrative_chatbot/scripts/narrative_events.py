@@ -200,12 +200,20 @@ class NarrativeEventController:
     def _arm_required_events(self) -> None:
         start = max(self.clock(), self._speech_end)
         for event in self.required_events:
-            if (
+            active = (
                 event.event_id not in self.state.completed_event_ids
                 and event.prerequisite(self.state)
-                and event.event_id not in self._deadlines
-            ):
+            )
+            if active and event.event_id not in self._deadlines:
                 self._deadlines[event.event_id] = start + event.delay_seconds
+            elif not active:
+                # Another event's firing (or settled state) can invalidate this
+                # one's prerequisite before it ever fires itself (e.g. the
+                # mystery resolving early stops the whole reveal cascade); an
+                # armed deadline left behind would make seconds_until_due()
+                # report "ready" forever while pop_due_event() keeps refusing
+                # it (its own prerequisite check), busy-looping the caller.
+                self._deadlines.pop(event.event_id, None)
 
     def observe_activity(self, speech_seconds: float = 0.0, awaiting_reply: bool = False) -> None:
         """Record participant input, or Pooh's line with its playback length.
