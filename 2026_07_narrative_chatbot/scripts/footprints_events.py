@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 import dspy
 
@@ -35,6 +35,7 @@ from narrative_events import (
     fixed_utterance,
 )
 from narrative_signatures import (
+    AnalyzeInteraction,
     GeneratePoohResponse,
     InterpretTurn,
     QuestionKind,
@@ -48,13 +49,48 @@ FootprintsAction = Literal[
     "noticed_second_animal",
     "noticed_fourth_animal",
     "realized_own_footprints",
+    "gave_hint_directly",
 ]
 KNOWN_FOOTPRINTS_ACTIONS = {
     "started_following",
     "noticed_second_animal",
     "noticed_fourth_animal",
     "realized_own_footprints",
+    "gave_hint_directly",
 }
+
+# A participant who explicitly gives up after reveal_prompt has already
+# asked "何か気づかない？" gets the hint right away instead of another vague
+# deflection (see FootprintsEventController.fixed_line_for). Judging "gave up"
+# from the participant's own words is exactly what an LM is for — a fixed
+# keyword list (e.g. matching "わからない") is both brittle (misses "お手上げ",
+# "思いつかない", ...) and too eager (would also fire mid-sentence on
+# unrelated uses) — so this is read from AnalyzeInteraction's classify stage,
+# the same way eeyore_birthday_events.EeyoreAnalyzeInteraction's
+# honey_requests field feeds HoneyGiftEventController.fixed_line_for.
+class FootprintsAnalyzeInteraction(AnalyzeInteraction):
+    gave_up_on_noticing: bool = dspy.OutputField(
+        desc=(
+            "プーが「なにか気づかない？」のように気づきを促した直後の参加者の発話が"
+            "対象。参加者が自分の言葉で、これは自分たちの足跡なのではないかと"
+            "明確に言い当てた場合だけfalse。"
+            "「わからない」「思いつかない」「お手上げ」のようにはっきり分からないと"
+            "表明した場合はもちろん、「なんのこと？」「え、なんだろう」のような、"
+            "まだ気づけていない曖昧な聞き返し・反応も含めてtrue"
+            "（もう一度ぼんやり促しても堂々巡りになるだけなので、ヒントを出す）。"
+            "そのような問いかけが直前になければfalse。"
+        )
+    )
+
+# settled_details topic marking that Pooh has named the creature (see
+# pooh_footprints_examples.py's 場面2); arms the start_following clock.
+NAMING_TOPIC = "正体の呼び名"
+# The scenario's main unresolved label; settling it (by the participant's own
+# realization, or by _fire_reveal_direct) stops any further escalation.
+IDENTITY_UNRESOLVED = "この足跡は何の生き物のものか"
+# Raised once naming is decided (organically or by _fire_name_creature);
+# resolved during 場面3's appearance discussion.
+APPEARANCE_UNRESOLVED = "ウズウズの見た目はどんな様子か"
 
 
 # InterpretTurn, extended with footprints' own closed vocabulary — built the
@@ -114,10 +150,21 @@ FootprintsInterpretTurn = type(
 # EeyoreAnalyzeInteraction above, just appending text instead of adding a
 # field this time.
 _FOOTPRINTS_RESPONSE_EXTRA_INSTRUCTIONS = (
-    "あしあとの正体について、プー自身が「これは自分たちの足あとかもしれない」のように"
-    "正体そのものを示唆することは、reveal_directの場面（参加者がヒントを重ねても"
-    "気づかない場合の最後の推測）以外ではしない。未解決の項目に話を戻すときも、"
-    "正体の推測ではなく、追いかける・観察するなど周辺の行動や感想にとどめる。"
+    f"未解決の項目のうち「{IDENTITY_UNRESOLVED}」だけは特別で、他の項目（見た目など）とは"
+    "違う扱いをする。プー自身が「これは自分たちの足あとかもしれない」のように正体そのものを"
+    "示唆することは、reveal_directの場面（参加者がヒントを重ねても気づかない場合の最後の"
+    "推測）以外では、参加者が迷ったり「わからない」と答えたりした場合も含めて一切しない。"
+    "この項目に話を戻すときも、正体の推測ではなく、追いかける・観察するなど周辺の行動や"
+    "感想にとどめる。"
+    "「なにか気づかない？」と尋ねた後に参加者が「なんのこと？」「わからない」のように"
+    "聞き返した・答えなかった場合も、具体的な手がかり（足あとの大きさがぼくたちと同じ、"
+    "など）や推測を自分から明かさない。もう一度ぼんやりと促す、または「気のせいかもしれ"
+    "ない」のようにはぐらかすだけに留める。具体的な手がかりと推測はreveal_hint・"
+    "reveal_directの固定セリフだけが出す。"
+    "ただし、プー自身が「なにか気づかない？」と問いかけた場面であり、プーの方から話を"
+    "切り出している以上、「ぼくもわからない」「ぼくも気づいていない」のように自分も"
+    "何も気づいていないかのように答えるのは不自然であり、しない。プーは何か気になる"
+    "ことがある、という態度は保ったまま、具体的な中身だけをぼかす。"
 )
 FootprintsGenerateResponse = type(
     "FootprintsGenerateResponse",
@@ -152,16 +199,6 @@ FootprintsGenerateResponse = type(
         "bot_response": _signature_field(GeneratePoohResponse, "bot_response"),
     },
 )
-
-# settled_details topic marking that Pooh has named the creature (see
-# pooh_footprints_examples.py's 場面2); arms the start_following clock.
-NAMING_TOPIC = "正体の呼び名"
-# The scenario's main unresolved label; settling it (by the participant's own
-# realization, or by _fire_reveal_direct) stops any further escalation.
-IDENTITY_UNRESOLVED = "この足跡は何の生き物のものか"
-# Raised once naming is decided (organically or by _fire_name_creature);
-# resolved during 場面3's appearance discussion.
-APPEARANCE_UNRESOLVED = "ウズウズの見た目はどんな様子か"
 
 ASK_NAME_RESPONSE = fixed_utterance("footprints.ask_name")
 ASK_APPEARANCE_RESPONSE = fixed_utterance("footprints.ask_appearance")
@@ -396,6 +433,8 @@ class FootprintsEventController(NarrativeEventController):
                 self.state.completed_event_ids.add("fourth_animal")
             elif action == "realized_own_footprints":
                 self.state.resolved = True
+            elif action == "gave_hint_directly":
+                self.state.completed_event_ids.add("reveal_hint")
         self._arm_required_events()
 
     def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
@@ -571,6 +610,37 @@ class FootprintsEventController(NarrativeEventController):
             ),
             fixed_response=True,
         )
+
+    def fixed_line_for(self, classification: Any) -> str | None:
+        """The fixed hint line, once the classify stage judges the participant
+        has given up on noticing (see FootprintsAnalyzeInteraction.
+        gave_up_on_noticing).
+
+        Once reveal_prompt has asked "何か気づかない？", repeating a vague
+        deflection every time the participant says they do not know reads as
+        Pooh stonewalling rather than noticing something himself (confirmed
+        live). The fixed reveal_hint line is the right amount of help here,
+        reused verbatim instead of generated, so it never duplicates what the
+        timed reveal_hint event would otherwise still say later (see
+        extra_actions_for, which marks reveal_hint done once this fires).
+        """
+        if not getattr(classification, "gave_up_on_noticing", False):
+            return None
+        if (
+            "reveal_prompt" in self.state.completed_event_ids
+            and "reveal_hint" not in self.state.completed_event_ids
+            and not self.state.resolved
+        ):
+            return REVEAL_HINT_RESPONSE
+        return None
+
+    def extra_actions_for(self, bot_response: str) -> list[str]:
+        """narrative_actions to record as if the model had reported them,
+        when enforce_response_invariants replaced its line with one that
+        implies an action the model's own (discarded) line might not have."""
+        if bot_response == REVEAL_HINT_RESPONSE:
+            return ["gave_hint_directly"]
+        return []
 
     @staticmethod
     def _fire_idle_close(state: FootprintsState) -> WorldEvent:

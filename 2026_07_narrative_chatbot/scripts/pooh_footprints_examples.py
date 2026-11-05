@@ -25,6 +25,7 @@ from footprints_events import (
     IDENTITY_UNRESOLVED,
     NAMING_EVENT,
     NAMING_TOPIC,
+    REVEAL_HINT_RESPONSE,
     SECOND_ANIMAL_EVENT,
     START_FOLLOWING_EVENT,
 )
@@ -256,11 +257,19 @@ FOOTPRINTS_TRAINSET = [
         bot_response="ほんとうだ！足あとが４つに増えてる。２匹いるのかもね。はぐれないようにしよう。",
         question_kind="none",
     ),
-    # 気づきの促し（reveal_prompt）への曖昧な返答：まだ解決したと判定しない。
-    # 「え、なんだろう」のような非committalな返答でrealized_own_footprintsを
-    # 誤って報告すると、reveal_hint/reveal_directの段階的な気づきが丸ごと
-    # 飛んでしまう（実機で確認済みの不具合）。
-    example(
+    # 気づきの促し（reveal_prompt）への、正体を言い当ててはいない返答：
+    # 「わからない」のようなはっきりした表明も、「え、なんだろう」「なんのこと？」
+    # のような曖昧な聞き返しも同列に扱う。どちらも参加者がまだ気づいていない
+    # ことに変わりはなく、もう一度あいまいに促すだけでは次のターンも同じやり取りが
+    # 続くだけなので、reveal_hintの固定ヒントをそのまま出す（実機フィードバックで
+    # 確認：footprints_events.FootprintsAnalyzeInteraction.gave_up_on_noticing /
+    # FootprintsEventController.fixed_line_for が判定・差し替えを行う。ここでは
+    # その判定のための分類ステージの教師データとして、この返答が
+    # gave_up_on_noticing=Trueになることを示す）。
+    # 一方、realized_own_footprintsを誤って報告すると、reveal_direct（最後の
+    # 直接的な推測）まで丸ごと飛んでしまうので、narrative_actionsはここでは
+    # 空のまま（正体を言い当ててはいないため）。
+    *example_variants(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
             update={
                 "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
@@ -273,7 +282,7 @@ FOOTPRINTS_TRAINSET = [
             },
             deep=True,
         ),
-        user_action="え、なんだろう",
+        user_action=["え、なんだろう", "なんのこと？", "わからないよ", "全然わからないなあ"],
         history=(
             "Turn 7\n世界イベント: プーが参加者に、何か気づかないかと問いかけた。"
             "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 7a\n"
@@ -282,7 +291,8 @@ FOOTPRINTS_TRAINSET = [
         interaction_mode="narrative",
         current_scene="7a",
         narrative_actions=[],
-        bot_response="こっちの足あとはきみの足と同じくらいの大きさで，こっちの足あとはぼくのと同じくらいの大きさなんだ。",
+        gave_up_on_noticing=True,
+        bot_response=REVEAL_HINT_RESPONSE,
     ),
     # --- 場面7-best：参加者が時限イベントより先に自分で気づく。
     # narrative_actionsでrealized_own_footprintsを報告し、以降の時限イベント
@@ -359,7 +369,12 @@ FOOTPRINTS_POOH_PREFERENCES = {
 }
 
 
-FOOTPRINTS_MODE_EXAMPLES = build_mode_examples(FOOTPRINTS_TRAINSET)
+FOOTPRINTS_MODE_EXAMPLES = build_mode_examples(
+    FOOTPRINTS_TRAINSET,
+    extra_fields=lambda item: {
+        "gave_up_on_noticing": getattr(item, "gave_up_on_noticing", False),
+    },
+)
 FOOTPRINTS_INTERPRET_EXAMPLES = build_interpret_examples(FOOTPRINTS_TRAINSET)
 FOOTPRINTS_RESPONSE_EXAMPLES = build_response_examples(
     FOOTPRINTS_TRAINSET, preferences=FOOTPRINTS_POOH_PREFERENCES,

@@ -212,6 +212,7 @@ def _eeyore_birthday() -> Scenario:
 
 def _footprints() -> Scenario:
     from footprints_events import (
+        FootprintsAnalyzeInteraction,
         FootprintsEventController,
         FootprintsGenerateResponse,
         FootprintsInterpretTurn,
@@ -272,6 +273,7 @@ def _footprints() -> Scenario:
         pooh_preferences=FOOTPRINTS_POOH_PREFERENCES,
         # 「プー，さっき何かを見つけたって言っていたよね．どうしたの？」
         start_cues=(("見つけた", "どうした"),),
+        classify_signature=FootprintsAnalyzeInteraction,
         interpret_signature=FootprintsInterpretTurn,
         response_signature=FootprintsGenerateResponse,
     )
