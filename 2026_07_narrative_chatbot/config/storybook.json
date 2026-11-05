@@ -142,6 +142,9 @@
     },
     "footprints": {
       "title": "あしあとの しょうたい",
+      "cover": {
+        "illustration": "footprints/cover.png"
+      },
       "beats": {
         "opening": {
           "narration": "ゆきが つもった もりの なかで、プーは みなれない あしあとを みつけました。",

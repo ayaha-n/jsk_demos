@@ -33,7 +33,11 @@ STORYBOOK_CONFIG_PATH = PROJECT_ROOT / "config" / "storybook.json"
 # Illustrations, at their paths in config/storybook.json
 # (e.g. "eeyore_birthday/opening.png").
 ILLUSTRATION_ROOT = PROJECT_ROOT / "assets" / "storybook"
-FIXED_ILLUSTRATION_BEATS = frozenset({"opening", "pooh_ate_honey"})
+# "opening" applies to every scenario (the story always starts the same
+# way); the rest name one beat of one scenario each ("pooh_ate_honey":
+# eeyore_birthday, "fourth_animal": footprints) whose picture should never
+# vary by session.
+FIXED_ILLUSTRATION_BEATS = frozenset({"opening", "pooh_ate_honey", "fourth_animal"})
 # Generated when the scene starts rather than once it is over: what it shows
 # (the gift decided in the story state) is known by then, and the scene runs
 # on to the end of the session.
