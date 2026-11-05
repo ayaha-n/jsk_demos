@@ -41,7 +41,7 @@ from narrative_signatures import (
     QuestionKind,
     _signature_field,
 )
-from narrative_state import NarrativeSituation, SituationUpdate
+from narrative_state import NarrativeSituation, SituationUpdate, apply_situation_update
 
 
 FootprintsAction = Literal[
@@ -79,6 +79,13 @@ class FootprintsAnalyzeInteraction(AnalyzeInteraction):
             "まだ気づけていない曖昧な聞き返し・反応も含めてtrue"
             "（もう一度ぼんやり促しても堂々巡りになるだけなので、ヒントを出す）。"
             "そのような問いかけが直前になければfalse。"
+        )
+    )
+    proposed_name: str = dspy.OutputField(
+        desc=(
+            "現在のunresolvedに「正体の呼び名」が含まれている場面で、参加者が"
+            "このターンの発話で足跡の主の名前として具体的に提案した一語の名前。"
+            "まだ名付けられていない場合だけが対象。該当しなければ空文字列。"
         )
     )
 
@@ -624,27 +631,63 @@ class FootprintsEventController(NarrativeEventController):
         )
 
     def fixed_line_for(self, classification: Any) -> str | None:
-        """The fixed hint line, once the classify stage judges the participant
-        has given up on noticing (see FootprintsAnalyzeInteraction.
-        gave_up_on_noticing).
+        """A fixed line for this turn's classify-stage result, for the two
+        cases generation proved unreliable at handling on its own.
 
-        Once reveal_prompt has asked "何か気づかない？", repeating a vague
-        deflection every time the participant says they do not know reads as
-        Pooh stonewalling rather than noticing something himself (confirmed
-        live). The fixed reveal_hint line is the right amount of help here,
-        reused verbatim instead of generated, so it never duplicates what the
-        timed reveal_hint event would otherwise still say later (see
-        extra_actions_for, which marks reveal_hint done once this fires).
+        proposed_name (FootprintsAnalyzeInteraction.proposed_name): once the
+        participant names the creature themselves, accepting it outright as a
+        fixed line (and settling it here, as a side effect, since a
+        fixed_line_for turn skips interpret() entirely — see
+        synchronize_situation) sidesteps a real generation bug confirmed
+        live: with a longer preceding history, the model would bring up
+        Pooh's own naming preference (pooh_preferences) alongside the
+        participant's name instead of simply accepting it, even though both
+        the instructions and a directly matching trainset example already
+        said not to — more matching trainset examples did not fix this.
+
+        gave_up_on_noticing: once reveal_prompt has asked "何か気づかない？",
+        repeating a vague deflection every time the participant says they do
+        not know reads as Pooh stonewalling rather than noticing something
+        himself (confirmed live). The fixed reveal_hint line is the right
+        amount of help here, reused verbatim instead of generated, so it
+        never duplicates what the timed reveal_hint event would otherwise
+        still say later (see extra_actions_for, which marks reveal_hint done
+        once this fires).
         """
-        if not getattr(classification, "gave_up_on_noticing", False):
-            return None
+        proposed_name = str(getattr(classification, "proposed_name", "") or "").strip()
+        if proposed_name and not self.state.named:
+            self.state.named = True
+            self.state.name = proposed_name
+            return f"{proposed_name}か、いいね！そう呼ぼう。"
         if (
-            "reveal_prompt" in self.state.completed_event_ids
+            getattr(classification, "gave_up_on_noticing", False)
+            and "reveal_prompt" in self.state.completed_event_ids
             and "reveal_hint" not in self.state.completed_event_ids
             and not self.state.resolved
         ):
             return REVEAL_HINT_RESPONSE
         return None
+
+    def synchronize_situation(self, situation: NarrativeSituation) -> NarrativeSituation:
+        """Render naming into the public narrative state once, in case
+        fixed_line_for's proposed_name branch settled it: that branch skips
+        interpret() entirely (see forward()'s fixed_line_for contract), so
+        nothing else applies the usual remove NAMING_TOPIC / add
+        APPEARANCE_UNRESOLVED delta for it. Gated on NAMING_TOPIC still being
+        present so an ordinary turn, whose own situation_update already
+        applied this, never gets a second, differently-worded naming event."""
+        if self.state.named and NAMING_TOPIC in situation.unresolved:
+            situation = apply_situation_update(
+                situation,
+                SituationUpdate(
+                    add_events=[f"足跡の主を「{self.state.name}」と名付けた"],
+                    remove_unresolved=[NAMING_TOPIC],
+                    add_unresolved=(
+                        [] if self.state.appearance_settled else [APPEARANCE_UNRESOLVED]
+                    ),
+                ),
+            )
+        return situation
 
     def extra_actions_for(self, bot_response: str) -> list[str]:
         """narrative_actions to record as if the model had reported them,

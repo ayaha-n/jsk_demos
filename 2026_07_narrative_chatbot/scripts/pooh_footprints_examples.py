@@ -111,6 +111,7 @@ FOOTPRINTS_TRAINSET = [
             deep=True,
         ),
         user_action="モコモコって呼んだらどうかな",
+        proposed_name="モコモコ",
         history=(
             "Turn 2\n世界イベント: プーが参加者に、名前を考えていると伝えた。"
             "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 1\n"
@@ -405,6 +406,7 @@ FOOTPRINTS_MODE_EXAMPLES = build_mode_examples(
     FOOTPRINTS_TRAINSET,
     extra_fields=lambda item: {
         "gave_up_on_noticing": getattr(item, "gave_up_on_noticing", False),
+        "proposed_name": getattr(item, "proposed_name", ""),
     },
 )
 FOOTPRINTS_INTERPRET_EXAMPLES = build_interpret_examples(FOOTPRINTS_TRAINSET)
