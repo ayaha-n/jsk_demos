@@ -389,7 +389,9 @@ _FOOTPRINTS_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
         "noticed_second_animal(足跡が２匹分に見えることに気づいた場合)、"
         "noticed_fourth_animal(足跡がさらに増えて４匹分になったことに気づいた場合。"
         "２匹分の段階を経ていなくてもよい)、"
-        "realized_own_footprints(足跡が自分たちのものだったとわかった場合)。"
+        "realized_own_footprints(自分たちの足跡だったと、参加者が自分の言葉で"
+        "明確に言い当てた場合のみ。「え，なんだろう」のような曖昧な返答・"
+        "聞き返しだけでは判定しない)。"
         "該当しなければ空リスト。"
     )
 )
