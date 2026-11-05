@@ -7,6 +7,8 @@ logs/*
 .env
 __pycache__/
 assets/storybook/generated/
+# Rejected illustration attempts kept locally for comparison, not for the book.
+assets/storybook/*/_unused_variants/
 *.py[cod]
 
 node_modules/
