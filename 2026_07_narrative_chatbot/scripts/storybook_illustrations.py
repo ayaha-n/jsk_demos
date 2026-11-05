@@ -56,21 +56,38 @@ class SceneSummary:
 
 
 def previous_illustration(config, turns):
-    """The last depicted scene; skip scenes deliberately left as text only."""
+    """The last depicted scene; skip scenes deliberately left as text only.
+
+    A fixed beat (storybook.FIXED_ILLUSTRATION_BEATS) has no per-session
+    description to compare against -- only its generic config prompt, which
+    was found similar enough to an unrelated later beat's real scene
+    (footprints' opening vs. ask_appearance, both just "the bear looks at
+    footprints") to make the summarizer skip that beat's own illustration
+    entirely. Reporting no previous illustration here instead makes the
+    summarizer always illustrate the scene right after a fixed beat.
+
+    A beat with bubble_bases (footprints' ask_appearance) has the same
+    problem even though it is session-specific: the shown picture is a
+    bundled background composited with a generated inner creature, never
+    literally the scene summary's own description, so that description is
+    not a trustworthy stand-in for what was actually drawn (it coincidentally
+    read as near-identical to start_following's real description and made
+    that beat's own illustration get skipped as a "duplicate")."""
     for turn in reversed(turns):
         beat_id, _ = storybook.narrate(turn, config)
         if not beat_id or config.illustration_path(beat_id) is None:
             continue
         beat = config.beats[beat_id]
-        if beat_id not in storybook.FIXED_ILLUSTRATION_BEATS:
-            name = config.illustration_name(beat_id)
-            if name and name.startswith("generated/") and storybook.find_illustration(name):
-                path = (storybook.ILLUSTRATION_ROOT / name).with_suffix(".scene.json")
-                try:
-                    metadata = json.loads(path.read_text())
-                    return metadata.get("image_description") or metadata["description"]
-                except (OSError, ValueError, KeyError, TypeError):
-                    pass
+        if beat_id in storybook.FIXED_ILLUSTRATION_BEATS or beat.bubble_bases:
+            return None
+        name = config.illustration_name(beat_id)
+        if name and name.startswith("generated/") and storybook.find_illustration(name):
+            path = (storybook.ILLUSTRATION_ROOT / name).with_suffix(".scene.json")
+            try:
+                metadata = json.loads(path.read_text())
+                return metadata.get("image_description") or metadata["description"]
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
         return beat.prompt or beat.narration
     return None
 
@@ -440,6 +457,7 @@ class SessionIllustrations:
         self._jobs: dict[tuple[str, str], Future] = {}
         self._promises: dict[tuple[str, str], Future] = {}
         self._active: dict[str, tuple[storybook.StoryConfig, str]] = {}
+        self._covered: dict[str, set[str]] = {}
         self._tails: dict[str, Future] = {}
         self.failures = 0
 
@@ -627,7 +645,6 @@ class SessionIllustrations:
         turn = storybook.turn_from_output(output)
         config = replace(storybook.load_story_config(session.scenario.key),
                          session_id=session.session_id)
-        beat_id, _ = storybook.narrate(turn, config)
         completed = None
         started = False
         # Finalize a scene after hearing its dialogue, rather than illustrating
@@ -635,6 +652,10 @@ class SessionIllustrations:
         # A closing scene runs on to the end of the session, and what it shows
         # is decided by the time it starts, so it is drawn right away.
         with self._lock:
+            covered = self._covered.setdefault(session.session_id, set())
+            beat_id, _ = storybook.narrate(turn, config, frozenset(covered))
+            if beat_id:
+                covered.add(beat_id)
             turns = self._turns.setdefault(session.session_id, [])
             active = self._active.get(session.session_id)
             if beat_id and (active is None or beat_id != active[1]):
@@ -650,6 +671,7 @@ class SessionIllustrations:
             if turn.ends_story:
                 self._turns.pop(session.session_id, None)
                 active = self._active.pop(session.session_id, None)
+                self._covered.pop(session.session_id, None)
             else:
                 active = None
         if completed:
@@ -701,9 +723,12 @@ def generate_from_log(path: Path, *, force=False, only: list[str] | None = None)
     # Use each scene's full conversation, with preceding dialogue as context.
     seen = []
     current = None
+    covered: set[str] = set()
     try:
         for turn in storybook.turns_from_log(records, scenario.opening_line):
-            beat_id, _ = storybook.narrate(turn, config)
+            beat_id, _ = storybook.narrate(turn, config, frozenset(covered))
+            if beat_id:
+                covered.add(beat_id)
             if beat_id and beat_id != current:
                 if current and (not only or current in only):
                     generator.submit(config, current, seen, force=force)

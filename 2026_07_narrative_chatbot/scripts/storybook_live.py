@@ -462,7 +462,7 @@ class LiveStorybook:
             return
         if self.builder is None or self.builder.finished:
             return
-        beat_id, _ = storybook.narrate(value, self.builder.config)
+        beat_id, _ = storybook.narrate(value, self.builder.config, frozenset(self.builder._covered_beats))
         if beat_id:
             # The scene before is over: its picture is being generated now.
             self._finish_awaited_page()

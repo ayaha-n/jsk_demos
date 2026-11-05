@@ -35,9 +35,9 @@ STORYBOOK_CONFIG_PATH = PROJECT_ROOT / "config" / "storybook.json"
 ILLUSTRATION_ROOT = PROJECT_ROOT / "assets" / "storybook"
 # "opening" applies to every scenario (the story always starts the same
 # way); the rest name one beat of one scenario each ("pooh_ate_honey":
-# eeyore_birthday, "fourth_animal": footprints) whose picture should never
-# vary by session.
-FIXED_ILLUSTRATION_BEATS = frozenset({"opening", "pooh_ate_honey", "fourth_animal"})
+# eeyore_birthday, "fourth_animal" and "session_close": footprints) whose
+# picture should never vary by session.
+FIXED_ILLUSTRATION_BEATS = frozenset({"opening", "pooh_ate_honey", "fourth_animal", "session_close"})
 # Generated when the scene starts rather than once it is over: what it shows
 # (the gift decided in the story state) is known by then, and the scene runs
 # on to the end of the session.
@@ -120,6 +120,13 @@ class StoryConfig:
     cover_illustration: str | None = None
     cover_bubble: tuple[int, int] | None = None
     cover_bubble_beat: str | None = None
+    # Maps one of the scenario's closed-vocabulary narrative_actions (see
+    # e.g. footprints_events.KNOWN_FOOTPRINTS_ACTIONS) to the beat it would
+    # otherwise only reach by its own scripted WorldEvent. The LM can report
+    # having reached that moment organically, pre-empting the scripted event
+    # (observe_actions()) -- its picture must still appear, on the turn that
+    # reported it, or an organically resolved session never gets it at all.
+    action_beats: dict[str, str] = field(default_factory=dict)
 
     def illustration_name(self, beat_id: str | None) -> str | None:
         beat = self.beats.get(beat_id or "")
@@ -301,6 +308,7 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
         cover_illustration=cover.get("illustration"),
         cover_bubble=tuple(cover["bubble"]) if cover.get("bubble") else None,
         cover_bubble_beat=cover.get("bubble_beat"),
+        action_beats=spec.get("action_beats", {}),
     )
 
 
@@ -321,6 +329,9 @@ class StoryTurn:
     # whether it came with the participant's next words
     observed_actions: tuple[str, ...] = ()
     with_speech: bool = False
+    # The LM's closed-vocabulary report of story progress reached this turn
+    # (e.g. footprints' "noticed_fourth_animal"); see StoryConfig.action_beats.
+    narrative_actions: tuple[str, ...] = ()
 
 
 def illustration_situation(value: Any) -> dict[str, Any]:
@@ -348,6 +359,7 @@ def turn_from_output(output: Any) -> StoryTurn:
         situation=illustration_situation(getattr(output, "updated_situation", None)),
         observed_actions=tuple(getattr(output, "observed_actions", ())),
         with_speech=bool(getattr(output, "observed_with_speech", False)),
+        narrative_actions=tuple(getattr(output, "narrative_actions", ()) or ()),
     )
 
 
@@ -367,6 +379,7 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
         situation=illustration_situation(record.get("updated_situation")),
         observed_actions=tuple(str(a) for a in record.get("observed_actions") or ()),
         with_speech=bool(record.get("with_speech")),
+        narrative_actions=tuple(str(a) for a in record.get("narrative_actions") or ()),
     )
 
 
@@ -514,8 +527,14 @@ def participant_entries(
     return entries
 
 
-def narrate(turn: StoryTurn, config: StoryConfig) -> tuple[str | None, list[StoryEntry]]:
-    """The beat this turn opens (if any) and the entries that retell it."""
+def narrate(
+    turn: StoryTurn, config: StoryConfig, covered_beats: frozenset[str] = frozenset()
+) -> tuple[str | None, list[StoryEntry]]:
+    """The beat this turn opens (if any) and the entries that retell it.
+
+    ``covered_beats``: beats already given their own page earlier in this
+    same session (by any means -- scripted or organic), so an action report
+    naming one of them again is not retold as a second, duplicate page."""
     entries: list[StoryEntry] = []
     beat_id: str | None = None
     if turn.source == "session_open":
@@ -524,6 +543,27 @@ def narrate(turn: StoryTurn, config: StoryConfig) -> tuple[str | None, list[Stor
             entries.append(StoryEntry("title", config.title))
     elif turn.source == "world_event" and turn.world_event_id in config.beats:
         beat_id = turn.world_event_id
+    elif turn.ends_story and "session_close" in config.beats:
+        # ends_story, not source == "session_close": a participant who says
+        # goodbye once resolved ends the session on an ordinary "participant"
+        # turn (interaction_mode "exit"), not the idle-timeout "session_close"
+        # source -- both must reach this final picture. Opt-in, scenario by
+        # scenario: a scenario that can end without ever reaching a scripted
+        # closing beat (footprints' reveal can resolve organically, skipping
+        # reveal_direct) defines "session_close" for a guaranteed final
+        # picture; one that already always ends on a beat
+        # with its own picture (eeyore_birthday's story_wrap_up) need not.
+        beat_id = "session_close"
+    else:
+        # The LM can report reaching a scripted beat's moment on its own
+        # (e.g. footprints' observe_actions(), pre-empting the beat's own
+        # WorldEvent) -- its picture must still appear, right on this turn,
+        # or an organically resolved session never gets it at all.
+        for action in turn.narrative_actions:
+            candidate = config.action_beats.get(action)
+            if candidate and candidate in config.beats and candidate not in covered_beats:
+                beat_id = candidate
+                break
     beat = config.beats.get(beat_id or "")
     if beat is not None and beat.narration:
         entries.append(StoryEntry("narration", beat.narration))
@@ -807,6 +847,8 @@ class StoryBuilder:
         self._seen: tuple[str, ...] = ()
         # What was just retold on its own, for a touch that follows it.
         self._just_seen: tuple[str, ...] = ()
+        # Beats already given their own page (see narrate()'s covered_beats).
+        self._covered_beats: set[str] = set()
 
     def add(self, turn: StoryTurn) -> list[PageEvent]:
         if self.finished:
@@ -827,7 +869,9 @@ class StoryBuilder:
             events.extend(self._retell_on_its_own(turn.observed_actions))
             return events
         self._just_seen = ()
-        beat_id, entries = narrate(turn, self.config)
+        beat_id, entries = narrate(turn, self.config, frozenset(self._covered_beats))
+        if beat_id is not None:
+            self._covered_beats.add(beat_id)
         if not self.pages or (beat_id is not None and not self._continue_in_next_column(beat_id)):
             events.append(self._new_page(beat_id))
         events.extend(self._place(entries))

@@ -145,6 +145,11 @@
       "cover": {
         "illustration": "footprints/cover.png"
       },
+      "action_beats": {
+        "started_following": "start_following",
+        "noticed_second_animal": "second_animal",
+        "noticed_fourth_animal": "fourth_animal"
+      },
       "beats": {
         "opening": {
           "narration": "ゆきが つもった もりの なかで、プーは みなれない あしあとを みつけました。",
@@ -184,6 +189,11 @@
           "narration": "プーは、あしあとが じぶんたちの ものだったと きづきました。",
           "illustration": "footprints/reveal_direct.png",
           "prompt": "This bear from the reference image crouches low and leans over, holding up its own round furry paw sole facing the viewer, next to a matching round paw-shaped footprint in the snow, comparing the two sizes by looking down at them with a surprised, sheepish smile. The raised paw's pads (the main pad and the toe-pads) must be warm brown/tan, the same warm brown as the bear's own nose -- not white or pale. Do not show the bear's hand or arm reaching toward anyone; this is the bear checking its own footprint against its own foot. A narrow boot-shaped print sits in the snow right next to the paw print, with no one reaching for it."
+        },
+        "session_close": {
+          "narration": "あしあとの しょうたいが わかって、プーは ほっとした かおに なりました。",
+          "illustration": "footprints/session_close.png",
+          "prompt": "This bear from the reference image stands in a snowy forest clearing beside a bare bush, waving one raised paw with a warm smile, a short trail of round paw-shaped footprints in the snow behind it. No second animal, no magnifying glass, no honey pot. No human hand, arm or fingers anywhere in the picture; the reader is present only as a soft, faceless gray shadow falling into the scene from the bottom edge."
         }
       },
       "closing": "おしまい"
