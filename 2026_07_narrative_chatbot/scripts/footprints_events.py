@@ -57,6 +57,8 @@ IDENTITY_UNRESOLVED = "この足跡は何の生き物のものか"
 # resolved during 場面3's appearance discussion.
 APPEARANCE_UNRESOLVED = "ウズウズの見た目はどんな様子か"
 
+ASK_NAME_RESPONSE = fixed_utterance("footprints.ask_name")
+ASK_APPEARANCE_RESPONSE = fixed_utterance("footprints.ask_appearance")
 NAMING_EVENT = "プーが足跡の主に「ウズウズ」と名付けた"
 NAMING_RESPONSE = fixed_utterance("footprints.naming")
 START_FOLLOWING_EVENT = "プーと参加者がウズウズの足跡を追いかけ始めた"
@@ -89,7 +91,9 @@ class FootprintsEventController(NarrativeEventController):
 
     def __init__(
         self,
+        ask_name_delay_seconds: float,
         naming_delay_seconds: float,
+        ask_appearance_delay_seconds: float,
         start_following_delay_seconds: float,
         second_animal_delay_seconds: float,
         fourth_animal_delay_seconds: float,
@@ -101,8 +105,12 @@ class FootprintsEventController(NarrativeEventController):
         speech_seconds: Callable[[str], float] = lambda text: 0.0,
         awaiting_quiet_seconds: float | None = None,
     ) -> None:
+        if ask_name_delay_seconds < 0:
+            raise ValueError("ask_name_delay_seconds must be non-negative")
         if naming_delay_seconds < 0:
             raise ValueError("naming_delay_seconds must be non-negative")
+        if ask_appearance_delay_seconds < 0:
+            raise ValueError("ask_appearance_delay_seconds must be non-negative")
         if start_following_delay_seconds < 0:
             raise ValueError("start_following_delay_seconds must be non-negative")
         if second_animal_delay_seconds < 0:
@@ -113,7 +121,9 @@ class FootprintsEventController(NarrativeEventController):
             raise ValueError("reveal_step_delay_seconds must be non-negative")
         if idle_close_seconds is not None and idle_close_seconds < 0:
             raise ValueError("idle_close_seconds must be non-negative")
+        self.ask_name_delay_seconds = ask_name_delay_seconds
         self.naming_delay_seconds = naming_delay_seconds
+        self.ask_appearance_delay_seconds = ask_appearance_delay_seconds
         self.start_following_delay_seconds = start_following_delay_seconds
         self.second_animal_delay_seconds = second_animal_delay_seconds
         self.fourth_animal_delay_seconds = fourth_animal_delay_seconds
@@ -121,7 +131,9 @@ class FootprintsEventController(NarrativeEventController):
         super().__init__(
             state=FootprintsState(),
             required_events=required_events or self._default_required_events(
+                ask_name_delay_seconds,
                 naming_delay_seconds,
+                ask_appearance_delay_seconds,
                 start_following_delay_seconds,
                 second_animal_delay_seconds,
                 fourth_animal_delay_seconds,
@@ -136,7 +148,9 @@ class FootprintsEventController(NarrativeEventController):
 
     @staticmethod
     def _default_required_events(
+        ask_name_delay_seconds: float,
         naming_delay_seconds: float,
+        ask_appearance_delay_seconds: float,
         start_following_delay_seconds: float,
         second_animal_delay_seconds: float,
         fourth_animal_delay_seconds: float,
@@ -144,17 +158,34 @@ class FootprintsEventController(NarrativeEventController):
         idle_close_seconds: float | None = None,
     ) -> tuple[RequiredNarrativeEvent, ...]:
         events = (
-            # Both beats below are free to happen organically (see
-            # pooh_footprints_examples.py's 場面2/4); each is only the
-            # fallback for when a small trainset's demos do not generalize to
-            # whatever phrasing actually comes up, the same reason the beats
-            # further down are Python-fired rather than learned.
+            # Asking for a name and asking about appearance are fixed lines,
+            # the same follow_up_response idea eeyore_birthday_events uses
+            # (e.g. honey_gift_committed's "あ、そういえば。…"): generating
+            # these organically turned out to collapse into the same turn as
+            # the answer far too often, so Python asks instead of hoping the
+            # model phrases a clean, separate question.
+            RequiredNarrativeEvent(
+                event_id="ask_name",
+                delay_seconds=ask_name_delay_seconds,
+                waits_for_quiet=True,
+                prerequisite=lambda state: not state.named,
+                fire=FootprintsEventController._fire_ask_name,
+            ),
+            # Deciding for himself if nobody answers ask_name in time; free to
+            # happen organically too (see pooh_footprints_examples.py's 場面2).
             RequiredNarrativeEvent(
                 event_id="name_creature",
                 delay_seconds=naming_delay_seconds,
                 waits_for_quiet=True,
                 prerequisite=lambda state: not state.named and not state.resolved,
                 fire=FootprintsEventController._fire_name_creature,
+            ),
+            RequiredNarrativeEvent(
+                event_id="ask_appearance",
+                delay_seconds=ask_appearance_delay_seconds,
+                waits_for_quiet=True,
+                prerequisite=lambda state: state.named,
+                fire=FootprintsEventController._fire_ask_appearance,
             ),
             # Naming comes first: start_following only arms once it is done,
             # so this can never race ahead of it (see NarrativeEventController
@@ -240,13 +271,17 @@ class FootprintsEventController(NarrativeEventController):
             if action not in KNOWN_FOOTPRINTS_ACTIONS:
                 continue
             if action == "started_following":
-                if not self.state.named:
-                    # The conversation moved on without ever naming it; the
+                if not self.state.named and "name_creature" not in self.state.completed_event_ids:
+                    # The conversation moved on without ever naming it. The
                     # start_following fallback's own prerequisite requires
-                    # state.named, so an organic report here must keep that
-                    # invariant too instead of silently breaking it.
-                    self.state.named = True
-                    self.state.name = "ウズウズ"
+                    # state.named, so this invariant must hold regardless —
+                    # but naming must still be SPOKEN, not silently assumed
+                    # (a participant who never heard a name chosen was
+                    # confused when a later line referred to one anyway).
+                    # Collapsing name_creature's deadline to now makes it
+                    # fire for real on the very next beat (normally via
+                    # follow_up right after this turn's own line).
+                    self._deadlines["name_creature"] = self.clock()
                 self.state.following_started = True
             elif action == "noticed_second_animal":
                 self.state.completed_event_ids.add("second_animal")
@@ -267,6 +302,45 @@ class FootprintsEventController(NarrativeEventController):
         self._arm_required_events()
 
     @staticmethod
+    def _fire_ask_name(state: FootprintsState) -> WorldEvent:
+        state.completed_event_ids.add("ask_name")
+        return WorldEvent(
+            event_id="ask_name",
+            description="プーが参加者に、名前を考えていると伝えた。これは既に起きた出来事。",
+            scene_id="1",
+            fallback_response=ASK_NAME_RESPONSE,
+            # Only now does naming become a visible unresolved topic (and so
+            # only now does pooh_preferences start surfacing Pooh's own
+            # "「ウズウズ」って呼びたいな。" as an option) — listing it as
+            # unresolved from session start let the model volunteer the name
+            # before this question was ever actually asked.
+            situation_update=SituationUpdate(add_unresolved=[NAMING_TOPIC]),
+            fixed_response=True,
+        )
+
+    @staticmethod
+    def _fire_ask_appearance(state: FootprintsState) -> WorldEvent:
+        state.completed_event_ids.add("ask_appearance")
+        # The registered fixed line (with its recorded wav/motion) says
+        # "ウズウズ" — Python's own default name. A participant-chosen name
+        # falls back to a line built with the actual name instead; it still
+        # fires deterministically, just without a matching wav/motion (same
+        # as any other line fixed_utterance_id() cannot match).
+        line = (
+            ASK_APPEARANCE_RESPONSE
+            if state.name == "ウズウズ"
+            else f"ところで，{state.name}の見た目はどんな感じだと思う？"
+        )
+        return WorldEvent(
+            event_id="ask_appearance",
+            description="プーが参加者に、見た目について尋ねた。これは既に起きた出来事。",
+            scene_id="3",
+            fallback_response=line,
+            situation_update=SituationUpdate(),
+            fixed_response=True,
+        )
+
+    @staticmethod
     def _fire_name_creature(state: FootprintsState) -> WorldEvent:
         state.completed_event_ids.add("name_creature")
         state.named = True
@@ -278,6 +352,7 @@ class FootprintsEventController(NarrativeEventController):
             fallback_response=NAMING_RESPONSE,
             situation_update=SituationUpdate(
                 add_events=[NAMING_EVENT],
+                remove_unresolved=[NAMING_TOPIC],
                 add_unresolved=[APPEARANCE_UNRESOLVED],
             ),
             fixed_response=True,
@@ -287,6 +362,14 @@ class FootprintsEventController(NarrativeEventController):
     def _fire_start_following(state: FootprintsState) -> WorldEvent:
         state.completed_event_ids.add("start_following")
         state.following_started = True
+        # Same hybrid as _fire_ask_appearance: the registered line (with its
+        # recorded wav/motion) says "ウズウズ" for Python's own default name;
+        # a participant-chosen name falls back to a dynamically built line.
+        line = (
+            START_FOLLOWING_RESPONSE
+            if state.name == "ウズウズ"
+            else f"よし、{state.name}を追いかけてみよう。きみも一緒に来てくれない？"
+        )
         return WorldEvent(
             event_id="start_following",
             description=(
@@ -294,7 +377,7 @@ class FootprintsEventController(NarrativeEventController):
                 "これは既に起きた出来事。"
             ),
             scene_id="4",
-            fallback_response=START_FOLLOWING_RESPONSE,
+            fallback_response=line,
             situation_update=SituationUpdate(add_events=[START_FOLLOWING_EVENT]),
             fixed_response=True,
         )

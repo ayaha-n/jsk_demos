@@ -20,6 +20,8 @@ import dspy
 
 from footprints_events import (
     APPEARANCE_UNRESOLVED,
+    ASK_APPEARANCE_RESPONSE,
+    ASK_NAME_RESPONSE,
     IDENTITY_UNRESOLVED,
     NAMING_EVENT,
     NAMING_TOPIC,
@@ -33,6 +35,7 @@ from pooh_examples import (
     build_interpret_examples,
     build_response_examples,
     example,
+    example_variants,
 )
 
 
@@ -48,12 +51,15 @@ FOOTPRINTS_SITUATION = NarrativeSituation(
     props=["雪の積もった地面", "足あと（２つ）"],
     events=["プーが雪の上に見慣れない足跡を見つけた"],
     relationship="参加者はプーと一緒に足跡の正体を探る仲間",
-    unresolved=[IDENTITY_UNRESOLVED, NAMING_TOPIC],
+    # NAMING_TOPIC is NOT listed here: it only becomes unresolved once Pooh
+    # actually asks (footprints_events._fire_ask_name adds it). Listing it
+    # from the start leaked pooh_preferences' "「ウズウズ」って呼びたいな。"
+    # into turn 1 — before the question was ever posed, relevant_preferences()
+    # has no gate on whether a topic has actually been raised yet — so the
+    # model volunteered the name immediately instead of waiting to be asked.
+    unresolved=[IDENTITY_UNRESOLVED],
 )
 
-_TURN2_INVITE_NAMING_RESPONSE = (
-    "だよね．これ，何の生き物の足跡だと思う？名前がないと呼びにくいから，なんて呼ぼうか？"
-)
 _TURN2_NAMING_RESPONSE = fixed_utterance("footprints.naming")
 
 # 追いかけ始めたあとの既知の出来事（場面5以降は時限イベントが足す）。
@@ -67,9 +73,12 @@ _FOLLOWING_STARTED_EVENTS = [
 
 FOOTPRINTS_TRAINSET = [
     # --- 場面1：足跡発見（必須。尋ねられた場合／自発的な場合の両方を用意） -----
-    example(
+    # 名前を尋ねる投げかけは、ここでは生成せず、footprints_events.ask_name
+    # （固定セリフ、この応答のすぐ後にfollow_upで発火）に任せている。発見と
+    # 投げかけが1ターンに圧縮されがちで、別ターンとして安定して生成できなかった。
+    *example_variants(
         current_situation=FOOTPRINTS_SITUATION,
-        user_action="何を追ってるの？",
+        user_action=["何を追ってるの？", "何かって，なに？"],
         history=f"会話の冒頭\nプーの応答: {_TURN1_BOT_RESPONSE}",
         interaction_mode="narrative",
         current_scene="1",
@@ -86,34 +95,21 @@ FOOTPRINTS_TRAINSET = [
             "ほら，そこ見て．足跡があるんだ．"
         ),
     ),
-    # --- 場面1→2：名付けを参加者に投げかける（必須ではないが、名付けを
-    # 一方的にプーが決めず、まず参加者に聞く）。-------------------------------
-    example(
-        current_situation=FOOTPRINTS_SITUATION.model_copy(
-            update={"events": [*FOOTPRINTS_SITUATION.events, "参加者が足跡に気づいた"]},
-            deep=True,
-        ),
-        user_action="本当だ、足跡があるね",
-        history=(
-            "Turn 1\n参加者の生入力: 何を追ってるの？\n応答モード: narrative\n"
-            f"参考場面ID: 1\n物語アクション: []\n"
-            "プーの応答: まさにそれを自分にきいているんだと．ほら，そこ見て．足跡があるんだ．"
-        ),
-        interaction_mode="narrative",
-        current_scene="1",
-        bot_response=_TURN2_INVITE_NAMING_RESPONSE,
-        question_kind="participant_own",
-    ),
     # 参加者が自分で名前を提案する：その名前がそのまま採用される。
+    # footprints.ask_name（固定セリフ）への返答として続く。
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
-            update={"events": [*FOOTPRINTS_SITUATION.events, "参加者が足跡に気づいた"]},
+            update={
+                "events": [*FOOTPRINTS_SITUATION.events, "参加者が足跡に気づいた"],
+                "unresolved": [IDENTITY_UNRESOLVED, NAMING_TOPIC],
+            },
             deep=True,
         ),
         user_action="モコモコって呼んだらどうかな",
         history=(
-            "Turn 2\n参加者の生入力: 本当だ、足跡があるね\n応答モード: narrative\n"
-            f"参考場面ID: 1\n物語アクション: []\nプーの応答: {_TURN2_INVITE_NAMING_RESPONSE}"
+            "Turn 2\n世界イベント: プーが参加者に、名前を考えていると伝えた。"
+            "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 1\n"
+            f"物語アクション: []\nプーの応答: {ASK_NAME_RESPONSE}"
         ),
         interaction_mode="narrative",
         current_scene="2",
@@ -128,13 +124,17 @@ FOOTPRINTS_TRAINSET = [
     # 参加者が迷ったら、プー自身の案を出す（pooh_preferences、聞き返さない）。
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
-            update={"events": [*FOOTPRINTS_SITUATION.events, "参加者が足跡に気づいた"]},
+            update={
+                "events": [*FOOTPRINTS_SITUATION.events, "参加者が足跡に気づいた"],
+                "unresolved": [IDENTITY_UNRESOLVED, NAMING_TOPIC],
+            },
             deep=True,
         ),
         user_action="うーん、わからないな",
         history=(
-            "Turn 2\n参加者の生入力: 本当だ、足跡があるね\n応答モード: narrative\n"
-            f"参考場面ID: 1\n物語アクション: []\nプーの応答: {_TURN2_INVITE_NAMING_RESPONSE}"
+            "Turn 2\n世界イベント: プーが参加者に、名前を考えていると伝えた。"
+            "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 1\n"
+            f"物語アクション: []\nプーの応答: {ASK_NAME_RESPONSE}"
         ),
         interaction_mode="narrative",
         current_scene="2",
@@ -147,28 +147,8 @@ FOOTPRINTS_TRAINSET = [
         bot_response=_TURN2_NAMING_RESPONSE,
     ),
     # --- 場面3：見た目を参加者に相談する（内容が参加者の発言で決まる） -----------
-    example(
-        current_situation=FOOTPRINTS_SITUATION.model_copy(
-            update={
-                "events": [
-                    *FOOTPRINTS_SITUATION.events,
-                    "参加者が足跡に気づいた",
-                    NAMING_EVENT,
-                ],
-                "unresolved": [IDENTITY_UNRESOLVED, APPEARANCE_UNRESOLVED],
-            },
-            deep=True,
-        ),
-        user_action="ウズウズっていい名前だね",
-        history=(
-            "Turn 3\n参加者の生入力: うーん、わからないな\n応答モード: narrative\n"
-            f"参考場面ID: 2\n物語アクション: []\nプーの応答: {_TURN2_NAMING_RESPONSE}"
-        ),
-        interaction_mode="narrative",
-        current_scene="3",
-        bot_response="きみは、ウズウズがどんな見た目だと思う？",
-        question_kind="participant_own",
-    ),
+    # 見た目を尋ねる投げかけも、footprints_events.ask_appearance（固定セリフ、
+    # 名付けの直後にfollow_upで発火）に任せている。回答の扱いだけがここの役目。
     # 参加者が自分の描写を答える：内容がそのまま採用される。
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
@@ -184,9 +164,9 @@ FOOTPRINTS_TRAINSET = [
         ),
         user_action="ふわふわの毛で、耳が大きいんじゃないかな",
         history=(
-            "Turn 4\n参加者の生入力: ウズウズっていい名前だね\n応答モード: narrative\n"
-            "参考場面ID: 3\n物語アクション: []\n"
-            "プーの応答: きみは、ウズウズがどんな見た目だと思う？"
+            "Turn 4\n世界イベント: プーが参加者に、見た目について尋ねた。"
+            "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 3\n"
+            f"物語アクション: []\nプーの応答: {ASK_APPEARANCE_RESPONSE}"
         ),
         interaction_mode="narrative",
         current_scene="3",
@@ -209,9 +189,9 @@ FOOTPRINTS_TRAINSET = [
         ),
         user_action="うーん、わからないな",
         history=(
-            "Turn 4\n参加者の生入力: ウズウズっていい名前だね\n応答モード: narrative\n"
-            "参考場面ID: 3\n物語アクション: []\n"
-            "プーの応答: きみは、ウズウズがどんな見た目だと思う？"
+            "Turn 4\n世界イベント: プーが参加者に、見た目について尋ねた。"
+            "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 3\n"
+            f"物語アクション: []\nプーの応答: {ASK_APPEARANCE_RESPONSE}"
         ),
         interaction_mode="narrative",
         current_scene="3",
@@ -271,6 +251,34 @@ FOOTPRINTS_TRAINSET = [
         ),
         bot_response="ほんとうだ！２匹になってるみたいだね。いっしょに来てくれる？",
         question_kind="participant_own",
+    ),
+    # 気づきの促し（reveal_prompt）への曖昧な返答：まだ解決したと判定しない。
+    # 「え、なんだろう」のような非committalな返答でrealized_own_footprintsを
+    # 誤って報告すると、reveal_hint/reveal_directの段階的な気づきが丸ごと
+    # 飛んでしまう（実機で確認済みの不具合）。
+    example(
+        current_situation=FOOTPRINTS_SITUATION.model_copy(
+            update={
+                "props": ["雪の積もった地面", "足あと（４つ）"],
+                "events": [
+                    *_FOLLOWING_STARTED_EVENTS,
+                    "足跡が２匹分になっていることに気づいた",
+                    "足跡が４匹分に増えていることに気づいた",
+                ],
+                "unresolved": [IDENTITY_UNRESOLVED],
+            },
+            deep=True,
+        ),
+        user_action="え、なんだろう",
+        history=(
+            "Turn 7\n世界イベント: プーが参加者に、何か気づかないかと問いかけた。"
+            "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 7a\n"
+            "物語アクション: []\nプーの応答: ねえ，きみ，なにか気づかない？"
+        ),
+        interaction_mode="narrative",
+        current_scene="7a",
+        narrative_actions=[],
+        bot_response="こっちの足あとはきみの足と同じくらいの大きさで，こっちの足あとはぼくのと同じくらいの大きさなんだ．",
     ),
     # --- 場面7-best：参加者が時限イベントより先に自分で気づく。
     # narrative_actionsでrealized_own_footprintsを報告し、以降の時限イベント

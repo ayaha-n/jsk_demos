@@ -34,10 +34,15 @@ EEYORE_AWAITING_REPLY_QUIET_SECONDS = 30.0
 EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS = 30.0
 
 # footprintsのテンポはeeyore_birthdayと揃えている。
-# プーが自分で正体に名前をつける（場面2）までの秒数。参加者またはプー自身が
-# 自発的に先に名付けた場合は発火しない。
+# 名前を尋ねる固定セリフ（場面1→2）までの秒数。会話の最初の返答のすぐ後に
+# follow_upで発火することを想定した短い値。
+FOOTPRINTS_ASK_NAME_DELAY_SECONDS = 2.0
+# 名前を尋ねてから、プーが自分で正体に名前をつける（場面2）までの秒数。
+# 参加者またはプー自身が自発的に先に名付けた場合は発火しない。
 FOOTPRINTS_NAMING_DELAY_SECONDS = 20.0
-# 名付けが終わってから、足跡を追いかけ始める（場面4）までの秒数。
+# 名付けが終わった直後に見た目を尋ねる固定セリフまでの秒数。
+FOOTPRINTS_ASK_APPEARANCE_DELAY_SECONDS = 2.0
+# 見た目を尋ねてから、足跡を追いかけ始める（場面4）までの秒数。
 FOOTPRINTS_START_FOLLOWING_DELAY_SECONDS = 30.0
 # 追いかけ始めてから、足跡が２匹分に見えることに気づくまでの秒数。
 FOOTPRINTS_SECOND_ANIMAL_DELAY_SECONDS = 30.0
@@ -232,7 +237,9 @@ def _footprints() -> Scenario:
             SceneDefinition("8", "場面8：自分たちの足跡だったと判明し、会話を続ける"),
         ),
         event_controller_factory=lambda clock: FootprintsEventController(
+            FOOTPRINTS_ASK_NAME_DELAY_SECONDS,
             FOOTPRINTS_NAMING_DELAY_SECONDS,
+            FOOTPRINTS_ASK_APPEARANCE_DELAY_SECONDS,
             FOOTPRINTS_START_FOLLOWING_DELAY_SECONDS,
             FOOTPRINTS_SECOND_ANIMAL_DELAY_SECONDS,
             FOOTPRINTS_FOURTH_ANIMAL_DELAY_SECONDS,

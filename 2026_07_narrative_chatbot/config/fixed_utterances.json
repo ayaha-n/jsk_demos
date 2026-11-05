@@ -147,6 +147,23 @@
       "arm": "right_hand_bye"
     }
   },
+  "footprints.ask_name": {
+    "text": "名前がないと呼びにくいから，なんて呼ぼうか考えているんだ。",
+    "wav": "footprints.ask_name.wav",
+    "motion": {
+      "eyebrow": "surprised",
+      "arm": "left_hand_chin",
+      "neck": "tilt"
+    }
+  },
+  "footprints.ask_appearance": {
+    "text": "ところで，ウズウズの見た目はどんな感じだと思う？",
+    "wav": "footprints.ask_appearance.wav",
+    "motion": {
+      "eyebrow": "happy",
+      "neck": "tilt"
+    }
+  },
   "footprints.naming": {
     "text": "あしあとがぐるぐる渦を巻いてるみたいだね。なんだか、うずうずして落ち着きのない生き物なのかもなあ。よし、「ウズウズ」って呼ぶことにしよう。",
     "wav": "footprints.naming.wav",
