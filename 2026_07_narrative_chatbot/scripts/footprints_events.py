@@ -682,7 +682,19 @@ class FootprintsEventController(NarrativeEventController):
         nothing else applies the usual remove NAMING_TOPIC / add
         APPEARANCE_UNRESOLVED delta for it. Gated on NAMING_TOPIC still being
         present so an ordinary turn, whose own situation_update already
-        applied this, never gets a second, differently-worded naming event."""
+        applied this, never gets a second, differently-worded naming event.
+
+        Also restores APPEARANCE_UNRESOLVED if interpret() dropped it without
+        the appearance actually being settled (confirmed live: affirming the
+        chosen name, in the same turn Pooh's own line happened to ask about
+        appearance, was enough for interpret() to report remove_unresolved
+        for it with no settled_details at all). Once the topic is missing
+        from the model's own view, a later turn that does describe the
+        appearance free-texts a topic label keyed to the creature's name
+        instead of anchoring on the real unresolved text, which
+        observe_settled_details then never matches either — so ask_appearance
+        re-asked a third time. self.state.appearance_settled is the only
+        ground truth for whether this is genuinely done."""
         if self.state.named and NAMING_TOPIC in situation.unresolved:
             situation = apply_situation_update(
                 situation,
@@ -693,6 +705,14 @@ class FootprintsEventController(NarrativeEventController):
                         [] if self.state.appearance_settled else [APPEARANCE_UNRESOLVED]
                     ),
                 ),
+            )
+        elif (
+            self.state.named
+            and not self.state.appearance_settled
+            and APPEARANCE_UNRESOLVED not in situation.unresolved
+        ):
+            situation = apply_situation_update(
+                situation, SituationUpdate(add_unresolved=[APPEARANCE_UNRESOLVED]),
             )
         return situation
 
