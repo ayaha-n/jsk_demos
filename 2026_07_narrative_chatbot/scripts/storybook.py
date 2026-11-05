@@ -35,9 +35,17 @@ STORYBOOK_CONFIG_PATH = PROJECT_ROOT / "config" / "storybook.json"
 ILLUSTRATION_ROOT = PROJECT_ROOT / "assets" / "storybook"
 # "opening" applies to every scenario (the story always starts the same
 # way); the rest name one beat of one scenario each ("pooh_ate_honey":
-# eeyore_birthday, "fourth_animal" and "session_close": footprints) whose
-# picture should never vary by session.
-FIXED_ILLUSTRATION_BEATS = frozenset({"opening", "pooh_ate_honey", "fourth_animal", "session_close"})
+# eeyore_birthday, "fourth_animal", "reveal_hint", "reveal_direct" and
+# "session_close": footprints) whose picture should never vary by session.
+# reveal_direct has no illustration at all (text only): it always fires
+# right after reveal_hint (its own prerequisite), which already showed the
+# comparison picture, so drawing another generic version of the same moment
+# every session was pure repetition -- and risked literally repeating
+# reveal_hint's picture whenever reveal_direct's own generation fell back to
+# its bundled image.
+FIXED_ILLUSTRATION_BEATS = frozenset(
+    {"opening", "pooh_ate_honey", "fourth_animal", "reveal_hint", "reveal_direct", "session_close"}
+)
 # Generated when the scene starts rather than once it is over: what it shows
 # (the gift decided in the story state) is known by then, and the scene runs
 # on to the end of the session.
@@ -136,6 +144,11 @@ class StoryConfig:
     # (observe_actions()) -- its picture must still appear, on the turn that
     # reported it, or an organically resolved session never gets it at all.
     action_beats: dict[str, str] = field(default_factory=dict)
+    # Maps a registered fixed_utterances.json id (e.g. "footprints.reveal_hint")
+    # to its beat, for a line that can also be returned by fixed_line_for as an
+    # ordinary "participant"-source turn instead of its own scripted
+    # WorldEvent -- the world_event_id check alone would miss it then.
+    fixed_utterance_beats: dict[str, str] = field(default_factory=dict)
 
     def illustration_name(self, beat_id: str | None) -> str | None:
         beat = self.beats.get(beat_id or "")
@@ -318,6 +331,7 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
         cover_bubble=tuple(cover["bubble"]) if cover.get("bubble") else None,
         cover_bubble_beat=cover.get("bubble_beat"),
         action_beats=spec.get("action_beats", {}),
+        fixed_utterance_beats=spec.get("fixed_utterance_beats", {}),
     )
 
 
@@ -341,6 +355,12 @@ class StoryTurn:
     # The LM's closed-vocabulary report of story progress reached this turn
     # (e.g. footprints' "noticed_fourth_animal"); see StoryConfig.action_beats.
     narrative_actions: tuple[str, ...] = ()
+    # Set whenever this turn's line is a registered fixed utterance, however
+    # it was delivered -- a scripted WorldEvent, or the same line returned
+    # as an ordinary turn by fixed_line_for (e.g. footprints' reveal_hint,
+    # given directly once the participant seems stuck, with no WorldEvent of
+    # its own). See StoryConfig.fixed_utterance_beats.
+    fixed_utterance_id: str | None = None
 
 
 def illustration_situation(value: Any) -> dict[str, Any]:
@@ -369,6 +389,7 @@ def turn_from_output(output: Any) -> StoryTurn:
         observed_actions=tuple(getattr(output, "observed_actions", ())),
         with_speech=bool(getattr(output, "observed_with_speech", False)),
         narrative_actions=tuple(getattr(output, "narrative_actions", ()) or ()),
+        fixed_utterance_id=getattr(output, "fixed_utterance_id", None),
     )
 
 
@@ -389,6 +410,7 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
         observed_actions=tuple(str(a) for a in record.get("observed_actions") or ()),
         with_speech=bool(record.get("with_speech")),
         narrative_actions=tuple(str(a) for a in record.get("narrative_actions") or ()),
+        fixed_utterance_id=utterance_id,
     )
 
 
@@ -563,6 +585,15 @@ def narrate(
         # picture; one that already always ends on a beat
         # with its own picture (eeyore_birthday's story_wrap_up) need not.
         beat_id = "session_close"
+    elif (
+        turn.fixed_utterance_id
+        and config.fixed_utterance_beats.get(turn.fixed_utterance_id) in config.beats
+        and config.fixed_utterance_beats[turn.fixed_utterance_id] not in covered_beats
+    ):
+        # The same registered line, however it was delivered: a scripted
+        # WorldEvent (already handled above), or fixed_line_for returning it
+        # directly on an ordinary turn instead (e.g. footprints' reveal_hint).
+        beat_id = config.fixed_utterance_beats[turn.fixed_utterance_id]
     else:
         # The LM can report reaching a scripted beat's moment on its own
         # (e.g. footprints' observe_actions(), pre-empting the beat's own

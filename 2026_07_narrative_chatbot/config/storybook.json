@@ -150,6 +150,9 @@
         "noticed_second_animal": "second_animal",
         "noticed_fourth_animal": "fourth_animal"
       },
+      "fixed_utterance_beats": {
+        "footprints.reveal_hint": "reveal_hint"
+      },
       "beats": {
         "opening": {
           "narration": "ゆきが つもった もりの なかで、プーは みなれない あしあとを みつけました。",
@@ -186,10 +189,12 @@
           "illustration": "footprints/fourth_animal.png",
           "prompt": "A bird's-eye view straight down onto plain white snow, empty except for footprints: four short, separate diagonal trails, scattered at irregular positions, angles and sizes across the frame (not a neat grid), each trail just a pair of a round paw-pad print and, right beside it, a plain rounded oval print with no tread pattern, no heel notch and no toe shape (nothing that reads as a shoe sole or a human foot), as if two walkers went back and forth a few times. The paw-pad print must be a big, round, teddy-bear-sized pad with four small toe-pad bumps, the same size and roundness as the reference bear's own paw, not a small cat-like paw. Leave open white snow between the trails. Absolutely no bear, no person, no hand, no other object anywhere in the frame; only the footprints themselves, matching the reference illustration's ink-and-watercolor style."
         },
+        "reveal_hint": {
+          "narration": "プーは、あしあとの おおきさが じぶんと あなたの あしと おなじだと きづきました。",
+          "illustration": "footprints/reveal_direct.png"
+        },
         "reveal_direct": {
-          "narration": "プーは、あしあとが じぶんたちの ものだったと きづきました。",
-          "illustration": "footprints/reveal_direct.png",
-          "prompt": "This bear from the reference image crouches low and leans over, holding up its own round furry paw sole facing the viewer, next to a matching round paw-shaped footprint in the snow, comparing the two sizes by looking down at them with a surprised, sheepish smile. The raised paw's pads (the main pad and the toe-pads) must be warm brown/tan, the same warm brown as the bear's own nose -- not white or pale. Do not show the bear's hand or arm reaching toward anyone; this is the bear checking its own footprint against its own foot. A narrow boot-shaped print sits in the snow right next to the paw print, with no one reaching for it."
+          "narration": "プーは、あしあとが じぶんたちの ものだったと きづきました。"
         },
         "session_close": {
           "narration": "あしあとの しょうたいが わかって、プーは ほっとした かおに なりました。",
