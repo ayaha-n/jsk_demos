@@ -97,3 +97,18 @@ PDF リンクは、画面で選んだ向きの PDF をその場で作って返�
 挿絵は `assets/storybook/<シナリオ>/` の PNG で、`config/storybook.json` に書いたパスで読む。リポジトリを軽くするため 256色 PNG にしてある（見た目の差は小さく、タブレットの描き出しは白黒）。タブレットに送るときは RGBA に直してから送る（`eink_memory_push` は透明部分から切り抜くため）。
 
 `scripts/storybook_illustrations.py --scenario <key>` は、各場面のプロンプトから `gpt-image-1.5` で挿絵を描かせる。参照画像は `assets/storybook/bear-reference.png`。ただし画像モデルのモデレーションで出力段階で拒否されることがあり（`moderation_blocked`）、その場合は手で描いた絵や写真を置く。参加者は顔や体を描かず、画面の下から差す影として表す。物を手渡したり差し出したり、プーに触れたりした場面では、手と腕だけを画面の端から描いてよい（`config/storybook.json` の `participant_presence`）。会話中に生成する挿絵の要約には、ROS 側が見た参加者の行為（source `observed`）も会話と同じ時系列で `reader_did` として渡す。
+
+既存の挿絵（bear-reference.png含む）は256色PNG（`P`モード）だが、`generate()`自体に減色処理はなく、どの工程で256色化されたかは未確認。footprintsの新規挿絵は`generate()`の出力（フルカラーRGBA）のままだと数MBになるため、`Image.quantize(colors=256)`で手動で揃えた（見た目の差は小さい）。
+
+footprintsシナリオの`second_animal`・`reveal_direct`・`fourth_animal`は、標準の`generate()`（参照画像1枚＋テキストのみ）では足あとの形（プーの丸い肉球と参加者の靴底）や配置が安定しなかったため、一時スクリプトで追加の参照画像を渡しながら生成した（2026-11-05、`storybook_illustrations.py`本体には未反映）。
+
+- `assets/storybook/footprints/paw_print_reference.png`・`shoe_print_reference.png`：それぞれ足あとの形だけを左右ペアで描かせた参照画像。`second_animal`・`reveal_direct`・`fourth_animal`の生成時、追加の入力画像として渡した。今後の作り直しでも使える。
+- `fourth_animal`は、使用者が別途用意した手描きのレイアウト案（黒いアイコンで足あとの配置だけを示した画像）を**レイアウト専用の参照画像**として渡し、「この配置のまま、描き方だけ絵本のスタイルに直して」と指示する方法（スタイル変換）で安定した。テキストだけで「不規則に散らばらせて」と指示しても、モデルは対称なグリッド状にしてしまう癖があった。`second_animal`・`reveal_direct`も同じレイアウト画像を使って作り直した。
+- `reveal_direct`は、`participant_presence`（読者は手だけ画面端から出す）の既定が「プーが読者と手をつなぐ」ように誤読されたため、`scene_prompt(..., reader_hand=False)`で読者の手を完全に消し、「プー自身が自分の足を持ち上げて自分の足あとと見比べる」構図に直した。
+- `ask_appearance`は、プーが考え中であることを示す吹き出し（中に想像した生き物の絵）を入れたいという要望があったが、`scene_prompt()`は常に「吹き出し禁止」を指示に含めるため、この1枚だけは`scene_prompt()`を使わず、吹き出しを明示的に許可する独自のプロンプトで生成した。
+- `opening`は挿絵の生成が繰り返しモデレーションで拒否されたため、吹き出し追加前の`ask_appearance`の絵をそのまま流用している（`cp`で複製）。
+- `ask_appearance`は、`storybook.compose_cover()`（本来は表紙の吹き出しに絵をはめ込む機能）を流用し、(1) 空の吹き出しだけを描いたポーズ違いの土台画像（`ask_appearance_bubble_empty_big.png`・`ask_appearance_bubble_empty_regen.png`）と、(2) 吹き出しの中身を別々に生成してから合成した。吹き出しの中身は、特定の会話内容を仮定できない共通の挿絵では「？」とあいまいなシルエット（`mystery_silhouette.png`、正体を特定しない）を使う。原作のWoozleのような、色・耳の形をプーとはっきり変えた具体的な想像図（`woozle_creature.png`）も作ったが、特定の見た目を断定してしまうため、共通の挿絵としては使わず、将来のセッション固有生成（下記）向けの素材として残してある。`compose_cover()`のキャッシュはファイル名ベースなので、同じファイル名のまま中身だけ差し替えた場合は`assets/storybook/generated/cover-*.png`の古いキャッシュを消してから再合成する必要がある。
+- `ask_appearance`はポーズ違いの2枚（`ask_appearance_big_bubble.png`・`ask_appearance_regen_bubble.png`）を`illustration_variants`でランダムに切り替える。将来、同じ役割の画像が複数あるとき「ベース名+番号（`_1`・`_2`等）のファイルを自動的に集めてランダム選択する」という案も出ており、毎回`illustration_variants`を手で列挙しなくて済むが、未実装。
+- `ask_appearance`は`--storybook-generate`・`--generate-illustrations`（セッション固有の挿絵生成、`generate_from_log`）には未対応。これらは`scene_prompt()`経由でしか呼ばれず、`scene_prompt()`は常に「吹き出し禁止」を含むため、実際に参加者が答えた見た目の内容を吹き出しの中に反映する仕組みにはなっていない（セッションが進んでも、上記の固定の吹き出し画像のどちらかがランダムに出るだけ）。会話に出てきた見た目を本当に反映するには、`ask_appearance`専用の生成経路（吹き出し許可＋`summarize_scene`の内容を生き物の絵に反映）を別途実装する必要がある。
+- `start_following`は、正体がまだ分かっていない段階なので参加者の靴あとを含めず、プーの肉球だけにした。
+- 足あとの向き（つま先の方向）を他の足や全体の向きと一致させる指示は、プロンプトでは安定して効かなかった（何度か試したが反映されないことがあった）。確実に直すなら、生成後に該当部分だけ`Image.rotate()`等で回転させる後処理が必要（ただし境界をなじませるマスク処理が難しく、雑に行うと二重露光のような跡が残るので要注意）。

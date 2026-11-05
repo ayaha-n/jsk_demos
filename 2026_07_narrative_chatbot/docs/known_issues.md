@@ -142,6 +142,15 @@ ROS 側（pooh_body の `handover_vision_relay.py`）は、差し出された物
 APIが返した判定段階は `output`、分類は `other`。詳細な拒否理由は分からず、
 キャラクター名・参照画像・場面内容など、どれが原因かは特定できていない。
 
+2026-11-05、footprintsシナリオの共通絵（`config/storybook.json`の
+`scenarios.footprints.beats`）を初めて生成した際も同じ現象を確認した。
+`opening`だけが毎回同じ`moderation_blocked / other`で拒否され、プロンプトの
+言い回しを変えて3回試しても変わらなかった（`ask_appearance`は1回失敗したが
+再実行だけで成功）。プロンプト内容が原因ではなく、個々の生成試行に対する
+一過性の判定である可能性を示す一例。他5ビート（`ask_appearance`・
+`start_following`・`second_animal`・`fourth_animal`・`reveal_direct`）は
+いずれか一度の試行で成功した。
+
 会話を短い場面説明に要約し、参照画像を使った部分編集にしても拒否されることがある。
 内蔵imagegenではフォールバック画像を作成できたが、同様の指示がPythonの画像APIでも
 必ず成功するとは確認できていない。再実行で未生成分を再試行できるが、成功の保証はない。

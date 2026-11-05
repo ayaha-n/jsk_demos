@@ -21,6 +21,7 @@ import base64
 import hashlib
 import os
 import json
+import random
 import re
 import sys
 import tempfile
@@ -28,6 +29,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -174,6 +176,10 @@ def generate(prompt: str, output: Path, reference: Path = REFERENCE_IMAGE,
             background="transparent",
             output_format="png",
         )
+    _save_image_response(result, output)
+
+
+def _save_image_response(result: Any, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     data = base64.b64decode(result.data[0].b64_json, validate=True)
     # Readers must never see an incomplete PNG, including during regeneration.
@@ -189,6 +195,25 @@ def generate(prompt: str, output: Path, reference: Path = REFERENCE_IMAGE,
         temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+
+def generate_plain(prompt: str, output: Path) -> None:
+    """Text-to-image, no reference picture -- for a standalone inner picture
+    (e.g. the creature composited into footprints' ask_appearance bubble),
+    not a scene continuing the bear's own book."""
+    from openai import OpenAI
+
+    with OpenAI(timeout=120.0, max_retries=0) as client:
+        result = client.images.generate(
+            model=os.getenv("STORYBOOK_IMAGE_MODEL", MODEL),
+            prompt=prompt,
+            size="1024x1024",
+            quality="medium",
+            background="transparent",
+            output_format="png",
+        )
+    _save_image_response(result, output)
 
 
 def reference_descriptions(text: str) -> str:
@@ -404,9 +429,10 @@ class SessionIllustrations:
     pictures already available. Failures leave the bundled pictures intact.
     """
 
-    def __init__(self, generate_image=None, summarize=None):
+    def __init__(self, generate_image=None, summarize=None, generate_plain_image=None):
         self.generate_image = generate_image or generate
         self._use_default_image_generator = generate_image is None
+        self.generate_plain_image = generate_plain_image or generate_plain
         self.summarize = summarize or summarize_scene
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="illustrations")
         self._lock = threading.Lock()
@@ -452,6 +478,34 @@ class SessionIllustrations:
                     raise
                 print(f"[絵本] {beat_id}: 出力段階で拒否されたため描き直します（{attempt + 1}/{MODERATION_RETRIES}）",
                       file=sys.stderr)
+
+    def _draw_bubble_scene(self, config, beat_id, description: str, output: Path, name: str) -> None:
+        """For a beat with ``bubble_bases`` (footprints' ask_appearance): draw
+        only the inner picture (e.g. the imagined creature) from the scene's
+        description, then compose it into one bundled empty-bubble base
+        (picked once per session, stable across regeneration) -- never
+        through scene_prompt(), which always forbids a thought bubble."""
+        beat = config.beats[beat_id]
+        base = random.Random(f"{config.scenario}:{config.session_id}:{beat_id}").choice(beat.bubble_bases)
+        prompt = beat.bubble_prompt.format(description=description)
+        creature_name = f"generated/{Path(name).stem}-creature.png"
+        creature_path = storybook.ILLUSTRATION_ROOT / creature_name
+        for attempt in range(MODERATION_RETRIES + 1):
+            try:
+                self.generate_plain_image(prompt, creature_path)
+                break
+            except Exception as exc:
+                diagnostics = error_diagnostics(exc)
+                if (attempt == MODERATION_RETRIES or diagnostics.get("code") != "moderation_blocked"
+                        or diagnostics["moderation_stage"] != "output"):
+                    raise
+                print(f"[絵本] {beat_id}: 出力段階で拒否されたため描き直します（{attempt + 1}/{MODERATION_RETRIES}）",
+                      file=sys.stderr)
+        composed = storybook.compose_cover(base["empty"], tuple(base["point"]), creature_name, create=True)
+        if not composed:
+            raise RuntimeError("吹き出しへの合成に失敗しました（土台または生成画像が見つかりません）")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        (storybook.ILLUSTRATION_ROOT / composed).replace(output)
 
     def _generate(self, config, beat_id, turns, name, force):
         diagnostic_path = (storybook.ILLUSTRATION_ROOT / name).with_suffix(".error.json")
@@ -519,7 +573,9 @@ class SessionIllustrations:
                 print(f"[絵本] {beat_id}: 保存済みの挿絵を使います", file=sys.stderr)
                 return
             phase = "image_generation"
-            if reference_name and self._use_default_image_generator:
+            if config.beats[beat_id].bubble_bases:
+                self._draw_bubble_scene(config, beat_id, description, storybook.ILLUSTRATION_ROOT / name, name)
+            elif reference_name and self._use_default_image_generator:
                 reference = storybook.find_illustration(reference_name)
                 if reference is None:
                     raise FileNotFoundError("編集元の挿絵がありません")

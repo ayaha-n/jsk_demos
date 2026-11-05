@@ -88,6 +88,17 @@ class StoryBeat:
     prompt: str = ""
     reference_illustration: str | None = None
     illustration_variants: list[str] = field(default_factory=list)
+    # Bundled thought-bubble bases this beat's inner picture (e.g. an
+    # imagined creature) can be composed into with compose_cover(), each
+    # {"empty": <illustration path>, "point": [x, y]} (a point inside that
+    # base's empty bubble). Only footprints' ask_appearance uses this so
+    # far; see storybook_illustrations.SessionIllustrations._draw_bubble_scene().
+    bubble_bases: list[dict[str, Any]] = field(default_factory=list)
+    # Scenario-owned prompt for that inner picture, with "{description}"
+    # standing in for the scene's own (session-specific) description; kept
+    # here rather than in storybook_illustrations.py so that module stays
+    # free of any one scenario's content.
+    bubble_prompt: str = ""
 
 
 @dataclass(frozen=True)
