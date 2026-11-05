@@ -97,6 +97,15 @@ class Scenario:
     # unresolved list are ever surfaced to the model (see
     # narrative_state.relevant_preferences).
     pooh_preferences: dict[str, str] = field(default_factory=dict)
+    # A scenario's own subclass of AnalyzeInteraction/InterpretTurn/
+    # GeneratePoohResponse (narrative_signatures.py), or None to use the
+    # generic signature unchanged. See eeyore_birthday_events.py/
+    # footprints_events.py for the shape a new scenario's own subclass
+    # should follow — defined next to that scenario's other content, never
+    # in pooh_narrative_dspy.py (see docs/known_issues.md).
+    classify_signature: type[dspy.Signature] | None = None
+    interpret_signature: type[dspy.Signature] | None = None
+    response_signature: type[dspy.Signature] | None = None
 
     def scene_label(self, scene_id: str) -> str | None:
         return next(
@@ -137,7 +146,11 @@ def _tea_party() -> Scenario:
 
 
 def _eeyore_birthday() -> Scenario:
-    from eeyore_birthday_events import HoneyGiftEventController
+    from eeyore_birthday_events import (
+        EeyoreAnalyzeInteraction,
+        EeyoreInterpretTurn,
+        HoneyGiftEventController,
+    )
     from narrative_events import estimate_speech_seconds
     from pooh_eeyore_examples import (
         EEYORE_BIRTHDAY_INTERPRET_EXAMPLES,
@@ -192,11 +205,17 @@ def _eeyore_birthday() -> Scenario:
         # the recognizer also hears イーヨー as イオン, いいよう or いーよ.
         start_cues=(("イーヨ", "相談"), ("イオン", "相談"), ("いいよう", "相談"),
                     ("いーよ", "相談")),
+        classify_signature=EeyoreAnalyzeInteraction,
+        interpret_signature=EeyoreInterpretTurn,
     )
 
 
 def _footprints() -> Scenario:
-    from footprints_events import FootprintsEventController
+    from footprints_events import (
+        FootprintsEventController,
+        FootprintsGenerateResponse,
+        FootprintsInterpretTurn,
+    )
     from narrative_events import estimate_speech_seconds
     from pooh_examples import MISHEARING_EXAMPLES
     from pooh_footprints_examples import (
@@ -253,6 +272,8 @@ def _footprints() -> Scenario:
         pooh_preferences=FOOTPRINTS_POOH_PREFERENCES,
         # 「プー，さっき何かを見つけたって言っていたよね．どうしたの？」
         start_cues=(("見つけた", "どうした"),),
+        interpret_signature=FootprintsInterpretTurn,
+        response_signature=FootprintsGenerateResponse,
     )
 
 

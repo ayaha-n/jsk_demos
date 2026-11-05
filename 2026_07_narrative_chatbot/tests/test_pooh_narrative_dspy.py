@@ -78,6 +78,7 @@ from narrative_state import (
 )
 from narrative_events import (
     FIXED_UTTERANCES,
+    NarrativeEventController,
     SettledDetail,
     RequiredNarrativeEvent,
     WorldEvent,
@@ -92,7 +93,9 @@ from eeyore_birthday_events import (
     HONEY_EATEN_RESPONSE,
     HONEY_GIFT_COMMITTED_EVENT,
     HONEY_GIFT_COMMITTED_RESPONSE,
+    HONEY_GIFT_KEPT_RESPONSE,
     HONEY_PREPARATION_UNRESOLVED,
+    HONEY_PROPOSAL_FALLBACK_RESPONSE,
     HONEY_TASTED_EVENT,
     HONEY_TASTED_FOLLOW_UP_RESPONSE,
     HONEY_TASTED_RESPONSE,
@@ -109,7 +112,8 @@ def request_agent(honey_requests, generate, situation):
     """A stand-in for PoohNarrativeAgent whose classify stage found ``honey_requests``."""
     def agent(**kwargs):
         fixed_line_for = kwargs.get("fixed_line_for")
-        line = fixed_line_for(honey_requests) if fixed_line_for else None
+        classification = SimpleNamespace(honey_requests=honey_requests)
+        line = fixed_line_for(classification) if fixed_line_for else None
         if line is None:
             return generate()
         return SimpleNamespace(
@@ -468,7 +472,7 @@ class RegressionTests(unittest.TestCase):
         with patch.object(pooh, "append_log") as log:
             output = session.submit("うーん、わからないな")
 
-        self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
+        self.assertEqual(output.bot_response, HONEY_PROPOSAL_FALLBACK_RESPONSE)
         self.assertEqual(output.narrative_actions, ["propose_honey_jar_gift"])
         # Only the guard's own proposal counts, not the dropped model commit.
         self.assertNotIn("飲み物", controller.state.settled_details)
@@ -507,7 +511,7 @@ class RegressionTests(unittest.TestCase):
             lambda controller, now: controller.observe_actions(["propose_honey_jar_gift"])
         )
 
-        self.assertEqual(output.bot_response, pooh.HONEY_GIFT_KEPT_RESPONSE)
+        self.assertEqual(output.bot_response, HONEY_GIFT_KEPT_RESPONSE)
         self.assertEqual(output.fixed_utterance_id, "eeyore_birthday.honey_gift_kept")
         self.assertEqual(controller.state.gift_status, "committed")
         self.assertIn("プーがあげるもの：ハチミツの入った壺", output.updated_situation.decided)
@@ -579,7 +583,7 @@ class RegressionTests(unittest.TestCase):
         scenario = pooh.get_scenario("eeyore_birthday")
         agent = Mock(return_value=SimpleNamespace(
             interaction_mode="narrative", current_scene="1b", narrative_actions=[],
-            settled_details=[], bot_response=pooh.HONEY_GIFT_KEPT_RESPONSE,
+            settled_details=[], bot_response=HONEY_GIFT_KEPT_RESPONSE,
             awaiting_reply=False, updated_situation=scenario.initial_situation,
         ))
         session = pooh.NarrativeSession(agent, "model", "program", scenario)
@@ -601,7 +605,7 @@ class RegressionTests(unittest.TestCase):
         with patch.object(pooh, "append_log"):
             output = session.submit("うーん、わからないな")
 
-        self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
+        self.assertEqual(output.bot_response, HONEY_PROPOSAL_FALLBACK_RESPONSE)
         self.assertFalse(session.awaiting_reply)
 
     def test_narrative_relay_publisher_does_not_raise_when_relay_is_unreachable(self):
@@ -1087,31 +1091,29 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(labeled.question_kind, "deepen")
 
     def test_response_invariants_prevent_repeated_question_on_hesitation(self):
-        response = pooh.enforce_response_invariants(
-            user_action="うーん，どうしよう",
-            history="",
-            bot_response="どうしようかな。きみはどう思う？",
-            gift_status="undecided",
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        response = controller.enforce_response_invariants(
+            "うーん，どうしよう", "", "どうしようかな。きみはどう思う？",
         )
         self.assertIn("ハチミツの入った壺", response)
         self.assertNotIn("どう思う", response)
 
     def test_response_invariants_without_gift_status_are_a_no_op(self):
-        # gift_status=None (the default) means "not the eeyore_birthday
-        # scenario"; both honey- and balloon-specific guards must be skipped.
-        response = pooh.enforce_response_invariants(
-            user_action="うーん，どうしよう",
-            history="",
-            bot_response="どうしようかな。きみはどう思う？",
+        # The base NarrativeEventController (no scenario-specific guard
+        # overriding it) must skip both the honey- and balloon-specific
+        # guards entirely — those are eeyore_birthday-only.
+        controller = NarrativeEventController(
+            state=SimpleNamespace(completed_event_ids=set()), required_events=(),
+        )
+        response = controller.enforce_response_invariants(
+            "うーん，どうしよう", "", "どうしようかな。きみはどう思う？",
         )
         self.assertEqual(response, "どうしようかな。きみはどう思う？")
 
     def test_response_invariants_still_apply_while_gift_is_undecided(self):
-        response = pooh.enforce_response_invariants(
-            user_action="うーん，どうしよう",
-            history="",
-            bot_response="どうしようかな。きみはどう思う？",
-            gift_status="undecided",
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        response = controller.enforce_response_invariants(
+            "うーん，どうしよう", "", "どうしようかな。きみはどう思う？",
         )
         self.assertIn("ハチミツの入った壺", response)
 
@@ -1120,21 +1122,19 @@ class RegressionTests(unittest.TestCase):
         # hesitation about which gift to propose; the jar has already been
         # decided (and eaten), so re-injecting the original pitch would
         # contradict the story.
-        response = pooh.enforce_response_invariants(
-            user_action="え，どうしよう，こまったね",
-            history="",
-            bot_response="困ったなあ。何かいいアイデアはあるかな？",
-            gift_status="committed",
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        controller.state.gift_status = "committed"
+        response = controller.enforce_response_invariants(
+            "え，どうしよう，こまったね", "", "困ったなあ。何かいいアイデアはあるかな？",
         )
         self.assertNotIn("ハチミツの入った壺を贈るのがいいと思うな", response)
         self.assertEqual(response, "困ったなあ。何かいいアイデアはあるかな？")
 
     def test_response_invariants_do_not_introduce_unmentioned_balloon(self):
-        response = pooh.enforce_response_invariants(
-            user_action="いいね",
-            history="プーの応答: ハチミツの入った壺を贈ろう。",
-            bot_response="風船も考えてくれたし、素敵なプレゼントだね。",
-            gift_status="undecided",
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
+        response = controller.enforce_response_invariants(
+            "いいね", "プーの応答: ハチミツの入った壺を贈ろう。",
+            "風船も考えてくれたし、素敵なプレゼントだね。",
         )
         self.assertNotIn("風船", response)
 
@@ -1680,7 +1680,7 @@ class RegressionTests(unittest.TestCase):
         with patch.object(pooh, "append_log"):
             output = session.submit("うーん、わからないな")
 
-        self.assertEqual(output.bot_response, pooh.HONEY_PROPOSAL_FALLBACK_RESPONSE)
+        self.assertEqual(output.bot_response, HONEY_PROPOSAL_FALLBACK_RESPONSE)
         self.assertIn("propose_honey_jar_gift", output.narrative_actions)
         # The guard voiced Pooh's own proposal, which decides his gift.
         self.assertEqual(controller.state.gift_status, "committed")
@@ -2366,13 +2366,17 @@ class EarlyResponseTests(unittest.TestCase):
     def test_turns_that_may_be_replaced_are_not_sent_early(self):
         controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: 0.0)
         # Honey requests get their fixed line before generation instead.
-        self.assertFalse(pooh.response_may_be_replaced("食べないでね", "", controller))
-        self.assertTrue(pooh.response_may_be_replaced("うーん、どうしよう", "", controller))
-        # No controller (e.g. tea_party) means no honey/balloon guard can ever
-        # fire in enforce_response_invariants, so nothing holds the line back.
-        self.assertFalse(pooh.response_may_be_replaced("いいね", "", None))
-        self.assertFalse(pooh.response_may_be_replaced("いいね", "風船", None))
-        self.assertFalse(pooh.response_may_be_replaced("ケーキにしよう", "", None))
+        self.assertFalse(controller.response_may_be_replaced("食べないでね", ""))
+        self.assertTrue(controller.response_may_be_replaced("うーん、どうしよう", ""))
+        # The base NarrativeEventController (no scenario-specific guard
+        # overriding it, e.g. tea_party) never holds a line back — nothing
+        # there could replace it in enforce_response_invariants.
+        base = NarrativeEventController(
+            state=SimpleNamespace(completed_event_ids=set()), required_events=(),
+        )
+        self.assertFalse(base.response_may_be_replaced("いいね", ""))
+        self.assertFalse(base.response_may_be_replaced("いいね", "風船"))
+        self.assertFalse(base.response_may_be_replaced("ケーキにしよう", ""))
 
     def agent(self, mode="narrative", technical_terms=()):
         order = []
@@ -2600,9 +2604,13 @@ class HoneyRequestTests(unittest.TestCase):
         agent, calls = self.agent(requests, mode)
         seen = []
 
-        def fixed_line_for(found):
-            seen.append(found)
-            return fixed_line
+        def fixed_line_for(classification):
+            # A stand-in for a scenario policy like
+            # HoneyGiftEventController.fixed_line_for: it is always called
+            # (the engine no longer pre-filters by honey_requests), and
+            # decides for itself whether it has anything to offer.
+            seen.append(classification)
+            return fixed_line if getattr(classification, "honey_requests", None) else None
         result = agent.forward(
             current_situation=pooh.get_scenario("eeyore_birthday").initial_situation,
             user_action="食べないでね", history="", fixed_line_for=fixed_line_for,
@@ -2612,7 +2620,8 @@ class HoneyRequestTests(unittest.TestCase):
     def test_fixed_line_skips_generation(self):
         result, calls, seen = self.run_turn(["ask_pooh_not_to_eat_honey"], "固定セリフ")
         self.assertEqual(calls, ["AnalyzeInteraction"])
-        self.assertEqual(seen, [["ask_pooh_not_to_eat_honey"]])
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].honey_requests, ["ask_pooh_not_to_eat_honey"])
         self.assertEqual(result.bot_response, "固定セリフ")
         self.assertTrue(result.fixed_by_request)
 
@@ -2620,8 +2629,12 @@ class HoneyRequestTests(unittest.TestCase):
         result, calls, _ = self.run_turn(["ask_pooh_not_to_eat_honey"], None)
         self.assertIn("GeneratePoohResponse", calls)
         self.assertFalse(result.fixed_by_request)
+        # fixed_line_for is still called with the full classification (an
+        # empty honey_requests is for it to decide is irrelevant), it just
+        # has nothing to offer.
         result, _, seen = self.run_turn([], "固定セリフ")
-        self.assertEqual(seen, [])
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].honey_requests, [])
         self.assertEqual(result.bot_response, "うん、約束するよ！")
 
     def test_exit_does_not_take_a_fixed_line(self):

@@ -160,7 +160,14 @@ class NarrativeEventController:
     ``situation_update``, subclasses this and overrides
     ``observe_actions``/``observe_settled_details``/``synchronize_situation``;
     the base implementations of those three are no-ops (the last one is the
-    identity). See ``eeyore_birthday_events.HoneyGiftEventController``.
+    identity). A scenario whose classify/generate stages need a runtime
+    guard (a fixed line for certain classify-stage results, or a
+    deterministic rewrite of a generated line) overrides
+    ``fixed_line_for``/``response_may_be_replaced``/
+    ``enforce_response_invariants``/``extra_actions_for`` instead; those
+    four default to never firing. See
+    ``eeyore_birthday_events.HoneyGiftEventController`` for the worked
+    example of both sets of hooks.
 
     ``state`` must carry a ``completed_event_ids: set[str]`` attribute: a
     fired event's prerequisite can easily still hold afterwards (nothing
@@ -307,3 +314,40 @@ class NarrativeEventController:
         situation_update did or forgot to do. The base implementation is the
         identity; a scenario with state to render overrides this."""
         return situation
+
+    def fixed_line_for(self, classification: Any) -> str | None:
+        """Hook: a scenario-specific fixed line for this turn's classify-stage
+        result (whatever extra fields that scenario's own AnalyzeInteraction
+        subclass adds, e.g. eeyore_birthday_events.EeyoreAnalyzeInteraction's
+        honey_requests), bypassing generation entirely, or None to generate
+        normally. The base implementation never has one; a scenario whose
+        classify stage can short-circuit generation overrides this. ``None``
+        when nothing was classified this turn (a world event)."""
+        return None
+
+    def response_may_be_replaced(self, user_action: str, history: str) -> bool:
+        """Hook: whether NarrativeSession.submit() may still swap the
+        generated line once it is complete, so it must be held back instead
+        of streamed to the robot as it is written. The base implementation
+        never replaces a line, so nothing is ever held back; a scenario whose
+        enforce_response_invariants can replace a line overrides this,
+        judging from the same input the eventual replacement would."""
+        return False
+
+    def enforce_response_invariants(
+        self, user_action: str, history: str, bot_response: str,
+    ) -> str:
+        """Hook: apply small deterministic guards for requirements the LM
+        output may violate, returning a replacement line (or bot_response
+        unchanged). The base implementation never replaces anything; a
+        scenario with such a guard overrides this (see
+        eeyore_birthday_events.HoneyGiftEventController for the worked
+        example)."""
+        return bot_response
+
+    def extra_actions_for(self, bot_response: str) -> list[str]:
+        """Hook: narrative_actions to record as if the model had reported
+        them, when enforce_response_invariants replaced its line with one
+        that implies an action the model's own (discarded) line might not
+        have included. The base implementation never adds any."""
+        return []

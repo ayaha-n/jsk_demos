@@ -24,6 +24,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Literal
 
+import dspy
+
+from mishearing_cases import MishearingCandidate
 from narrative_events import (
     NarrativeEventController,
     RequiredNarrativeEvent,
@@ -31,7 +34,13 @@ from narrative_events import (
     WorldEvent,
     fixed_utterance,
 )
-from narrative_state import SituationUpdate
+from narrative_signatures import (
+    GeneratePoohResponse,
+    InterpretTurn,
+    QuestionKind,
+    _signature_field,
+)
+from narrative_state import NarrativeSituation, SituationUpdate
 
 
 FootprintsAction = Literal[
@@ -46,6 +55,103 @@ KNOWN_FOOTPRINTS_ACTIONS = {
     "noticed_fourth_animal",
     "realized_own_footprints",
 }
+
+
+# InterpretTurn, extended with footprints' own closed vocabulary — built the
+# same way as eeyore_birthday_events.EeyoreInterpretTurn, for the same reason
+# (field order; see that class's comment).
+_FOOTPRINTS_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
+    desc=(
+        "Pythonが検証する機械可読な報告。必要なものだけを返す。利用可能: "
+        "started_following(プーと参加者が足跡を追いかけ始めた場合)、"
+        "noticed_second_animal(足跡が２匹分に見えることに気づいた場合)、"
+        "noticed_fourth_animal(足跡がさらに増えて４匹分になったことに気づいた場合。"
+        "２匹分の段階を経ていなくてもよい)、"
+        "realized_own_footprints(自分たちの足跡だったと、参加者が自分の言葉で"
+        "明確に言い当てた場合のみ。「え，なんだろう」のような曖昧な返答・"
+        "聞き返しだけでは判定しない)。"
+        "該当しなければ空リスト。"
+    )
+)
+FootprintsInterpretTurn = type(
+    "FootprintsInterpretTurn",
+    (dspy.Signature,),
+    {
+        "__doc__": getattr(InterpretTurn, "instructions", InterpretTurn.__doc__),
+        "__annotations__": {
+            "current_situation": NarrativeSituation,
+            "history": str,
+            "user_action": str,
+            "world_event": str,
+            "bot_response": str,
+            "situation_update": SituationUpdate,
+            "narrative_actions": list[FootprintsAction],
+            "settled_details": list[SettledDetail],
+            "question_kind": QuestionKind,
+        },
+        "current_situation": _signature_field(InterpretTurn, "current_situation"),
+        "history": _signature_field(InterpretTurn, "history"),
+        "user_action": _signature_field(InterpretTurn, "user_action"),
+        "world_event": _signature_field(InterpretTurn, "world_event"),
+        "bot_response": _signature_field(InterpretTurn, "bot_response"),
+        "situation_update": _signature_field(InterpretTurn, "situation_update"),
+        "narrative_actions": _FOOTPRINTS_NARRATIVE_ACTIONS_FIELD,
+        "settled_details": _signature_field(InterpretTurn, "settled_details"),
+        "question_kind": _signature_field(InterpretTurn, "question_kind"),
+    },
+)
+
+
+# GeneratePoohResponse, extended with footprints' own constraint: Pooh must
+# never float the actual twist (that the tracks are the pair's own) himself,
+# except through reveal_direct's scripted line. GeneratePoohResponse's shared
+# instructions already tell Pooh to volunteer his own idea about whatever is
+# still unresolved once a topic winds down — for footprints, IDENTITY_UNRESOLVED
+# IS the twist, so without this carve-out Pooh ends up guessing it himself in
+# an aside, and the story then carries on as if nothing had been said (see
+# docs/known_issues.md). Built with type() (not a plain docstring subclass)
+# so the base instructions are kept, not replaced — same reasoning as
+# EeyoreAnalyzeInteraction above, just appending text instead of adding a
+# field this time.
+_FOOTPRINTS_RESPONSE_EXTRA_INSTRUCTIONS = (
+    "あしあとの正体について、プー自身が「これは自分たちの足あとかもしれない」のように"
+    "正体そのものを示唆することは、reveal_directの場面（参加者がヒントを重ねても"
+    "気づかない場合の最後の推測）以外ではしない。未解決の項目に話を戻すときも、"
+    "正体の推測ではなく、追いかける・観察するなど周辺の行動や感想にとどめる。"
+)
+FootprintsGenerateResponse = type(
+    "FootprintsGenerateResponse",
+    (dspy.Signature,),
+    {
+        "__doc__": (
+            getattr(GeneratePoohResponse, "instructions", GeneratePoohResponse.__doc__ or "")
+            + "\n\n"
+            + _FOOTPRINTS_RESPONSE_EXTRA_INSTRUCTIONS
+        ),
+        "__annotations__": {
+            "current_situation": NarrativeSituation,
+            "history": str,
+            "user_action": str,
+            "world_event": str,
+            "previous_bot_response": str,
+            "pooh_preferences": str,
+            "interaction_mode": str,
+            "mishearing_candidates": list[MishearingCandidate],
+            "selected_mishearing": str,
+            "bot_response": str,
+        },
+        "current_situation": _signature_field(GeneratePoohResponse, "current_situation"),
+        "history": _signature_field(GeneratePoohResponse, "history"),
+        "user_action": _signature_field(GeneratePoohResponse, "user_action"),
+        "world_event": _signature_field(GeneratePoohResponse, "world_event"),
+        "previous_bot_response": _signature_field(GeneratePoohResponse, "previous_bot_response"),
+        "pooh_preferences": _signature_field(GeneratePoohResponse, "pooh_preferences"),
+        "interaction_mode": _signature_field(GeneratePoohResponse, "interaction_mode"),
+        "mishearing_candidates": _signature_field(GeneratePoohResponse, "mishearing_candidates"),
+        "selected_mishearing": _signature_field(GeneratePoohResponse, "selected_mishearing"),
+        "bot_response": _signature_field(GeneratePoohResponse, "bot_response"),
+    },
+)
 
 # settled_details topic marking that Pooh has named the creature (see
 # pooh_footprints_examples.py's 場面2); arms the start_following clock.

@@ -331,30 +331,31 @@ current_situation の小道具（テーブル、カップ、皿、蜂蜜壺、�
 「ハチミツはやめて、ケーキにしようよ」は `decline_honey_jar_gift` だけになった（会話の流れ
 なしで単独に分類させたときは、2つとも付くことがあった）。
 
-## シナリオ固有のInterpretTurn/AnalyzeInteractionサブクラスが共通ファイルに置かれている
+## ～解決済み～ シナリオ固有の内容が共通ファイルに置かれている
 
 - 記録日: 2026-11-03
-- 状態: 既知の制約として承知のうえ、現時点では踏襲。リファクタリングは保留。
-- 確認対象: `scripts/pooh_narrative_dspy.py` の `EeyoreAnalyzeInteraction`・`EeyoreInterpretTurn`・
-  `FootprintsInterpretTurn`（いずれも定義元コメントに理由あり）。
+- 解決日: 2026-11-05
+- 状態: 解決済み。
 
-`AnalyzeInteraction`/`InterpretTurn`（共通の基底Signature）・`QuestionKind`・`_signature_field`は
-`pooh_narrative_dspy.py`に定義されている。一方この同じモジュールが`scenarios.py`経由で
-`eeyore_birthday_events.py`・`footprints_events.py`を読み込むため、これらシナリオ固有ファイルの
-側から基底Signatureを逆輸入してサブクラス化すると循環importになる。そのため
-`EeyoreAnalyzeInteraction`・`EeyoreInterpretTurn`・`FootprintsInterpretTurn`は、本来シナリオ固有の
-語彙（`honey_requests`・`narrative_actions`の説明文など）であるにもかかわらず、回避策として
-共通ファイル`pooh_narrative_dspy.py`の中に書かれている。シナリオが増えるたびにこの共通ファイルに
-シナリオ固有のブロックが積み重なる。
+`scripts/narrative_signatures.py`を新設し、`AnalyzeInteraction`・`InterpretTurn`・
+`GeneratePoohResponse`・`QuestionKind`・`_signature_field`（シナリオに依存しない基底部分）を
+`pooh_narrative_dspy.py`から移動した。`EeyoreAnalyzeInteraction`・`EeyoreInterpretTurn`は
+`eeyore_birthday_events.py`へ、`FootprintsInterpretTurn`・`FootprintsGenerateResponse`は
+`footprints_events.py`へ、それぞれ移動し、そこから`narrative_signatures`の基底Signatureを
+読み込んでサブクラス化する形にした（循環importは起きない）。
 
-対策の候補:
+さらに、`NarrativeSession.submit()`内に直接書かれていた蜂蜜・風船固有の後処理ロジック
+（`response_may_be_replaced`・`enforce_response_invariants`・`_fixed_line_for`・生成破棄時の
+`narrative_actions`補完）も、`NarrativeEventController`の4つの汎用フック
+（`fixed_line_for`・`response_may_be_replaced`・`enforce_response_invariants`・
+`extra_actions_for`、基底はすべて no-op）に置き換え、実装は`HoneyGiftEventController`側に
+移した。`PoohNarrativeAgent.forward()`の`fixed_line_for`フックも、「honey_requestsを渡す」という
+決め打ちをやめ、分類結果そのもの（`classification`）を渡す形に一般化した。
 
-- `AnalyzeInteraction`・`InterpretTurn`・`QuestionKind`・`_signature_field`など、シナリオに依存
-  しない基底部分だけを独立したモジュール（例: `narrative_signatures.py`）に切り出す。
-  `eeyore_birthday_events.py`・`footprints_events.py`はそこから基底Signatureを読み込んでそれぞれの
-  サブクラスを自分のファイル内に定義できるようになり、`pooh_narrative_dspy.py`側は
-  `SCENARIO_SIGNATURES`を組み立てるために各シナリオのファイルからサブクラスを読み込むだけになる
-  （循環importは起きない）。eeyore側の既存コードも合わせて移動する、やや大きめの変更になる。
+これにより`pooh_narrative_dspy.py`にはシナリオ固有の語彙・文言が残っておらず、新しいシナリオは
+自分のイベントファイル（`xxx_events.py`）を追加するだけで済む。eeyore_birthdayの
+コンパイル済みプログラムは変更前後でバイト単位の完全一致を確認済み（`git stash`での往復比較）。
+テストスイート282件もパス。
 
 ## 応答の差し替えにキーワードの決め打ちが残っている
 

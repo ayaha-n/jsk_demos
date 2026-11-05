@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
+
+import dspy
 
 from narrative_events import (
     NarrativeEventController,
@@ -24,6 +26,7 @@ from narrative_events import (
     WorldEvent,
     fixed_utterance,
 )
+from narrative_signatures import AnalyzeInteraction, InterpretTurn, QuestionKind, _signature_field
 from narrative_state import NarrativeSituation, SituationUpdate, apply_situation_update
 
 
@@ -50,6 +53,88 @@ KNOWN_NARRATIVE_ACTIONS = {
     "give_empty_jar",
     "not_give_empty_jar",
 }
+
+
+# AnalyzeInteraction, extended with eeyore_birthday's own closed vocabulary.
+# No docstring here: dspy.Signature uses a subclass's own docstring as its
+# instructions instead of inheriting the parent's, so adding one would
+# silently replace the real classification instructions with whatever this
+# comment said. A scenario with its own narrative actions should follow this
+# same shape: subclass the generic signature right next to its own vocabulary
+# (also without its own docstring), rather than adding its fields to the
+# shared one. See pooh_narrative_dspy.signatures_for for how a scenario's own
+# subclass gets used.
+class EeyoreAnalyzeInteraction(AnalyzeInteraction):
+    honey_requests: list[HoneyRequest] = dspy.OutputField(
+        desc=(
+            "このターンの参加者の発話・行為そのものが次に当たる場合だけ返す。"
+            "historyにある前の頼みは数えず、話題が移った発話には返さない。"
+            "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると決めているのに、"
+            "参加者がそれをいらないと言った、または別の贈り物に置き換えようとした)、"
+            "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
+            "または食べないと約束するよう求めた)。該当しなければ空リスト。"
+        )
+    )
+
+
+# InterpretTurn, extended with eeyore_birthday's own closed vocabulary.
+#
+# This is NOT a plain subclass: DSPy signature inheritance always appends a
+# subclass's own fields after all inherited ones, but narrative_actions
+# originally sat right after situation_update (second of four output
+# fields), before settled_details/question_kind — generating it earlier,
+# conditioned on less of the rest of the output, than generating it last
+# would. Rebuilt with type() instead, reusing InterpretTurn's own field
+# objects (and its instructions verbatim — see the EeyoreAnalyzeInteraction
+# note on docstrings above) so only the position and the one new field
+# differ from InterpretTurn itself.
+_EEYORE_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
+    desc=(
+        "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
+        "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
+        "プーまたは参加者が提案したが、まだ決まっていない場合)、"
+        "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると言ったのに、参加者が"
+        "それをいらないと言った、または別の贈り物に置き換えようとした場合)、"
+        "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
+        "または食べないと約束するよう求めた場合)、"
+        "commit_honey_jar_gift、"
+        "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
+        "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
+        "決まった場合。別の贈り物に替える場合など)。該当しなければ空リスト。"
+    )
+)
+EeyoreInterpretTurn = type(
+    "EeyoreInterpretTurn",
+    (dspy.Signature,),
+    {
+        # getattr: under tests' fake dspy stub (dspy.Signature = object),
+        # there is no .instructions property at all; __doc__ (identical once
+        # DSPy's own dedenting is accounted for) is close enough there, since
+        # the stub never inspects a signature's rendered instructions anyway.
+        "__doc__": getattr(InterpretTurn, "instructions", InterpretTurn.__doc__),
+        "__annotations__": {
+            "current_situation": NarrativeSituation,
+            "history": str,
+            "user_action": str,
+            "world_event": str,
+            "bot_response": str,
+            "situation_update": SituationUpdate,
+            "narrative_actions": list[NarrativeAction],
+            "settled_details": list[SettledDetail],
+            "question_kind": QuestionKind,
+        },
+        "current_situation": _signature_field(InterpretTurn, "current_situation"),
+        "history": _signature_field(InterpretTurn, "history"),
+        "user_action": _signature_field(InterpretTurn, "user_action"),
+        "world_event": _signature_field(InterpretTurn, "world_event"),
+        "bot_response": _signature_field(InterpretTurn, "bot_response"),
+        "situation_update": _signature_field(InterpretTurn, "situation_update"),
+        "narrative_actions": _EEYORE_NARRATIVE_ACTIONS_FIELD,
+        "settled_details": _signature_field(InterpretTurn, "settled_details"),
+        "question_kind": _signature_field(InterpretTurn, "question_kind"),
+    },
+)
+
 
 HONEY_EATEN_RESPONSE = fixed_utterance("eeyore_birthday.honey_eaten")
 HONEY_EATEN_DESCRIPTION = (
@@ -106,6 +191,11 @@ STORY_WRAP_UP_DESCRIPTION = (
 # Pooh cannot move, so the wrap-up only reflects on the gift and leaves the
 # choice to keep talking with the participant.
 STORY_WRAP_UP_RESPONSE = fixed_utterance("eeyore_birthday.story_wrap_up")
+
+HONEY_PROPOSAL_FALLBACK_RESPONSE = (
+    "ぼくは、ハチミツの入った壺を贈るのがいいと思うな。甘いものがあると、イーヨーもきっと喜ぶもの。"
+)
+HESITATION_MARKERS = ("うーん", "迷", "まよう", "どうしよう", "わからない")
 
 
 @dataclass
@@ -450,3 +540,68 @@ class HoneyGiftEventController(NarrativeEventController):
                 SituationUpdate(add_events=[STORY_WRAP_UP_EVENT]),
             )
         return situation
+
+    def fixed_line_for(self, classification: Any) -> str | None:
+        """The fixed line for the participant's honey requests, this turn's
+        classification found, if any applies now (see
+        EeyoreAnalyzeInteraction.honey_requests)."""
+        honey_requests = [
+            str(request) for request in getattr(classification, "honey_requests", []) or []
+        ]
+        if not honey_requests:
+            return None
+        line = None
+        if "decline_honey_jar_gift" in honey_requests and self.state.honey_jar_is_poohs_gift():
+            # Pooh's own gift stays; a fixed line adds it beside the
+            # participant's idea instead of a generated line dropping it.
+            line = HONEY_GIFT_KEPT_RESPONSE
+        if "ask_pooh_not_to_eat_honey" in honey_requests:
+            # The honey is always eaten, so a generated line must not promise
+            # otherwise; Pooh sidesteps with a fixed line instead.
+            line = self.state.sidestep_promise_request() or line
+        return line
+
+    def response_may_be_replaced(self, user_action: str, history: str) -> bool:
+        """Whether submit() may swap the generated line once it is complete.
+
+        A line sent before the turn finishes is spoken before that, so such
+        turns are sent whole at the end. Judged from the input and state
+        only; keep in step with enforce_response_invariants and the
+        replacements in NarrativeSession.submit(). The fixed lines for honey
+        requests are chosen before generation instead (fixed_line_for).
+        """
+        if self.state.gift_status == "undecided" and any(
+            marker in user_action for marker in HESITATION_MARKERS
+        ):
+            return True
+        return user_action.strip() == "いいね" and "風船" not in history
+
+    def enforce_response_invariants(
+        self, user_action: str, history: str, bot_response: str,
+    ) -> str:
+        """Apply small deterministic guards for requirements LM output may violate."""
+        hesitation = any(marker in user_action for marker in HESITATION_MARKERS)
+        asks_back = any(
+            marker in bot_response for marker in ("？", "?", "どう思う", "何かいいアイデア", "何か思いつ")
+        )
+        # This fallback proposes the honey jar as a still-open idea. Once the
+        # gift has moved past that stage (committed, eaten, cancelled,
+        # delivered), the same word ("どうしよう" etc.) can appear for
+        # unrelated reasons (e.g. sympathizing that the honey is gone), and
+        # re-injecting this text would contradict what has already happened.
+        if self.state.gift_status == "undecided" and hesitation and asks_back:
+            return HONEY_PROPOSAL_FALLBACK_RESPONSE
+
+        # Do not let the model introduce a prop the participant has not mentioned.
+        if user_action.strip() == "いいね" and "風船" not in history and "風船" in bot_response:
+            return "うん、そうしよう。イーヨーが喜んでくれるといいなあ。"
+
+        return bot_response
+
+    def extra_actions_for(self, bot_response: str) -> list[str]:
+        """narrative_actions to record as if the model had reported them,
+        when enforce_response_invariants replaced its line with one that
+        implies an action the model's own (discarded) line might not have."""
+        if bot_response == HONEY_PROPOSAL_FALLBACK_RESPONSE:
+            return ["propose_honey_jar_gift"]
+        return []

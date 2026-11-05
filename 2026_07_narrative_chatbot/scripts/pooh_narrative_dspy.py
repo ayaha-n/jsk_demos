@@ -21,7 +21,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence
+from typing import Any, Callable, Sequence
 from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -55,13 +55,6 @@ from narrative_state import (
     coerce_situation,
     relevant_preferences,
 )
-from eeyore_birthday_events import (
-    HoneyGiftState,
-    HoneyRequest,
-    NarrativeAction,
-    HONEY_GIFT_KEPT_RESPONSE,
-)
-from footprints_events import FootprintsAction
 from narrative_events import (
     NarrativeEventController,
     SettledDetail,
@@ -69,6 +62,13 @@ from narrative_events import (
     estimate_speech_seconds,
     fixed_utterance_id,
     fixed_utterance_motion,
+)
+from narrative_signatures import (
+    AnalyzeInteraction,
+    DISALLOWED_QUESTION_KINDS,
+    GeneratePoohResponse,
+    InterpretTurn,
+    PlanMishearing,
 )
 from pooh_examples import (
     INITIAL_SITUATION,
@@ -97,331 +97,15 @@ MAX_BOOTSTRAPPED_DEMOS = 4
 MAX_LABELED_DEMOS = 0
 MAX_TOTAL_DEMOS_PER_STAGE = 12
 
-class AnalyzeInteraction(dspy.Signature):
-    """参加者の発話・行為に最も自然な応答方針を選ぶ。
 
-    ロボット本体、機械、内部機構、技術、研究、実験への言及を含む場合はmetaとする。
-    物語世界内の食事や行為と組み合わされた質問でも、技術的な前提を含めばmetaとする。
-    直前のmetaへの訂正、言い換え、補足もmetaを維持する。
-    終了、拒否、不快、安全に関する意思はexitを優先する。
-    「そろそろ行かなきゃ」「もう帰るね」「またね」のような、立ち去る・別れる意思もexitとする。
-    場面の場所・小道具・登場人物・目的、これまでのやり取りで積み重なった出来事、
-    または原作（他のクマのプーさんの話）にあるプーの過去のエピソードに関わる発話や
-    身体的行為はnarrativeとする。
-    挨拶、相槌、間投詞、「これでいい？」「続けてもいい？」のような進行確認など、
-    物語世界の出来事を伴わない発話だけをordinaryとする。
-    場面についての問いかけへの「迷う」「わからない」も、履歴を踏まえてnarrativeとする。
-    判断に迷う場合はordinaryではなくnarrativeを優先する。
-    """
-
-    current_situation: NarrativeSituation = dspy.InputField()
-    # Keep history before the current input so the newest participant line in
-    # the prompt is this turn's input, not the previous turn's.
-    history: str = dspy.InputField()
-    user_action: str = dspy.InputField()
-    technical_terms: list[str] = dspy.OutputField(
-        desc="発話に含まれる物語世界外の技術語・研究語。存在しない場合は空。"
-    )
-    interaction_mode: str = dspy.OutputField(
-        desc="ordinary、narrative、meta、exitのいずれか。直前のmetaへの訂正・補足もmeta。"
-    )
-    current_scene: str = dspy.OutputField(
-        desc=(
-            "観察用の場面ID。会話例に定義された場面のうち、現在の展開に最も近い"
-            "安定したIDを返す。順序や状態遷移の制御には使わない。該当しなければnone。"
-        )
-    )
-
-
-# AnalyzeInteraction, extended with eeyore_birthday's own closed vocabulary.
-# No docstring here: dspy.Signature uses a subclass's own docstring as its
-# instructions instead of inheriting the parent's, so adding one would
-# silently replace the real classification instructions above with whatever
-# this comment said. Defined here (not in eeyore_birthday_events.py) only to
-# avoid a circular import: this module imports scenario content from
-# scenarios.py, which in turn loads eeyore_birthday_events.py, so that module
-# cannot import AnalyzeInteraction back from here to subclass it. A scenario
-# with its own narrative actions should follow this same shape: subclass the
-# generic signature right next to it (also without its own docstring),
-# rather than adding its fields to the shared one. See ``signatures_for``
-# for how a scenario's own subclass gets used.
-class EeyoreAnalyzeInteraction(AnalyzeInteraction):
-    honey_requests: list[HoneyRequest] = dspy.OutputField(
-        desc=(
-            "このターンの参加者の発話・行為そのものが次に当たる場合だけ返す。"
-            "historyにある前の頼みは数えず、話題が移った発話には返さない。"
-            "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると決めているのに、"
-            "参加者がそれをいらないと言った、または別の贈り物に置き換えようとした)、"
-            "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
-            "または食べないと約束するよう求めた)。該当しなければ空リスト。"
-        )
-    )
-
-
-class PlanMishearing(dspy.Signature):
-    """抽出済みの技術語について、物語世界内の聞き違い候補を作る。
-
-    既存例の音の近さと物語への接続方法を参考にする。履歴にある聞き違いは繰り返さず、
-    自然な候補がなければ空にする。
-    """
-
-    current_situation: NarrativeSituation = dspy.InputField()
-    user_utterance: str = dspy.InputField()
-    technical_terms: list[str] = dspy.InputField()
-    history: str = dspy.InputField()
-    candidates: list[MishearingCandidate] = dspy.OutputField(desc="自然に利用できる0〜3件の候補。")
-
-
-class GeneratePoohResponse(dspy.Signature):
-    """分類結果と候補を参考に、プーとして短く自然に応答する。
-
-    プー自身の好み・考え・次にしたいことは、プー自身が決める。
-    プーが贈ると決めた贈り物は、参加者が別の案を出しても取り下げず、参加者の案と
-    一緒に贈る形で受け止める（例:「風船もいいね！ハチミツの壺と一緒に贈ろう」）。
-    問いかけ: 参加者の質問にはまず答える。知らない事実は知らないと伝え、プー自身の
-    考えを添える（例: 好きな色を知らなくても「青が好きそうだと思うよ」）。応答は
-    問いかけで終える必要はなく、プー自身の考えや次にしたいことで終えるのを基本とする。
-    historyのプーの問いかけに倣わない。問いかけてよいのは、すでに出た案を深めるとき
-    （例: 風船が出たら「何色にする？」）、参加者自身の考えや行動を尋ねるとき
-    （例:「きみは何をあげる？」）、聞き違いを確かめるときだけ。新しい案を参加者に
-    求める問いかけ（例:「ほかには？」）や、プーが決めるべきことを委ねたり、尋ねられた
-    ことを答えずに返したりする問いかけ（例:「きみはどう思う？」「きみは知ってる？」）は
-    しない。案を広げるなら、プー自身の具体案を一つ理由とともに示す。
-    参加者が迷ったり思いつかなかったりしたら、場面に沿った具体案を一つ、
-    プー自身の考えとして理由とともに示す。参加者の同意や行動は決めつけない。
-    previous_bot_responseや履歴と同じ・意味的に同じ内容（質問、説明、安心させる
-    セリフ）を繰り返さない。言い換えだけも避ける。書き出しや締めの言い回しも、
-    直前の応答と同じ型を続けて使わない。
-    current_situationの【未解決・未確定】は、プーが物語を進めるために気にかけている
-    目標である。参加者が出した案にプーも賛成なら、「じゃあ、〇〇にしよう」のように
-    決まったことをはっきり言葉にする。話がそれて一段落したら、未解決の項目に戻るよう
-    プー自身の案を一つ出す。毎ターン話を戻す必要はない。
-    「いいね」などの相づちには短く受け止めるだけでもよい。進めるならプー自身の
-    小さな次の行動や考えを一つ示し、参加者の行動や場面の結末を勝手に決めない。
-    聞き直しや確認には必要な内容を再提示してよい。新しい内容のために、未確認の
-    好みや物資の補充を捏造しない。心配にはその内容に即した具体的な工夫で応じる。
-    プーは実際にはできないこと・守れないことを言わない。物語はcurrent_situationの
-    【場所】で進み、プーはそこから出かけず、その場でできないこと（例: ケーキを焼く、
-    花を探しに行く）を今やろうとしない。「あとで一緒に」や「蜂蜜を食べない」といった
-    守れない約束もしない（例: 「だいじょうぶ、だいじょうぶ。ちょっと味見するだけだもの。」）。
-    そうした案や頼みは「〜だったらいいなあ」「イーヨー、よろこびそうだなあ」
-    のように楽しく受け止めるか軽くはぐらかし、この場にあるものや決めることに話を戻す。
-    world_event は既に確定した事実として扱う。
-    """
-
-    current_situation: NarrativeSituation = dspy.InputField()
-    # Keep history before the current input so the newest participant line in
-    # the prompt is this turn's input, not the previous turn's.
-    history: str = dspy.InputField()
-    user_action: str = dspy.InputField()
-    world_event: str = dspy.InputField(
-        desc="参加者の入力とは別に、既に確定・適用された世界の出来事。通常ターンは空文字列。"
-    )
-    previous_bot_response: str = dspy.InputField(
-        desc=(
-            "直前のプー自身の応答。これと同じ、または意味的に同じ内容("
-            "同じ質問・同じ説明・同じ安心させるセリフ等)を繰り返さない。"
-            "最初のターンでは空文字列。"
-        )
-    )
-    pooh_preferences: str = dspy.InputField(
-        desc=(
-            "プー自身が持つ既定の好み(参考情報)。参加者が既に具体的な答えを"
-            "示している場合はそれを尊重し、この好みで上書きしない。参加者が"
-            "迷ったり答えなかったりした場合にだけ、自分の意見としてここから"
-            "提示してよい。空文字列なら特に無い。"
-        )
-    )
-    interaction_mode: str = dspy.InputField()
-    mishearing_candidates: list[MishearingCandidate] = dspy.InputField(
-        desc=(
-            "利用可能な聞き違い候補。候補がある場合はその中から一つを使用し、"
-            "候補にない聞き違いを新しく作らない。候補が空なら聞き違いを作らない。"
-        )
-    )
-    selected_mishearing: str = dspy.OutputField(desc=(
-            "使用した候補のheard_as。候補が空の場合のみnone。"
-        ))
-    bot_response: str = dspy.OutputField(
-        desc=(
-            "参加者に提示する短く自然で穏やかなセリフ。一人称は常に「ぼく」。"
-            "物語世界外の技術語全体を直接出さず、技術語を直接説明せず、"
-            "利用可能な聞き違い候補があれば、その音を使って不理解を示す。"
-            "理解したような肯定、説明、自己同定をしない。"
-            "問いかけの方針は上の説明に従う。"
-        )
-    )
-
-
-QuestionKind = Literal[
-    "none", "deepen", "participant_own", "clarify", "new_idea", "delegate",
-]
-# Questions that stall the story instead of moving it; see GeneratePoohResponse.
-DISALLOWED_QUESTION_KINDS = {"new_idea", "delegate"}
-
-
-class InterpretTurn(dspy.Signature):
-    """確定したこのターンのやり取りから、物語上の判断と状態の差分を構造化する。セリフは書かない。
-
-    参加者の入力とプーの応答の両方を踏まえ、実際に起きたことだけを返す。
-    提案・候補・質問の段階と、決まったことを区別する。迷ったら何も返さない。
-    """
-
-    current_situation: NarrativeSituation = dspy.InputField()
-    history: str = dspy.InputField()
-    user_action: str = dspy.InputField()
-    world_event: str = dspy.InputField(
-        desc="参加者の入力とは別に、既に確定・適用された世界の出来事。通常ターンは空文字列。"
-    )
-    bot_response: str = dspy.InputField(desc="このターンのプーの応答。確定済み。")
-    situation_update: SituationUpdate = dspy.OutputField(
-        desc=(
-            "このターンのやり取り(参加者の入力とbot_response)で実際に生じた状態の差分だけ。変更しない項目はnullまたは空リスト。"
-            "現在状態の保持と差分の適用はPythonが行う。"
-        )
-    )
-    settled_details: list[SettledDetail] = dspy.OutputField(
-        desc=(
-            "このターンで一つに決まったこと。贈るもの、色、飲み物、ケーキなど何でもよい。"
-            "topicは、current_situationの【未解決・未確定】の項目が決まったならその項目名を"
-            "そのまま使い、それ以外は短い名詞(例: 飲み物)にする。壺以外にイーヨーに贈るものが"
-            "決まったら、topicは「イーヨーに何をあげるか」にする。空になった壺を贈るかどうかは"
-            "narrative_actionsで表し、ここには含めない。valueは決まった内容"
-            "(例: 青、風船)で、一つに決まっていなければ含めない。"
-            "誰の案かは問わない。候補を挙げただけ、質問しただけなら含めない。"
-            "current_situationの【決まったこと】にある内容を同じ値で繰り返さない。"
-            "該当しなければ空リスト。"
-        )
-    )
-    question_kind: QuestionKind = dspy.OutputField(
-        desc=(
-            "bot_responseの最後が参加者への問いかけかどうかと、その種類。"
-            "none: 問いかけで終わらない(独り言の問いかけを含む)。"
-            "deepen: すでに出た案を深める(例: 何色にする？)。"
-            "participant_own: 参加者自身の考えや行動を尋ねる(例: きみは何をあげる？)。"
-            "clarify: 聞き違いや聞き直しを確かめる。"
-            "new_idea: 新しい案を参加者に求める(例: ほかには？)。"
-            "delegate: プーが決めるべきことを委ねる、尋ねられたことを答えずに返す"
-            "(例: きみはどう思う？)。"
-        )
-    )
-
-
-def _signature_field(signature: type, name: str) -> Any:
-    """A declared field's object, whether ``signature`` is a real
-    dspy.Signature (fields live in .input_fields/.output_fields, keyed by
-    name) or tests' fake dspy stub (dspy.Signature = object; fields are
-    just plain class attributes, with no such dict at all)."""
-    for fields in (
-        getattr(signature, "input_fields", {}),
-        getattr(signature, "output_fields", {}),
-    ):
-        if name in fields:
-            return fields[name]
-    return getattr(signature, name)
-
-
-# InterpretTurn, extended with eeyore_birthday's own closed vocabulary.
-#
-# This is NOT a plain subclass: DSPy signature inheritance always appends a
-# subclass's own fields after all inherited ones, but narrative_actions
-# originally sat right after situation_update (second of four output
-# fields), before settled_details/question_kind — generating it earlier,
-# conditioned on less of the rest of the output, than generating it last
-# would. Rebuilt with type() instead, reusing InterpretTurn's own field
-# objects (and its instructions verbatim — see the EeyoreAnalyzeInteraction
-# note on docstrings above) so only the position and the one new field
-# differ from InterpretTurn itself.
-_EEYORE_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
-    desc=(
-        "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
-        "propose_honey_jar_gift(ハチミツの入った壺を贈り物の候補として、"
-        "プーまたは参加者が提案したが、まだ決まっていない場合)、"
-        "decline_honey_jar_gift(プーがハチミツの入った壺を贈ると言ったのに、参加者が"
-        "それをいらないと言った、または別の贈り物に置き換えようとした場合)、"
-        "ask_pooh_not_to_eat_honey(参加者がプーに、蜂蜜を食べないよう頼んだ、"
-        "または食べないと約束するよう求めた場合)、"
-        "commit_honey_jar_gift、"
-        "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
-        "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
-        "決まった場合。別の贈り物に替える場合など)。該当しなければ空リスト。"
-    )
-)
-EeyoreInterpretTurn = type(
-    "EeyoreInterpretTurn",
-    (dspy.Signature,),
-    {
-        # getattr: under tests' fake dspy stub (dspy.Signature = object),
-        # there is no .instructions property at all; __doc__ (identical once
-        # DSPy's own dedenting is accounted for) is close enough there, since
-        # the stub never inspects a signature's rendered instructions anyway.
-        "__doc__": getattr(InterpretTurn, "instructions", InterpretTurn.__doc__),
-        "__annotations__": {
-            "current_situation": NarrativeSituation,
-            "history": str,
-            "user_action": str,
-            "world_event": str,
-            "bot_response": str,
-            "situation_update": SituationUpdate,
-            "narrative_actions": list[NarrativeAction],
-            "settled_details": list[SettledDetail],
-            "question_kind": QuestionKind,
-        },
-        "current_situation": _signature_field(InterpretTurn, "current_situation"),
-        "history": _signature_field(InterpretTurn, "history"),
-        "user_action": _signature_field(InterpretTurn, "user_action"),
-        "world_event": _signature_field(InterpretTurn, "world_event"),
-        "bot_response": _signature_field(InterpretTurn, "bot_response"),
-        "situation_update": _signature_field(InterpretTurn, "situation_update"),
-        "narrative_actions": _EEYORE_NARRATIVE_ACTIONS_FIELD,
-        "settled_details": _signature_field(InterpretTurn, "settled_details"),
-        "question_kind": _signature_field(InterpretTurn, "question_kind"),
-    },
-)
-
-
-# InterpretTurn, extended with footprints' own closed vocabulary — built the
-# same way as EeyoreInterpretTurn above, for the same reason (field order).
-_FOOTPRINTS_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
-    desc=(
-        "Pythonが検証する機械可読な報告。必要なものだけを返す。利用可能: "
-        "started_following(プーと参加者が足跡を追いかけ始めた場合)、"
-        "noticed_second_animal(足跡が２匹分に見えることに気づいた場合)、"
-        "noticed_fourth_animal(足跡がさらに増えて４匹分になったことに気づいた場合。"
-        "２匹分の段階を経ていなくてもよい)、"
-        "realized_own_footprints(自分たちの足跡だったと、参加者が自分の言葉で"
-        "明確に言い当てた場合のみ。「え，なんだろう」のような曖昧な返答・"
-        "聞き返しだけでは判定しない)。"
-        "該当しなければ空リスト。"
-    )
-)
-FootprintsInterpretTurn = type(
-    "FootprintsInterpretTurn",
-    (dspy.Signature,),
-    {
-        "__doc__": getattr(InterpretTurn, "instructions", InterpretTurn.__doc__),
-        "__annotations__": {
-            "current_situation": NarrativeSituation,
-            "history": str,
-            "user_action": str,
-            "world_event": str,
-            "bot_response": str,
-            "situation_update": SituationUpdate,
-            "narrative_actions": list[FootprintsAction],
-            "settled_details": list[SettledDetail],
-            "question_kind": QuestionKind,
-        },
-        "current_situation": _signature_field(InterpretTurn, "current_situation"),
-        "history": _signature_field(InterpretTurn, "history"),
-        "user_action": _signature_field(InterpretTurn, "user_action"),
-        "world_event": _signature_field(InterpretTurn, "world_event"),
-        "bot_response": _signature_field(InterpretTurn, "bot_response"),
-        "situation_update": _signature_field(InterpretTurn, "situation_update"),
-        "narrative_actions": _FOOTPRINTS_NARRATIVE_ACTIONS_FIELD,
-        "settled_details": _signature_field(InterpretTurn, "settled_details"),
-        "question_kind": _signature_field(InterpretTurn, "question_kind"),
-    },
-)
+# AnalyzeInteraction/PlanMishearing/GeneratePoohResponse/QuestionKind/
+# InterpretTurn/_signature_field live in narrative_signatures.py (imported
+# above); each scenario's own subclasses (e.g. eeyore_birthday_events's
+# EeyoreAnalyzeInteraction/EeyoreInterpretTurn) live next to that scenario's
+# other content and are wired in via its own Scenario.classify_signature/
+# interpret_signature/response_signature fields (scenarios.py) — this module
+# never imports a scenario's own events file at all (see signatures_for below
+# and docs/known_issues.md).
 
 
 class MetaPolicyEvaluator(dspy.Signature):
@@ -510,72 +194,6 @@ def count_prior_technical_mentions(history: str, technical_terms: list[str]) -> 
     )
 
 
-HONEY_PROPOSAL_FALLBACK_RESPONSE = (
-    "ぼくは、ハチミツの入った壺を贈るのがいいと思うな。甘いものがあると、イーヨーもきっと喜ぶもの。"
-)
-
-
-HESITATION_MARKERS = ("うーん", "迷", "まよう", "どうしよう", "わからない")
-
-
-def response_may_be_replaced(
-    user_action: str,
-    history: str,
-    controller: NarrativeEventController | None,
-) -> bool:
-    """Whether submit() may swap the generated line once it is complete.
-
-    A line sent before the turn finishes is spoken before that, so such
-    turns are sent whole at the end.
-    Judged from the input and state only; keep in step with
-    enforce_response_invariants and the replacements in submit(). The fixed
-    lines for honey requests are chosen before generation instead.
-
-    The guards below are eeyore_birthday-specific (honey jar / balloon
-    color); scenarios with a different controller state have nothing to
-    swap for, so no line is ever held back.
-    """
-    state = controller.state if controller is not None else None
-    if not isinstance(state, HoneyGiftState):
-        return False
-    if state.gift_status == "undecided" and any(m in user_action for m in HESITATION_MARKERS):
-        return True
-    return user_action.strip() == "いいね" and "風船" not in history
-
-
-def enforce_response_invariants(
-    user_action: str,
-    history: str,
-    bot_response: str,
-    gift_status: str | None = None,
-) -> str:
-    """Apply small deterministic guards for requirements LM output may violate.
-
-    ``gift_status`` is eeyore_birthday-specific; pass ``None`` (the default)
-    for scenarios without a honey-gift state and both guards below are
-    skipped.
-    """
-    if gift_status is None:
-        return bot_response
-    hesitation = any(marker in user_action for marker in HESITATION_MARKERS)
-    asks_back = any(
-        marker in bot_response for marker in ("？", "?", "どう思う", "何かいいアイデア", "何か思いつ")
-    )
-    # This fallback proposes the honey jar as a still-open idea. Once the gift
-    # has moved past that stage (committed, eaten, cancelled, delivered), the
-    # same word ("どうしよう" etc.) can appear for unrelated reasons (e.g.
-    # sympathizing that the honey is gone), and re-injecting this text would
-    # contradict what has already happened in the story.
-    if gift_status == "undecided" and hesitation and asks_back:
-        return HONEY_PROPOSAL_FALLBACK_RESPONSE
-
-    # Do not let the model introduce a prop the participant has not mentioned.
-    if user_action.strip() == "いいね" and "風船" not in history and "風船" in bot_response:
-        return "うん、そうしよう。イーヨーが喜んでくれるといいなあ。"
-
-    return bot_response
-
-
 # A sentence ends at 。！？ (or a run of them, with any closing bracket);
 # the line is handed on sentence by sentence as it streams in.
 SENTENCE_END = re.compile(r"[。！？!?…]+[」』）)]*")
@@ -661,14 +279,20 @@ def warn_if_response_repeated(bot_response: str, previous_bot_response: str | No
 # without an entry here uses the plain, vocabulary-free base Signatures.
 # Kept here, not on Scenario itself, since Scenario (scenarios.py) is loaded
 # by this module and so cannot import these classes back from it.
-SCENARIO_SIGNATURES: dict[str, tuple[type[dspy.Signature], type[dspy.Signature]]] = {
-    "eeyore_birthday": (EeyoreAnalyzeInteraction, EeyoreInterpretTurn),
-    "footprints": (AnalyzeInteraction, FootprintsInterpretTurn),
-}
-
-
-def signatures_for(scenario: Scenario) -> tuple[type[dspy.Signature], type[dspy.Signature]]:
-    return SCENARIO_SIGNATURES.get(scenario.key, (AnalyzeInteraction, InterpretTurn))
+def signatures_for(
+    scenario: Scenario,
+) -> tuple[type[dspy.Signature], type[dspy.Signature], type[dspy.Signature]]:
+    """A scenario's own classify/interpret/response Signature subclasses
+    (scenarios.Scenario.classify_signature/interpret_signature/
+    response_signature), or the generic ones for whichever a scenario leaves
+    as None. Scenario-specific subclasses are defined in that scenario's own
+    events file (e.g. eeyore_birthday_events.py), never here — see
+    docs/known_issues.md."""
+    return (
+        scenario.classify_signature or AnalyzeInteraction,
+        scenario.interpret_signature or InterpretTurn,
+        scenario.response_signature or GeneratePoohResponse,
+    )
 
 
 class PoohNarrativeAgent(dspy.Module):
@@ -679,6 +303,7 @@ class PoohNarrativeAgent(dspy.Module):
         predictor_factory: Any = dspy.ChainOfThought,
         classify_signature: type[dspy.Signature] = AnalyzeInteraction,
         interpret_signature: type[dspy.Signature] = InterpretTurn,
+        response_signature: type[dspy.Signature] = GeneratePoohResponse,
     ) -> None:
         super().__init__()
         self.classify = predictor_factory(classify_signature)
@@ -688,7 +313,7 @@ class PoohNarrativeAgent(dspy.Module):
         respond_factory = (
             dspy.Predict if predictor_factory is dspy.ChainOfThought else predictor_factory
         )
-        self.respond = respond_factory(GeneratePoohResponse)
+        self.respond = respond_factory(response_signature)
         # Structured decisions are judged separately from writing the line, so
         # this stage's demos are all about decisions and it reads the final text.
         self.interpret = predictor_factory(interpret_signature)
@@ -703,7 +328,7 @@ class PoohNarrativeAgent(dspy.Module):
         previous_bot_response: str = "",
         pooh_preferences: str = "",
         on_response: Callable[[str], None] | None = None,
-        fixed_line_for: Callable[[list[str]], str | None] | None = None,
+        fixed_line_for: Callable[[Any], str | None] | None = None,
     ) -> Any:
         """``on_response(text)``, if given, receives the line before interpret,
         so the robot can start speaking: sentence by sentence while the line
@@ -711,14 +336,17 @@ class PoohNarrativeAgent(dspy.Module):
         by the technical-term guard, so it is passed whole once checked; an
         exit's line is replaced by the ending, so it is not passed.
 
-        ``fixed_line_for(honey_requests)``, if given, returns the fixed line
-        Pooh answers those requests with in the current state, or None; with
-        a line, nothing is generated and the turn decides nothing else
-        (``fixed_by_request``).
+        ``fixed_line_for(classification)``, if given, returns a scenario-
+        specific fixed line for this turn's classify-stage result (whatever
+        extra fields that scenario's own AnalyzeInteraction subclass adds),
+        or None; with a line, nothing is generated and the turn decides
+        nothing else (``fixed_by_request``). ``classification`` is None for a
+        world event (nothing was classified this turn), so the hook is not
+        called then.
         """
         current_situation = coerce_situation(current_situation)
         technical_terms: list[str] = []
-        honey_requests: list[str] = []
+        classification = None
         if world_event:
             mode = "narrative"
             current_scene = event_scene
@@ -735,13 +363,10 @@ class PoohNarrativeAgent(dspy.Module):
             technical_terms = list(dict.fromkeys(extracted_terms + known_terms))
             if technical_terms and mode != "exit":
                 mode = "meta"
-            honey_requests = [
-                str(request) for request in getattr(classification, "honey_requests", []) or []
-            ]
         # The ending replaces an exit's line anyway.
         fixed_line = (
-            fixed_line_for(honey_requests)
-            if fixed_line_for is not None and honey_requests and mode != "exit"
+            fixed_line_for(classification)
+            if fixed_line_for is not None and classification is not None and mode != "exit"
             else None
         )
         if fixed_line is not None:
@@ -756,7 +381,6 @@ class PoohNarrativeAgent(dspy.Module):
                 bot_response=fixed_line,
                 question_kind="none",
                 awaiting_reply=False,
-                honey_requests=honey_requests,
                 fixed_by_request=True,
             )
         candidates: list[MishearingCandidate] = []
@@ -815,7 +439,7 @@ class PoohNarrativeAgent(dspy.Module):
             selected_mishearing = "none"
             bot_response = (
                 "ぼくにはよくわからないけれど、"
-                "いま、きみとお茶会をしているのはわかるよ。"
+                "いま、きみといっしょにいるのはわかるよ。"
             )
         if feed is not None:
             if not feed.finish(bot_response):
@@ -859,7 +483,6 @@ class PoohNarrativeAgent(dspy.Module):
             bot_response=bot_response,
             question_kind=question_kind,
             awaiting_reply=question_kind != "none",
-            honey_requests=honey_requests,
             fixed_by_request=False,
         )
 
@@ -1164,12 +787,14 @@ def compile_program(
         max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
         max_labeled_demos=MAX_LABELED_DEMOS,
     )
-    classify_signature, interpret_signature = signatures_for(scenario)
+    classify_signature, interpret_signature, response_signature = signatures_for(scenario)
     student = PoohNarrativeAgent(
         classify_signature=classify_signature, interpret_signature=interpret_signature,
+        response_signature=response_signature,
     )
     teacher = PoohNarrativeAgent(
         classify_signature=classify_signature, interpret_signature=interpret_signature,
+        response_signature=response_signature,
     )
     set_agent_demos(teacher, scenario)
     with dspy.context(lm=train_lm):
@@ -1193,9 +818,10 @@ def load_compiled_program(train_model: str, judge_model: str, scenario: Scenario
             "`python scripts/pooh_narrative_dspy.py --mode compile"
             f" --scenario {scenario.key}` を先に実行してください。"
         )
-    classify_signature, interpret_signature = signatures_for(scenario)
+    classify_signature, interpret_signature, response_signature = signatures_for(scenario)
     program = PoohNarrativeAgent(
         classify_signature=classify_signature, interpret_signature=interpret_signature,
+        response_signature=response_signature,
     )
     program.load(str(target))
     return program
@@ -1335,7 +961,7 @@ def invoke(
     previous_bot_response: str = "",
     pooh_preferences: str = "",
     on_response: Callable[[str], None] | None = None,
-    fixed_line_for: Callable[[list[str]], str | None] | None = None,
+    fixed_line_for: Callable[[Any], str | None] | None = None,
 ) -> tuple[Any, float]:
     started = time.perf_counter()
     # Only passed when used, so agents without these hooks keep working.
@@ -1788,28 +1414,6 @@ class NarrativeSession:
         self._publish(output)
         return output
 
-    def _fixed_line_for(self, honey_requests: list[str]) -> str | None:
-        """The fixed line for the participant's honey requests, if any applies now.
-
-        ``honey_requests`` only ever comes from EeyoreAnalyzeInteraction, so
-        this is unreachable for other scenarios; the isinstance check below
-        just keeps that assumption explicit instead of relying on it silently.
-        """
-        assert self.controller is not None
-        state = self.controller.state
-        if not isinstance(state, HoneyGiftState):
-            return None
-        line = None
-        if "decline_honey_jar_gift" in honey_requests and state.honey_jar_is_poohs_gift():
-            # Pooh's own gift stays; a fixed line adds it beside the
-            # participant's idea instead of a generated line dropping it.
-            line = HONEY_GIFT_KEPT_RESPONSE
-        if "ask_pooh_not_to_eat_honey" in honey_requests:
-            # The honey is always eaten, so a generated line must not promise
-            # otherwise; Pooh sidesteps with a fixed line instead.
-            line = state.sidestep_promise_request() or line
-        return line
-
     def submit(self, user_input: str) -> SessionOutput | None:
         """Process one participant utterance or textual physical action."""
         if not self.started:
@@ -1839,9 +1443,10 @@ class NarrativeSession:
             elif sent_early:
                 print(f"警告: 応答の続きを送れませんでした: {text!r}", file=sys.stderr)
 
-        early = (
-            self.ros_publisher is not None
-            and not response_may_be_replaced(user_input, history, self.controller)
+        early = self.ros_publisher is not None and not (
+            self.controller.response_may_be_replaced(user_input, history)
+            if self.controller is not None
+            else False
         )
         result, latency_ms = invoke(
             self.agent,
@@ -1853,21 +1458,14 @@ class NarrativeSession:
                 self.current_situation, self.scenario.pooh_preferences
             ),
             on_response=send_early if early else None,
-            fixed_line_for=self._fixed_line_for if self.controller is not None else None,
+            fixed_line_for=self.controller.fixed_line_for if self.controller is not None else None,
         )
         streamed = bool(sent_early)
         generated_response = str(result.bot_response)
-        result.bot_response = enforce_response_invariants(
-            user_action=user_input,
-            history=history,
-            bot_response=str(result.bot_response),
-            gift_status=(
-                self.controller.state.gift_status
-                if self.controller is not None
-                and isinstance(self.controller.state, HoneyGiftState)
-                else None
-            ),
-        )
+        if self.controller is not None:
+            result.bot_response = self.controller.enforce_response_invariants(
+                user_input, history, str(result.bot_response),
+            )
         if str(result.interaction_mode) == "exit":
             # DSPy decides that the participant is leaving; the goodbye itself
             # is the scenario's fixed ending line, as when the session closes.
@@ -1902,12 +1500,13 @@ class NarrativeSession:
                 awaiting_reply=self.awaiting_reply,
             )
         actions = list(getattr(result, "narrative_actions", []))
-        if (
-            result.bot_response == HONEY_PROPOSAL_FALLBACK_RESPONSE
-            and "propose_honey_jar_gift" not in actions
-        ):
-            # The runtime guard itself voiced the proposal; record it as such.
-            actions.append("propose_honey_jar_gift")
+        if self.controller is not None:
+            # The runtime guard (enforce_response_invariants) can replace the
+            # line with one that implies an action the model's own (discarded)
+            # line might not have reported.
+            for extra in self.controller.extra_actions_for(str(result.bot_response)):
+                if extra not in actions:
+                    actions.append(extra)
         details = settled_details_of(result)
         if self.controller is not None:
             self.controller.observe_actions(actions)
@@ -2116,14 +1715,16 @@ def run_comparison(compiled: Any, scenario: Scenario) -> None:
     if not action:
         print("空入力のため比較を終了します。")
         return
-    classify_signature, interpret_signature = signatures_for(scenario)
+    classify_signature, interpret_signature, response_signature = signatures_for(scenario)
     predict = PoohNarrativeAgent(
         dspy.Predict, classify_signature=classify_signature, interpret_signature=interpret_signature,
+        response_signature=response_signature,
     )
     set_agent_demos(predict, scenario)
     chain = PoohNarrativeAgent(
         dspy.ChainOfThought,
         classify_signature=classify_signature, interpret_signature=interpret_signature,
+        response_signature=response_signature,
     )
     set_agent_demos(chain, scenario)
     agents = {"Predict": predict, "ChainOfThought": chain, "Compiled": compiled}
