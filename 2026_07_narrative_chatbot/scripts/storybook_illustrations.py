@@ -271,6 +271,7 @@ def scene_context(config, beat_id, turns):
         "latest_participant_dialogue": dialogue(
             [turn for turn in turns if turn.source in ("participant", "observed")][-8:]),
         "is_closing": beat_id in storybook.CLOSING_FALLBACK_BEATS,
+        "elicits_description": beat.elicits_description,
         "previous_illustration": previous_illustration(config, turns[:start]),
     }
 
@@ -303,6 +304,17 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                 "pose, action, expression, visible props, their colors and arrangement. "
                 "Prioritize current_state.decided, current_state.place, recent "
                 "events and latest_participant_dialogue for what is happening NOW. "
+                "EXCEPTION: when elicits_description=true, scene_start is itself a "
+                "question the bear asked (not a drawable moment), and the point of "
+                "this picture is specifically the thing being described in answer to "
+                "it (for example an imagined creature's appearance). Search all of "
+                "current_scene for the participant's answer to that question, even "
+                "if later turns moved on to another topic -- ignore what is most "
+                "recent and describe the answered appearance/description itself, in "
+                "as much visual detail (shape, size, color, fur/feather texture) as "
+                "was actually given. If it was never actually answered anywhere in "
+                "current_scene, describe only the bear's pose and expression from "
+                "scene_start with no invented creature. "
                 "reader_did entries are what the reader was actually seen doing to "
                 "the bear (参加者 is the reader): handing or holding out an object, "
                 "stroking or touching it. They may be drawn: the bear holding or "
@@ -458,6 +470,9 @@ class SessionIllustrations:
         self._promises: dict[tuple[str, str], Future] = {}
         self._active: dict[str, tuple[storybook.StoryConfig, str]] = {}
         self._covered: dict[str, set[str]] = {}
+        # A beat with elicits_description held back one more beat change,
+        # the same reason generate_from_log() defers it; see __call__.
+        self._deferred: dict[str, tuple[storybook.StoryConfig, str]] = {}
         self._tails: dict[str, Future] = {}
         self.failures = 0
 
@@ -645,12 +660,17 @@ class SessionIllustrations:
         turn = storybook.turn_from_output(output)
         config = replace(storybook.load_story_config(session.scenario.key),
                          session_id=session.session_id)
-        completed = None
+        to_submit: list[tuple] = []  # finished beats: (config, beat_id), drawn from turns *before* this one
         started = False
         # Finalize a scene after hearing its dialogue, rather than illustrating
         # the opening before the participant has had a chance to say anything.
         # A closing scene runs on to the end of the session, and what it shows
-        # is decided by the time it starts, so it is drawn right away.
+        # is decided by the time it starts, so it is drawn right away. A beat
+        # with elicits_description is held back one more beat change instead
+        # (see generate_from_log() for why): its own line is just a question,
+        # and the answer can land inside the very next beat's turn window
+        # when two scripted beats fire back to back with nothing from the
+        # participant in between.
         with self._lock:
             covered = self._covered.setdefault(session.session_id, set())
             beat_id, _ = storybook.narrate(turn, config, frozenset(covered))
@@ -659,23 +679,33 @@ class SessionIllustrations:
             turns = self._turns.setdefault(session.session_id, [])
             active = self._active.get(session.session_id)
             if beat_id and (active is None or beat_id != active[1]):
+                deferred = self._deferred.pop(session.session_id, None)
+                if deferred:
+                    to_submit.append(deferred)
                 if active:
-                    completed = (active[0], active[1], list(turns))
+                    if active[0].beats[active[1]].elicits_description:
+                        self._deferred[session.session_id] = active
+                    else:
+                        to_submit.append(active)
                 self._active[session.session_id] = (config, beat_id)
                 name = storybook.generated_illustration_name(config.scenario, config.session_id, beat_id)
                 if beat_id not in storybook.FIXED_ILLUSTRATION_BEATS and not storybook.find_illustration(name):
                     self._promises.setdefault((config.session_id, beat_id), Future())
                     started = beat_id in storybook.ILLUSTRATED_AT_START_BEATS
+            before = list(turns)
             turns.append(turn)
             snapshot = list(turns)
             if turn.ends_story:
                 self._turns.pop(session.session_id, None)
                 active = self._active.pop(session.session_id, None)
                 self._covered.pop(session.session_id, None)
+                deferred = self._deferred.pop(session.session_id, None)
+                if deferred:
+                    to_submit.append(deferred)
             else:
                 active = None
-        if completed:
-            self.submit(*completed)
+        for item_config, item_beat_id in to_submit:
+            self.submit(item_config, item_beat_id, before)
         if started:
             self.submit(config, beat_id, snapshot)
         if active:
@@ -724,16 +754,36 @@ def generate_from_log(path: Path, *, force=False, only: list[str] | None = None)
     seen = []
     current = None
     covered: set[str] = set()
+    # A beat whose own line only asks a question (elicits_description) is not
+    # finalized the moment the next beat starts: the answer to that question
+    # can land inside the NEXT beat's own turn window when two scripted beats
+    # fire back to back with no participant turn in between (footprints' own
+    # start_following can follow ask_appearance this way). Held back one more
+    # beat change, so "seen" has grown to include that answer by the time it
+    # is actually submitted.
+    deferred: str | None = None
+
+    def flush_deferred() -> None:
+        nonlocal deferred
+        if deferred and (not only or deferred in only):
+            generator.submit(config, deferred, seen, force=force)
+        deferred = None
+
     try:
         for turn in storybook.turns_from_log(records, scenario.opening_line):
             beat_id, _ = storybook.narrate(turn, config, frozenset(covered))
             if beat_id:
                 covered.add(beat_id)
             if beat_id and beat_id != current:
+                flush_deferred()
                 if current and (not only or current in only):
-                    generator.submit(config, current, seen, force=force)
+                    if config.beats[current].elicits_description:
+                        deferred = current
+                    else:
+                        generator.submit(config, current, seen, force=force)
                 current = beat_id
             seen.append(turn)
+        flush_deferred()
         if current and (not only or current in only):
             generator.submit(config, current, seen, force=force)
     finally:

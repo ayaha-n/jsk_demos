@@ -158,6 +158,7 @@
         },
         "ask_appearance": {
           "narration": "プーと あなたは、あしあとの ぬしの みための ことを はなしあいました。",
+          "elicits_description": true,
           "illustration": "footprints/ask_appearance_1.png",
           "illustration_variants": [
             "footprints/ask_appearance_1.png",

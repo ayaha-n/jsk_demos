@@ -103,6 +103,15 @@ class StoryBeat:
     # here rather than in storybook_illustrations.py so that module stays
     # free of any one scenario's content.
     bubble_prompt: str = ""
+    # This beat's own narration/fixed line is a question, not a drawable
+    # moment (e.g. footprints' ask_appearance: "what do you think it looks
+    # like?") -- its scene is not finalized merely because the next beat has
+    # started, only once a participant turn answering it has actually been
+    # seen (or the session ends). An ordinary beat's narration already states
+    # a complete visual moment by itself and needs no such wait. Independent
+    # of bubble_bases: this is about when enough content exists, not how the
+    # picture is drawn once it does.
+    elicits_description: bool = False
 
 
 @dataclass(frozen=True)
