@@ -131,12 +131,12 @@
       }
   },
   "footprints.opening": {
-    "text": "やあ，ぼくね，いま，何かを追ってるんだ。",
+    "text": "やあ、ぼくね、いま、何かを追ってるんだ。",
     "wav": "footprints.opening.wav",
     "motion": {
       "eyebrow": "surprised",
-      "arm": "left_hand_chin",
-      "neck": "tilt"
+      "arm": "left_hand_up",
+      "neck": ""
     }
   },
   "footprints.ending": {
@@ -148,16 +148,16 @@
     }
   },
   "footprints.ask_name": {
-    "text": "名前がないと呼びにくいから，なんて呼ぼうか考えているんだ。",
+    "text": "名前がないと呼びにくいから、なんて呼ぼうか考えているんだ。",
     "wav": "footprints.ask_name.wav",
     "motion": {
-      "eyebrow": "surprised",
+      "eyebrow": "normal",
       "arm": "left_hand_chin",
       "neck": "tilt"
     }
   },
   "footprints.ask_appearance": {
-    "text": "ところで，ウズウズの見た目はどんな感じだと思う？",
+    "text": "ところで、ウズウズの見た目はどんな感じだと思う？",
     "wav": "footprints.ask_appearance.wav",
     "motion": {
       "eyebrow": "happy",
@@ -184,7 +184,7 @@
     }
   },
   "footprints.second_animal": {
-    "text": "おかしいな。足あとが４つに増えてるね……これ，もしかして，動物が２匹いるのかな。はぐれないように気をつけよう。",
+    "text": "おかしいな。足あとが４つに増えてるね……これ、もしかして、動物が２匹いるのかな。はぐれないように気をつけよう。",
     "wav": "footprints.second_animal.wav",
     "motion": {
       "eyebrow": "surprised",
@@ -201,7 +201,7 @@
     }
   },
   "footprints.reveal_prompt": {
-    "text": "ねえ，きみ，なにか気づかない？",
+    "text": "ねえ、きみ、なにか気づかない？",
     "wav": "footprints.reveal_prompt.wav",
     "motion": {
       "eyebrow": "surprised",
@@ -209,7 +209,7 @@
     }
   },
   "footprints.reveal_hint": {
-    "text": "あれ，このあしあとはぼくのあし，こっちのあしあとはきみのあしとおなじおおきさだね。",
+    "text": "あれ、このあしあとはぼくのあし、こっちのあしあとはきみのあしとおなじおおきさだね。",
     "wav": "footprints.reveal_hint.wav",
     "motion": {
       "arm": "left_hand_point",
@@ -217,7 +217,7 @@
     }
   },
   "footprints.reveal_direct": {
-    "text": "これ，もしかして，ぼくたちのあしあとなんじゃないかっておもうんだけど。",
+    "text": "これ、もしかして、ぼくたちのあしあとなんじゃないかっておもうんだけど。",
     "wav": "footprints.reveal_direct.wav",
     "motion": {
       "eyebrow": "surprised",
