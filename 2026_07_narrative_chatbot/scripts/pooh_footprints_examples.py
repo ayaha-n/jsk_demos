@@ -151,6 +151,38 @@ FOOTPRINTS_TRAINSET = [
         ),
         bot_response=_TURN2_NAMING_RESPONSE,
     ),
+    # 名付けの直後、footprints.ask_appearance（固定セリフ）がまだ発火して
+    # いない段階で、参加者が自分から見た目について尋ねる場合。settled_details
+    # （topic=APPEARANCE_UNRESOLVED）をここで返しておかないと、Pythonの状態機械は
+    # 見た目がもう話題になったことを知らず、この直後にask_appearanceが同じ
+    # 質問を重ねて尋ねてしまう（実機で確認済みの不具合。
+    # footprints_events.FootprintsEventController.observe_settled_details /
+    # ask_appearanceのprerequisite参照）。
+    example(
+        current_situation=FOOTPRINTS_SITUATION.model_copy(
+            update={
+                "events": [
+                    *FOOTPRINTS_SITUATION.events,
+                    "参加者が足跡に気づいた",
+                    NAMING_EVENT,
+                ],
+                "unresolved": [IDENTITY_UNRESOLVED, APPEARANCE_UNRESOLVED],
+            },
+            deep=True,
+        ),
+        user_action="ウズウズはどんな生き物なのかな",
+        history=(
+            "Turn 3\n応答モード: narrative\n参考場面ID: 2\n"
+            f"物語アクション: []\nプーの応答: {_TURN2_NAMING_RESPONSE}"
+        ),
+        interaction_mode="narrative",
+        current_scene="3",
+        settled_details=[
+            SettledDetail(topic=APPEARANCE_UNRESOLVED, value="ふわふわの茶色い毛で、まん丸い")
+        ],
+        situation_update=SituationUpdate(remove_unresolved=[APPEARANCE_UNRESOLVED]),
+        bot_response="うーん、ぼくも気になっているんだ。ふわふわの茶色い毛で、まん丸いんじゃないかな。",
+    ),
     # --- 場面3：見た目を参加者に相談する（内容が参加者の発言で決まる） -----------
     # 見た目を尋ねる投げかけも、footprints_events.ask_appearance（固定セリフ、
     # 名付けの直後にfollow_upで発火）に任せている。回答の扱いだけがここの役目。

@@ -14,8 +14,8 @@ as eeyore_birthday_events: a closed ``narrative_actions`` vocabulary (here
 following, noticed the count rise, realized the footprints are the pair's
 own — so that beat's later timed fire is pre-empted instead of duplicated;
 and the open, free-text ``settled_details`` mechanism (see
-narrative_events.SettledDetail) only for naming, where the actual chosen
-text (not just that naming happened) matters.
+narrative_events.SettledDetail) for naming and for appearance, where the
+actual chosen text (not just that the topic was settled) matters.
 """
 
 from __future__ import annotations
@@ -224,6 +224,9 @@ class FootprintsState:
     name: str | None = None
     named: bool = False
     following_started: bool = False
+    # Settled by the participant's own description, or by Pooh's own guess,
+    # either before or after ask_appearance fires; see observe_settled_details.
+    appearance_settled: bool = False
     # Settled early (the participant's own realization) or by _fire_reveal_direct.
     resolved: bool = False
     completed_event_ids: set[str] = field(default_factory=set)
@@ -327,7 +330,11 @@ class FootprintsEventController(NarrativeEventController):
                 event_id="ask_appearance",
                 delay_seconds=ask_appearance_delay_seconds,
                 waits_for_quiet=True,
-                prerequisite=lambda state: state.named,
+                # A participant who asks what the creature looks like (or
+                # Pooh, prompted by that) before this ever fires has already
+                # covered what this line would ask; re-asking afterward was
+                # confirmed live as a redundant repeat.
+                prerequisite=lambda state: state.named and not state.appearance_settled,
                 fire=FootprintsEventController._fire_ask_appearance,
             ),
             # Naming comes first: start_following only arms once it is done,
@@ -438,12 +445,17 @@ class FootprintsEventController(NarrativeEventController):
         self._arm_required_events()
 
     def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
-        """Record the chosen name, whoever picked it; arms start_following."""
+        """Record the chosen name, whoever picked it; arms start_following.
+        Also records the appearance once settled, by the participant or by
+        Pooh's own guess, so ask_appearance never re-asks once it already
+        has an answer (see that event's prerequisite)."""
         for detail in details:
             detail = SettledDetail.model_validate(detail)
             if detail.topic == NAMING_TOPIC:
                 self.state.named = True
                 self.state.name = detail.value
+            elif detail.topic == APPEARANCE_UNRESOLVED:
+                self.state.appearance_settled = True
         self._arm_required_events()
 
     @staticmethod
