@@ -98,6 +98,25 @@ FOOTPRINTS_TRAINSET = [
             "ねえ，聞いてよ。ぼくはいま，あの茂みのまわりの足あとの正体を考えているんだ。"
         ),
     ),
+    # 正体が何の生き物かという推測（呼び名の提案ではない）：まだ名付けの
+    # 話題にすらなっていないこの段階で、そのまま名前として採用してしまうと、
+    # 正体当て（IDENTITY_UNRESOLVED）という別の未解決項目への推測を、呼び名の
+    # 決定とすり替えてしまう（実機で確認済みの不具合：footprints_events.
+    # FootprintsAnalyzeInteraction.proposed_nameが「ゆきうさぎとかなのかな」を
+    # 名付けの提案と誤判定し、fixed_line_forがその場で名付けを確定させていた）。
+    example(
+        current_situation=FOOTPRINTS_SITUATION,
+        user_action="ゆきうさぎとかなのかな",
+        proposed_name="",
+        history=(
+            "Turn 1\n参加者の生入力: なにかって？\n応答モード: narrative\n参考場面ID: 1\n"
+            "物語アクション: []\nプーの応答: あのね、雪の上に足跡があって、"
+            "何の生き物か知りたくて追っているんだ。"
+        ),
+        interaction_mode="narrative",
+        current_scene="1",
+        bot_response="ゆきうさぎかもしれないね。どのくらいの大きさなんだろう。",
+    ),
     # 参加者が自分で名前を提案する：その名前がそのまま採用される。
     # footprints.ask_name（固定セリフ）への返答として続く。ask_nameが既に
     # 発火した後なので、NAMING_TOPICはここで初めてunresolvedに入る
