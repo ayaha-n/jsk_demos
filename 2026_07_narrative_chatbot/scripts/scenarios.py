@@ -227,7 +227,7 @@ def _footprints() -> Scenario:
         scenes=(
             SceneDefinition("1", "場面1：足跡を発見する"),
             SceneDefinition("2", "場面2：正体に名前をつける（参加者の案、またはプー自身の案）"),
-            SceneDefinition("3", "場面3：ウズウズの見た目を参加者と相談する"),
+            SceneDefinition("3", "場面3：正体の見た目を参加者と相談する"),
             SceneDefinition("4", "場面4：足跡を追いかけ始める"),
             SceneDefinition("5", "場面5：足跡が２匹分になっていることに気づく"),
             SceneDefinition("6", "場面6：足跡が４匹分に増えたことに気づく"),

@@ -184,7 +184,7 @@
     }
   },
   "footprints.second_animal": {
-    "text": "おかしいな。今、２匹動物がいるみたいだ。これは―それが何であれ―今２匹が一緒になって進んでる。きみ，いっしょにきてくれない？彼らが敵意のある動物だといけないので。",
+    "text": "おかしいな。足あとが４つに増えてるね……これ，もしかして，動物が２匹いるのかな。はぐれないように気をつけよう。",
     "wav": "footprints.second_animal.wav",
     "motion": {
       "eyebrow": "surprised",
@@ -193,7 +193,7 @@
     }
   },
   "footprints.fourth_animal": {
-    "text": "まいったなあ。足跡が４つに増えてるよ。さっきの２匹に、また２匹分くらい加わったみたいだ。",
+    "text": "まいったなあ。足あとがまた増えて８つになってるよ。今度は４匹になったのかな。",
     "wav": "footprints.fourth_animal.wav",
     "motion": {
       "eyebrow": "surprised",
@@ -209,7 +209,7 @@
     }
   },
   "footprints.reveal_hint": {
-    "text": "あれ，このあしあとはぼくのあし，こっちのあしあとはきみのあしとおなじおおきさだね．",
+    "text": "あれ，このあしあとはぼくのあし，こっちのあしあとはきみのあしとおなじおおきさだね。",
     "wav": "footprints.reveal_hint.wav",
     "motion": {
       "arm": "left_hand_point",
@@ -217,7 +217,7 @@
     }
   },
   "footprints.reveal_direct": {
-    "text": "これ，もしかして，ぼくたちのあしあとなんじゃないかっておもうんだけど．",
+    "text": "これ，もしかして，ぼくたちのあしあとなんじゃないかっておもうんだけど。",
     "wav": "footprints.reveal_direct.wav",
     "motion": {
       "eyebrow": "surprised",

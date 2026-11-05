@@ -395,7 +395,7 @@ class FootprintsEventController(NarrativeEventController):
             fallback_response=SECOND_ANIMAL_RESPONSE,
             situation_update=SituationUpdate(
                 remove_props=["足あと（２つ）"],
-                add_props=["足あと（さらに増えている）"],
+                add_props=["足あと（４つ）"],
                 add_events=[SECOND_ANIMAL_EVENT],
             ),
             fixed_response=True,
@@ -413,8 +413,8 @@ class FootprintsEventController(NarrativeEventController):
             scene_id="6",
             fallback_response=FOURTH_ANIMAL_RESPONSE,
             situation_update=SituationUpdate(
-                remove_props=["足あと（さらに増えている）"],
-                add_props=["足あと（４つ）"],
+                remove_props=["足あと（４つ）"],
+                add_props=["足あと（８つ）"],
                 add_events=[FOURTH_ANIMAL_EVENT],
             ),
             fixed_response=True,

@@ -48,7 +48,7 @@ FOOTPRINTS_SITUATION = NarrativeSituation(
     place="雪が降ったあとの100エーカーの森、小さな茂みのまわり",
     purpose="プーと参加者が、見つけた足跡の正体を一緒に突き止める",
     characters=["プー", "参加者"],
-    props=["雪の積もった地面", "足あと（２つ）"],
+    props=["雪の積もった地面", "茂み", "足あと（２つ）"],
     events=["プーが雪の上に見慣れない足跡を見つけた"],
     relationship="参加者はプーと一緒に足跡の正体を探る仲間",
     # NAMING_TOPIC is NOT listed here: it only becomes unresolved once Pooh
@@ -60,6 +60,9 @@ FOOTPRINTS_SITUATION = NarrativeSituation(
     unresolved=[IDENTITY_UNRESOLVED],
 )
 
+_TURN1_DISCOVERY_RESPONSE = (
+    "まさにそれを自分にきいているんだ。ほら，あの茂みの周りを見て。足跡があるんだ。"
+)
 _TURN2_NAMING_RESPONSE = fixed_utterance("footprints.naming")
 
 # 追いかけ始めたあとの既知の出来事（場面5以降は時限イベントが足す）。
@@ -82,7 +85,7 @@ FOOTPRINTS_TRAINSET = [
         history=f"会話の冒頭\nプーの応答: {_TURN1_BOT_RESPONSE}",
         interaction_mode="narrative",
         current_scene="1",
-        bot_response="まさにそれを自分にきいているんだと．ほら，そこ見て．足跡があるんだ．",
+        bot_response=_TURN1_DISCOVERY_RESPONSE,
     ),
     example(
         current_situation=FOOTPRINTS_SITUATION,
@@ -91,12 +94,13 @@ FOOTPRINTS_TRAINSET = [
         interaction_mode="narrative",
         current_scene="1",
         bot_response=(
-            "ねえ，聞いてよ．ぼくがいま何を追ってるかって？"
-            "ほら，そこ見て．足跡があるんだ．"
+            "ねえ，聞いてよ。ぼくはいま，あの茂みのまわりの足あとの正体を考えているんだ。"
         ),
     ),
     # 参加者が自分で名前を提案する：その名前がそのまま採用される。
-    # footprints.ask_name（固定セリフ）への返答として続く。
+    # footprints.ask_name（固定セリフ）への返答として続く。ask_nameが既に
+    # 発火した後なので、NAMING_TOPICはここで初めてunresolvedに入る
+    # （footprints_events._fire_ask_nameのsituation_update参照）。
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
             update={
@@ -201,8 +205,8 @@ FOOTPRINTS_TRAINSET = [
         situation_update=SituationUpdate(remove_unresolved=[APPEARANCE_UNRESOLVED]),
         bot_response="ぼくは、ふわふわの茶色い毛で、まん丸い生き物だと思うな。",
     ),
-    # --- 場面4：足跡を追いかけ始める（必須）。settled_detailsで時限イベントの
-    # クロックを起動する（FootprintsEventController.observe_settled_details）。
+    # --- 場面4：足跡を追いかけ始める（必須）。narrative_actionsで時限イベントの
+    # クロックを起動する（FootprintsEventController.observe_actions）。
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
             update={
@@ -223,7 +227,7 @@ FOOTPRINTS_TRAINSET = [
         situation_update=SituationUpdate(
             add_events=[START_FOLLOWING_EVENT],
         ),
-        bot_response="よし，追いかけてみよう．",
+        bot_response="よし，追いかけてみよう。",
     ),
     # 参加者が時限イベントより先に２匹分になったことに気づく：narrative_actions
     # で後続の時限second_animalが重複発火しないようにする。
@@ -237,20 +241,20 @@ FOOTPRINTS_TRAINSET = [
         ),
         user_action="あ！あしあとがふえたよ",
         history=(
-            "Turn 6\n参加者の生入力: 追いかけてみようよ\n応答モード: narrative\n"
+            "Turn 5\n参加者の生入力: 追いかけてみようよ\n応答モード: narrative\n"
             "参考場面ID: 4\n物語アクション: ['started_following']\n"
-            "プーの応答: よし，追いかけてみよう．"
+            "プーの応答: よし，追いかけてみよう。"
         ),
         interaction_mode="narrative",
         current_scene="5",
         narrative_actions=["noticed_second_animal"],
         situation_update=SituationUpdate(
             remove_props=["足あと（２つ）"],
-            add_props=["足あと（さらに増えている）"],
+            add_props=["足あと（４つ）"],
             add_events=[SECOND_ANIMAL_EVENT],
         ),
-        bot_response="ほんとうだ！２匹になってるみたいだね。いっしょに来てくれる？",
-        question_kind="participant_own",
+        bot_response="ほんとうだ！足あとが４つに増えてる。２匹いるのかもね。はぐれないようにしよう。",
+        question_kind="none",
     ),
     # 気づきの促し（reveal_prompt）への曖昧な返答：まだ解決したと判定しない。
     # 「え、なんだろう」のような非committalな返答でrealized_own_footprintsを
@@ -259,7 +263,7 @@ FOOTPRINTS_TRAINSET = [
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
             update={
-                "props": ["雪の積もった地面", "足あと（４つ）"],
+                "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
                 "events": [
                     *_FOLLOWING_STARTED_EVENTS,
                     "足跡が２匹分になっていることに気づいた",
@@ -278,7 +282,7 @@ FOOTPRINTS_TRAINSET = [
         interaction_mode="narrative",
         current_scene="7a",
         narrative_actions=[],
-        bot_response="こっちの足あとはきみの足と同じくらいの大きさで，こっちの足あとはぼくのと同じくらいの大きさなんだ．",
+        bot_response="こっちの足あとはきみの足と同じくらいの大きさで，こっちの足あとはぼくのと同じくらいの大きさなんだ。",
     ),
     # --- 場面7-best：参加者が時限イベントより先に自分で気づく。
     # narrative_actionsでrealized_own_footprintsを報告し、以降の時限イベント
@@ -286,7 +290,7 @@ FOOTPRINTS_TRAINSET = [
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
             update={
-                "props": ["雪の積もった地面", "足あと（４つ）"],
+                "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
                 "events": [
                     *_FOLLOWING_STARTED_EVENTS,
                     "足跡が２匹分になっていることに気づいた",
@@ -298,11 +302,11 @@ FOOTPRINTS_TRAINSET = [
         ),
         user_action="あれ、これって、もしかして僕たちの足跡じゃない？",
         history=(
-            "Turn 8\n世界イベント: 足跡がさらに増え、４匹分になっていることに気づいた。"
+            "Turn 7\n世界イベント: 足跡がさらに増え、４匹分になっていることに気づいた。"
             "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 6\n"
             "物語アクション: []\n"
-            "プーの応答: まいったなあ。足跡が４つに増えてるよ。さっきの２匹に、"
-            "また２匹分くらい加わったみたいだ。"
+            "プーの応答: まいったなあ。足あとがまた増えて８つになってるよ。"
+            "今度は４匹になったのかな。"
         ),
         interaction_mode="narrative",
         current_scene="8",
@@ -317,7 +321,7 @@ FOOTPRINTS_TRAINSET = [
     example(
         current_situation=FOOTPRINTS_SITUATION.model_copy(
             update={
-                "props": ["雪の積もった地面", "足あと（４つ）"],
+                "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
                 "purpose": "プーと参加者は、足跡の正体が自分たちだったと気づいた",
                 "events": [
                     *_FOLLOWING_STARTED_EVENTS,
@@ -331,7 +335,7 @@ FOOTPRINTS_TRAINSET = [
         ),
         user_action="君は世界一のクマだよ。",
         history=(
-            "Turn 9\n参加者の生入力: あれ、これって、もしかして僕たちの足跡じゃない？\n"
+            "Turn 8\n参加者の生入力: あれ、これって、もしかして僕たちの足跡じゃない？\n"
             "応答モード: narrative\n参考場面ID: 8\n物語アクション: []\n"
             "プーの応答: ああ，わかった，ボクはバカだから，だまされたんだね。"
             "ほんとに頭の悪いクマだ。"
