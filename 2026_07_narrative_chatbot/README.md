@@ -62,14 +62,29 @@ Changing the model, examples, metric, or DSPy version produces a different compi
 
 ## Scenarios
 
-The agent, mishearing gimmick, and evaluators are shared across scenarios; only the initial `NarrativeSituation` and full-turn examples change. Scenarios are registered in `scripts/scenarios.py`:
+The agent, mishearing gimmick, and evaluators are shared across scenarios. Scenarios are registered in `scripts/scenarios.py`:
 
 | `--scenario` | Content |
 |---|---|
 | `tea_party` (default) | Open-ended tea party with Pooh (`scripts/pooh_examples.py`) |
-| `eeyore_birthday` | Eeyore-birthday-gift arc, with lines from the original story (`scripts/pooh_eeyore_examples.py`) |
+| `eeyore_birthday` | Eeyore-birthday-gift arc, with lines from the original story (`scripts/pooh_eeyore_examples.py`, `scripts/eeyore_birthday_events.py`) |
+| `footprints` | "Hunting the Woozle": Pooh and the participant track mysterious footprints that turn out to be their own (`scripts/pooh_footprints_examples.py`, `scripts/footprints_events.py`) |
 
-In `eeyore_birthday`, timed world events move the story on even while the participant is silent: Pooh decides on the honey jar, takes it out, eats the honey, and finally wraps up once the empty jar is settled; a request not to eat it does not stop it. The delays are constants near the top of `scripts/scenarios.py` (changing them needs a restart, not recompilation); how and when the events fire is described in [`docs/timed_narrative_events.md`](docs/timed_narrative_events.md). The chat output shows the DSPy-inferred scene as `[参考場面]`, for observation and logging only.
+In `eeyore_birthday` and `footprints`, timed world events move the story on even while the participant is silent (Pooh decides on the honey jar and eats it regardless of a request not to; the footprint count escalates and Pooh eventually hints at, then states, the twist). The delays are constants near the top of `scripts/scenarios.py` (changing them needs a restart, not recompilation); how and when the events fire is described in [`docs/timed_narrative_events.md`](docs/timed_narrative_events.md). The chat output shows the DSPy-inferred scene as `[参考場面]`, for observation and logging only.
+
+### Adding a new scenario
+
+A scenario's own content lives entirely in its own files; `scripts/pooh_narrative_dspy.py`, `scripts/narrative_events.py` and `scripts/narrative_signatures.py` stay scenario-agnostic (see [`docs/known_issues.md`](docs/known_issues.md) for how this separation was enforced — a new scenario should never need to touch them). To add one:
+
+1. **`scripts/pooh_<name>_examples.py`** (new file) — the initial `NarrativeSituation`, the opening line, `<NAME>_TRAINSET` (full-turn examples built with `pooh_examples.example()`/`example_variants()`), and the derived `<NAME>_MODE_EXAMPLES` / `<NAME>_INTERPRET_EXAMPLES` / `<NAME>_RESPONSE_EXAMPLES` (via `pooh_examples.build_mode_examples()` / `build_interpret_examples()` / `build_response_examples()`). Add `pooh_preferences` (a dict keyed by an unresolved-item label) only if Pooh needs a fallback opinion of his own on some topic.
+2. **`scripts/<name>_events.py`** (new file, only if the scenario needs timed world events or its own closed `narrative_actions` vocabulary) — modeled on `eeyore_birthday_events.py` or `footprints_events.py`:
+   - A state `@dataclass` and a `NarrativeEventController` subclass with the scenario's `RequiredNarrativeEvent`s (delays, prerequisites, fixed lines).
+   - Any scenario-specific `AnalyzeInteraction` / `InterpretTurn` / `GeneratePoohResponse` subclass, built on the generic ones in `scripts/narrative_signatures.py` (a plain subclass to add fields; see that module's own classes' docstrings for when a `type()`-built subclass is needed instead, to extend instructions without losing the base text).
+   - Any of the controller's hooks worth overriding: `fixed_line_for` (bypass generation with a fixed line, decided from the classify stage — use this instead of a keyword-matched guard, which does not generalize), `response_may_be_replaced` / `enforce_response_invariants` (post-hoc guards for cases `fixed_line_for` cannot catch before generation), `extra_actions_for`, `synchronize_situation` (render controller-owned state into the narrative situation deterministically, as a backstop against the LM's own `situation_update` getting it wrong).
+3. **`scripts/scenarios.py`** — add a `_<name>()` function building a `Scenario(...)` (see its field comments for what each one does — `classify_signature`/`interpret_signature`/`response_signature` only need setting if step 2 defined one), register it in the `SCENARIOS` dict (this alone makes `--scenario <name>` available everywhere: chat, compile, the Web UI), and add any new delay constants near the top of the file.
+4. **`config/fixed_utterances.json`** — an entry (`text`, optionally `motion`) for every fixed line referenced from step 2; the robot side generates the WAV on demand.
+5. **`config/storybook.json`** (optional) — a `scenarios.<name>` entry (`title`, `beats` keyed by the same world-event IDs used in step 2, `closing`) if the scenario should have a picture book; see [`docs/storybook.md`](docs/storybook.md).
+6. Compile (`--mode compile --scenario <name>`) and run the full test suite. If step 2 added a controller, test it directly (construct it, feed it fake actions/classifications) the way `tests/test_pooh_narrative_dspy.py` does for `HoneyGiftEventController`.
 
 ## Usage
 

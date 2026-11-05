@@ -2,6 +2,8 @@
 
 この文書は、プーとの物語対話システムについて、DSPyコンパイル時とチャット実行時の構成を示す。図中では、教師例や状態などのデータ、Pythonによる規則処理、LLMを使用するDSPy Predictor、生成・保存される結果を色と形で区別している。
 
+`AnalyzeInteraction`・`InterpretTurn`・`GeneratePoohResponse`はシナリオに依存しない基底（`scripts/narrative_signatures.py`）で、各シナリオは必要なら自分の`<name>_events.py`でこれらをサブクラス化し、`scripts/scenarios.py`の`Scenario.classify_signature`/`interpret_signature`/`response_signature`で差し替える。`scripts/pooh_narrative_dspy.py`自体にはシナリオ固有の語彙・文言を置かない（詳細は[`docs/known_issues.md`](known_issues.md)の「シナリオ固有の内容が共通ファイルに置かれている」、新しいシナリオの追加手順は[`README.md`](../README.md#adding-a-new-scenario)を参照）。以下の図・説明は、この一般化されたシグネチャを前提に、シナリオを問わず共通する処理の流れを示す。
+
 ## DSPyコンパイル時
 
 ![DSPyコンパイル時のシステム構成](<フローチャート - narrative_chatbot_compile.jpg>)
@@ -66,12 +68,17 @@ LLMは状態全体を再生成せず、そのターンで変化した差分だ�
 
 | ファイル | 図との対応 | 確認結果 |
 |---|---|---|
-| `scripts/pooh_narrative_dspy.py` | CLI、3つのPredictor、候補選択、技術語漏出防止、コンパイル、評価、ログ | 一致 |
+| `scripts/pooh_narrative_dspy.py` | CLI、`PoohNarrativeAgent`（classify/interpret/respond）、候補選択、技術語漏出防止、コンパイル、評価、ログ。シナリオ固有の語彙・文言は持たない | 一致 |
+| `scripts/narrative_signatures.py` | シナリオに依存しない基底Signature（`AnalyzeInteraction`・`InterpretTurn`・`GeneratePoohResponse`・`PlanMishearing`・`QuestionKind`） | 一致 |
+| `scripts/narrative_events.py` | `NarrativeEventController`（タイマー・固定イベント基盤）と、各シナリオが上書きする汎用フック（`fixed_line_for`・`response_may_be_replaced`・`enforce_response_invariants`・`extra_actions_for`・`synchronize_situation`、基底はすべてno-op） | 一致 |
 | `scripts/narrative_state.py` | `NarrativeSituation`、`SituationUpdate`、状態差分の適用 | 一致 |
-| `scripts/pooh_examples.py` | 初期状態、`TRAINSET`、3種類の段階別教師例 | 一致 |
+| `scripts/scenarios.py` | シナリオ登録（`SCENARIOS`）、各`Scenario`の初期状態・教師例・イベントコントローラ・固有Signatureの配線、秒数設定 | 一致 |
+| `scripts/pooh_examples.py` | tea_party自身の教師例と、他シナリオが使う共通ヘルパー（`example`・`example_variants`・`build_mode_examples`等） | 一致 |
+| `scripts/pooh_eeyore_examples.py`、`scripts/eeyore_birthday_events.py` | eeyore_birthdayの初期状態・教師例・イベントコントローラ・固有Signature | 一致 |
+| `scripts/pooh_footprints_examples.py`、`scripts/footprints_events.py` | footprintsの初期状態・教師例・イベントコントローラ・固有Signature | 一致 |
 | `scripts/mishearing_cases.py` | 固定候補、表記正規化、既知語検索、不確かな短縮音、不理解表現 | 一致 |
 | `tests/test_pooh_narrative_dspy.py` | 分類、候補、表記揺れ、評価hard gate、構造化状態更新の回帰テスト | 一致 |
-| `README.md` | 環境設定、compile/chat/compare/testの操作方法 | 一致 |
+| `README.md` | 環境設定、compile/chat/compare/testの操作方法、シナリオ追加手順 | 一致 |
 
 検証には次を使用する。
 
