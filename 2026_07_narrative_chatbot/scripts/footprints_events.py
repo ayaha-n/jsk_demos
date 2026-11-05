@@ -104,7 +104,7 @@ NAMING_TOPIC = "正体の呼び名"
 IDENTITY_UNRESOLVED = "この足跡は何の生き物のものか"
 # Raised once naming is decided (organically or by _fire_name_creature);
 # resolved during 場面3's appearance discussion.
-APPEARANCE_UNRESOLVED = "ウズウズの見た目はどんな様子か"
+APPEARANCE_UNRESOLVED = "正体の見た目はどんな様子か"
 
 
 # InterpretTurn, extended with footprints' own closed vocabulary — built the

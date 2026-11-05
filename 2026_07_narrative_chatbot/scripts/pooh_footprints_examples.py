@@ -22,6 +22,8 @@ from footprints_events import (
     APPEARANCE_UNRESOLVED,
     ASK_APPEARANCE_RESPONSE,
     ASK_NAME_RESPONSE,
+    FOURTH_ANIMAL_EVENT,
+    FOURTH_ANIMAL_RESPONSE,
     IDENTITY_UNRESOLVED,
     NAMING_EVENT,
     NAMING_TOPIC,
@@ -309,6 +311,35 @@ FOOTPRINTS_TRAINSET = [
         bot_response="ほんとうだ！足あとが４つに増えてる。２匹いるのかもね。はぐれないようにしよう。",
         question_kind="none",
     ),
+    # fourth_animal（時限イベント、場面6）のあと、参加者が「見ていないのに
+    # なぜ増えたのか」と不審がる場合：もっともらしい、現実的な範囲の説明
+    # （気づかないうちに別の足あとが重なった、等）に留め、関係のない要素
+    # （「影」など）を持ち出したり、正体そのものを示唆したりしない
+    # （実機で確認済みの不具合：「まさか、ぼくたちの影がウズウズになってる」
+    # のような、物語に根拠のない、わかりにくい説明をしてしまっていた）。
+    example(
+        current_situation=FOOTPRINTS_SITUATION.model_copy(
+            update={
+                "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
+                "events": [*_FOLLOWING_STARTED_EVENTS, SECOND_ANIMAL_EVENT, FOURTH_ANIMAL_EVENT],
+                "unresolved": [IDENTITY_UNRESOLVED],
+            },
+            deep=True,
+        ),
+        user_action="なんでふえてるの？みてないのに",
+        history=(
+            "Turn 6\n世界イベント: 足跡がさらに増え、４匹分になっていることに"
+            "気づいた。これは既に起きた出来事。\n応答モード: narrative\n"
+            f"参考場面ID: 6\n物語アクション: []\nプーの応答: {FOURTH_ANIMAL_RESPONSE}"
+        ),
+        interaction_mode="narrative",
+        current_scene="6",
+        narrative_actions=[],
+        bot_response=(
+            "たしかに、見ていないのに増えてるのは不思議だね。ぼくたちが気づかない"
+            "うちに、こっそりやってきたのかもしれないよ。"
+        ),
+    ),
     # 気づきの促し（reveal_prompt）への、正体を言い当ててはいない返答：
     # 「わからない」のようなはっきりした表明も、「え、なんだろう」「なんのこと？」
     # のような曖昧な聞き返しも同列に扱う。どちらも参加者がまだ気づいていない
@@ -378,6 +409,39 @@ FOOTPRINTS_TRAINSET = [
             add_events=["実はウズウズの足跡は自分たちの足跡だったとわかった"],
         ),
         bot_response="ああ，わかった，ボクはバカだから，だまされたんだね。ほんとに頭の悪いクマだ。",
+    ),
+    # reveal_hint（固定セリフ、具体的な手がかりを出す）のあと、参加者が
+    # それに納得して「自分たちの足あとかも」と応じる場合：はっきりと
+    # 「自分たちの足あとだった」と言い切る。「そっくりさんの足あとを作って
+    # しまった」のような、曖昧でわかりにくい結論は避ける（実機で確認済みの
+    # 不具合）。
+    example(
+        current_situation=FOOTPRINTS_SITUATION.model_copy(
+            update={
+                "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
+                "events": [
+                    *_FOLLOWING_STARTED_EVENTS,
+                    "足跡が２匹分になっていることに気づいた",
+                    "足跡が４匹分に増えていることに気づいた",
+                ],
+                "unresolved": [IDENTITY_UNRESOLVED],
+            },
+            deep=True,
+        ),
+        user_action="わあほんとうだ。わたしたちのそっくりさんなのかな",
+        history=(
+            "Turn 7\n世界イベント: プーが参加者に、何か気づかないかと問いかけた。"
+            "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 7a\n"
+            f"物語アクション: ['gave_hint_directly']\nプーの応答: {REVEAL_HINT_RESPONSE}"
+        ),
+        interaction_mode="narrative",
+        current_scene="8",
+        narrative_actions=["realized_own_footprints"],
+        situation_update=SituationUpdate(
+            remove_unresolved=[IDENTITY_UNRESOLVED],
+            add_events=["実はウズウズの足跡は自分たちの足跡だったとわかった"],
+        ),
+        bot_response="わかった！これはぼくたち自身の足あとだったんだね。さがしまわっている間に足あとを増やしちゃったんだ。おもしろい冒険だったなあ。",
     ),
     # --- 場面8：着地（正体判明・会話続行） -------------------------------------
     example(
