@@ -119,6 +119,26 @@ FOOTPRINTS_TRAINSET = [
         current_scene="1",
         bot_response="ゆきうさぎかもしれないね。どのくらいの大きさなんだろう。",
     ),
+    # プーが既に知っている実在の友だちの名前を挙げた場合も、呼び名の提案では
+    # なく正体当てへの推測として扱う（上と同じ理由）。「そう呼ぼう」と新しい
+    # ニックネームのように受け入れるのは不自然：プーはティガーを個人として
+    # 知っているので、本人かどうかを自分の知識に照らして考える反応になる。
+    example(
+        current_situation=FOOTPRINTS_SITUATION,
+        user_action="ティガーとか？",
+        proposed_name="",
+        history=(
+            "Turn 1\n参加者の生入力: なにかって？\n応答モード: narrative\n参考場面ID: 1\n"
+            "物語アクション: []\nプーの応答: あのね、雪の上に足跡があって、"
+            "何の生き物か知りたくて追っているんだ。"
+        ),
+        interaction_mode="narrative",
+        current_scene="1",
+        bot_response=(
+            "うーん、ティガーの足あとだったらもっと跳びはねた形があるはずだから、"
+            "ちがう気がするな。"
+        ),
+    ),
     # 参加者が自分で名前を提案する：その名前がそのまま採用される。
     # footprints.ask_name（固定セリフ）への返答として続く。ask_nameが既に
     # 発火した後なので、NAMING_TOPICはここで初めてunresolvedに入る
