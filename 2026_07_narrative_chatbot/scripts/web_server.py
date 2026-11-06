@@ -35,6 +35,7 @@ DEFAULT_SESSION_TTL_SECONDS = 600.0
 DEFAULT_MAX_SESSIONS = 50
 SWEEP_INTERVAL_SECONDS = 30.0
 MAX_INPUT_CHARS = 500
+TOUCH_PARTS = frozenset({"頭", "右腕", "左腕", "おなか", "右足", "左足"})
 MAX_LOG_BYTES = 5 * 1024 * 1024
 MAX_LOG_RECORDS = 2000
 MIN_TIMER_WAIT_SECONDS = 0.1
@@ -56,6 +57,7 @@ class NarrativeSessionLike(Protocol):
 
     def start(self) -> SessionOutputLike | None: ...
     def submit(self, user_input: str) -> SessionOutputLike | None: ...
+    def observe(self, actions: Sequence[str], with_speech: bool = False) -> SessionOutputLike | None: ...
     def poll(self) -> SessionOutputLike | None: ...
     def follow_up(self) -> SessionOutputLike | None: ...
     def seconds_until_due(self) -> float | None: ...
@@ -223,6 +225,25 @@ class SessionRegistry:
     async def close(self, entry: WebSession) -> None:
         await self.run_call(entry, lambda: entry.session.close("web_close"))
 
+    async def touch(self, entry: WebSession, part: str) -> None:
+        """Record a touch without a reply or a busy-status transition.
+
+        Like ROS observations, session mutations are serialized with a running
+        turn. Touches received during generation wait for that turn to finish.
+        """
+        if part not in TOUCH_PARTS:
+            return
+        entry.last_active = self.clock()
+        async with entry.lock:
+            if entry.session.ended:
+                return
+            output = await asyncio.to_thread(
+                entry.session.observe, [f"参加者がプーの{part}に触れた"]
+            )
+            await self._emit(entry, output)
+            if output is not None:
+                await self._broadcast(entry, {"type": "touch_recorded", "part": part})
+
     async def _run_timer(self, entry: WebSession) -> None:
         """Push due world events without waiting for participant input."""
         while not entry.session.ended:
@@ -259,10 +280,10 @@ def _authorized(request: web.Request) -> bool:
 
 
 def _asset_version() -> str:
-    """Changes whenever app.js or style.css does: the page asks for them by
+    """Changes whenever a frontend asset does: the page asks for them by
     this, so a browser never keeps using a copy cached before an update."""
     return str(max(
-        (WEB_ROOT / name).stat().st_mtime_ns for name in ("app.js", "style.css")
+        (WEB_ROOT / name).stat().st_mtime_ns for name in ("app.js", "style.css", "bear.js")
     ))
 
 
@@ -334,6 +355,10 @@ async def static_app_script(request: web.Request) -> web.FileResponse:
 
 async def static_stylesheet(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_ROOT / "style.css", headers=NO_CACHE)
+
+
+async def static_bear_script(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(WEB_ROOT / "bear.js", headers=NO_CACHE)
 
 
 def _resolve_log_path(log_dir: Path, name: str) -> Path | None:
@@ -663,6 +688,7 @@ async def session_socket(request: web.Request) -> web.WebSocketResponse:
         "messages": entry.transcript,
         "ended": entry.session.ended,
         "busy": entry.busy,
+        "touch_supported": True,
     })
     try:
         async for message in socket:
@@ -681,6 +707,8 @@ async def session_socket(request: web.Request) -> web.WebSocketResponse:
                     await registry.submit(entry, text)
             elif kind == "close":
                 await registry.close(entry)
+            elif kind == "touch":
+                await registry.touch(entry, payload.get("part") if isinstance(payload.get("part"), str) else "")
     finally:
         # Disconnection is not an ending; the tab may reconnect until the TTL.
         entry.sockets.discard(socket)
@@ -745,6 +773,7 @@ def create_app(
     # Do not expose index.html as a static file: it would bypass per-peer UI hiding.
     app.router.add_get("/static/app.js", static_app_script)
     app.router.add_get("/static/style.css", static_stylesheet)
+    app.router.add_get("/static/bear.js", static_bear_script)
     return app
 
 

@@ -46,6 +46,7 @@ class FakeSession:
     follow_up_pending: bool = False
     submit_delay: float = 0.0
     inputs: list[str] = field(default_factory=list)
+    observations: list[str] = field(default_factory=list)
     closed_reasons: list[str] = field(default_factory=list)
     active_calls: int = 0
     max_active_calls: int = 0
@@ -79,6 +80,14 @@ class FakeSession:
         if self.ended or self.due_at is None:
             return None
         return max(0.0, self.due_at - time.monotonic())
+
+    def observe(self, actions, with_speech=False):
+        self._enter()
+        try:
+            self.observations.extend(actions)
+            return FakeOutput("observed", "")
+        finally:
+            self._leave()
 
     def poll(self):
         self._enter()
@@ -141,6 +150,49 @@ class WebServerTests(AioHTTPTestCase):
             transcript = await self.receive_until(ws, "transcript")
         self.assertEqual(transcript["messages"][0]["output"]["motion"], {"arm": "right_hand_up"})
         self.assertFalse(transcript["ended"])
+        self.assertTrue(transcript["touch_supported"])
+
+    async def test_touch_records_observation_without_speech_or_busy_status(self):
+        session_id = await self.new_session()
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            await self.receive_until(ws, "transcript")
+            await ws.send_json({"type": "touch", "part": "おなか"})
+            message = await asyncio.wait_for(ws.receive_json(), timeout=2)
+            self.assertEqual(message["type"], "output")
+            self.assertEqual(message["output"]["source"], "observed")
+            self.assertEqual(message["output"]["bot_response"], "")
+            acknowledgement = await asyncio.wait_for(ws.receive_json(), timeout=2)
+            self.assertEqual(acknowledgement, {"type": "touch_recorded", "part": "おなか"})
+        session = self.sessions[session_id]
+        self.assertEqual(session.observations, ["参加者がプーのおなかに触れた"])
+        self.assertEqual(session.inputs, [])
+
+    async def test_touches_during_answer_are_recorded_in_order_without_another_reply(self):
+        session_id = await self.new_session()
+        session = self.sessions[session_id]
+        session.submit_delay = .1
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            await self.receive_until(ws, "transcript")
+            await ws.send_json({"type": "user_input", "text": "こんにちは"})
+            await self.receive_until(ws, "status")
+            await ws.send_json({"type": "touch", "part": "頭"})
+            await ws.send_json({"type": "touch", "part": "左足"})
+            answer = await self.receive_until(ws, "output")
+            self.assertEqual(answer["output"]["source"], "participant")
+            for _ in range(2):
+                observed = await self.receive_until(ws, "output")
+                self.assertEqual(observed["output"]["source"], "observed")
+        self.assertEqual(session.inputs, ["こんにちは"])
+        self.assertEqual(session.observations, ["参加者がプーの頭に触れた", "参加者がプーの左足に触れた"])
+        self.assertEqual(session.max_active_calls, 1)
+
+    async def test_invalid_and_after_end_touches_are_ignored(self):
+        session_id = await self.new_session()
+        entry = self.registry.get(session_id)
+        await self.registry.touch(entry, "存在しない部位")
+        entry.session.ended = True
+        await self.registry.touch(entry, "頭")
+        self.assertEqual(entry.session.observations, [])
 
     async def test_page_uses_scenario_title(self):
         response = await self.client.get("/")
@@ -450,11 +502,13 @@ class StaticCachingTests(AioHTTPTestCase):
         body = await (await self.client.get("/")).text()
         version = web_server._asset_version()
         self.assertIn(f'src="/static/app.js?v={version}"', body)
+        self.assertIn(f'src="/static/bear.js?v={version}"', body)
         self.assertIn(f'href="/static/style.css?v={version}"', body)
         self.assertEqual((await self.client.get(f"/static/app.js?v={version}")).status, 200)
+        self.assertEqual((await self.client.get(f"/static/bear.js?v={version}")).status, 200)
 
     async def test_page_and_assets_are_always_revalidated(self):
-        for path in ("/", "/static/app.js", "/static/style.css"):
+        for path in ("/", "/static/app.js", "/static/style.css", "/static/bear.js"):
             response = await self.client.get(path)
             self.assertEqual(response.headers.get("Cache-Control"), "no-cache", path)
 

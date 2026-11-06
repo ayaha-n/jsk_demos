@@ -295,3 +295,28 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
   color: #bbb;
   font-size: 1.6cqw;
 }
+
+/* A compact shared presence above the conversation, including on phones. */
+#bear-stage {
+  flex: 0 0 auto;
+  position: relative;
+  background: radial-gradient(ellipse at 50% 75%, #f2dfb5, var(--bg) 72%);
+  border-bottom: 1px solid var(--border);
+}
+#bear-canvas {
+  display: block;
+  width: 100%;
+  height: clamp(160px, 30dvh, 300px);
+  cursor: grab;
+  touch-action: pan-y;
+}
+#bear-canvas:active { cursor: grabbing; }
+#bear-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+#log { min-height: 0; }
+@media (max-height: 600px) {
+  #bear-canvas { height: 120px; }
+}
+
+#bear-canvas { background: radial-gradient(ellipse 100px 12px at 50% 89%, #a47e4533, transparent); }
+
+#bear-stage[hidden] { display: none; }

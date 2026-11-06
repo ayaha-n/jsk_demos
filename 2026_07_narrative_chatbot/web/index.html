@@ -19,6 +19,9 @@
     </div>
   </header>
 
+  <section id="bear-stage" aria-label="プーの3D表示">
+    <canvas id="bear-canvas" tabindex="0" role="img" aria-label="立体のクマ。頭・腕・お腹・足をタップすると触れます。ドラッグまたは左右キーで回転、Homeキーで向きを戻せます。"></canvas>
+  </section>
   <main id="log" aria-live="polite"></main>
 
   <div id="status" role="status"></div>
@@ -70,5 +73,6 @@
   <template id="scene-intro-template"><div class="scene-intro">{{SCENE_INTRO}}</div></template>
 
   <script src="/static/app.js?v={{ASSET_VERSION}}"></script>
+  <script src="/static/bear.js?v={{ASSET_VERSION}}"></script>
 </body>
 </html>

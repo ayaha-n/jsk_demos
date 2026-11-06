@@ -44,6 +44,7 @@ let endedSessionId = null;  // the session whose book 絵本を見る opens
 // participant has closed it.
 let storybookOfferedFor = null;
 let busy = false;
+let touchSupported = false;
 let reconnectDelay = 1000;
 let reconnectTimer = null;
 
@@ -70,6 +71,8 @@ function authenticatedHeaders() {
 
 function updateControls() {
   const connected = socket !== null && socket.readyState === WebSocket.OPEN;
+  const bearStage = document.getElementById("bear-stage");
+  if (bearStage) bearStage.dataset.touchEnabled = String(connected && !ended);
   const canType = connected && !ended && !busy;
   inputText.disabled = !canType;
   sendButton.disabled = !canType;
@@ -129,6 +132,8 @@ function detailsText(output) {
 }
 
 function appendOutput(output) {
+  // Sensor-style observations belong to the book, not to the spoken chat.
+  if (output.source === "observed") return;
   const node = document.createElement("div");
   node.className = "message pooh";
   const speaker = document.createElement("span");
@@ -323,6 +328,7 @@ function renderMessage(message) {
 function handleMessage(message) {
   switch (message.type) {
     case "transcript":
+      touchSupported = message.touch_supported === true;
       clearLog();
       message.messages.forEach(renderMessage);
       ended = message.ended;
@@ -342,6 +348,9 @@ function handleMessage(message) {
       break;
     case "status":
       busy = message.busy;
+      break;
+    case "touch_recorded":
+      document.dispatchEvent(new CustomEvent("pooh-touch-recorded", { detail: { part: message.part } }));
       break;
     case "ended":
       ended = true;
@@ -366,6 +375,7 @@ function handleMessage(message) {
 }
 
 function connect() {
+  touchSupported = false;
   clearTimeout(reconnectTimer);
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const token = encodeURIComponent(accessToken());
@@ -429,6 +439,16 @@ form.addEventListener("submit", (event) => {
   if (!text || socket === null || busy || ended) return;
   socket.send(JSON.stringify({ type: "user_input", text }));
   inputText.value = "";
+});
+
+// Independent of text submission and busy: a touch never requests a reply.
+document.addEventListener("pooh-touch", (event) => {
+  if (!socket || socket.readyState !== WebSocket.OPEN || ended) return;
+  if (!touchSupported) {
+    appendNotice("タップの記録には、Webサーバを再起動してから画面を再読み込みしてください。", true);
+    return;
+  }
+  socket.send(JSON.stringify({ type: "touch", part: event.detail.part }));
 });
 
 endButton.addEventListener("click", () => {
