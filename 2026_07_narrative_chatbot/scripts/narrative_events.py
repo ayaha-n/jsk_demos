@@ -336,10 +336,13 @@ class NarrativeEventController:
 
     def enforce_response_invariants(
         self, user_action: str, history: str, bot_response: str,
+        narrative_actions: list[str] | tuple[str, ...] = (),
     ) -> str:
         """Hook: apply small deterministic guards for requirements the LM
         output may violate, returning a replacement line (or bot_response
-        unchanged). The base implementation never replaces anything; a
+        unchanged). ``narrative_actions`` are what interpret() reported for
+        the generated line, so a guard can rely on its judgment instead of
+        matching keywords (see footprints_events). The base implementation never replaces anything; a
         scenario with such a guard overrides this (see
         eeyore_birthday_events.HoneyGiftEventController for the worked
         example)."""

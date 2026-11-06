@@ -424,6 +424,7 @@ FOOTPRINTS_TRAINSET = [
         interaction_mode="narrative",
         current_scene="8",
         narrative_actions=["realized_own_footprints"],
+        participant_suggested_own_footprints=True,
         situation_update=SituationUpdate(
             remove_unresolved=[IDENTITY_UNRESOLVED],
             add_events=["実はウズウズの足跡は自分たちの足跡だったとわかった"],
@@ -457,6 +458,7 @@ FOOTPRINTS_TRAINSET = [
         interaction_mode="narrative",
         current_scene="8",
         narrative_actions=["realized_own_footprints"],
+        participant_suggested_own_footprints=True,
         situation_update=SituationUpdate(
             remove_unresolved=[IDENTITY_UNRESOLVED],
             add_events=["実はウズウズの足跡は自分たちの足跡だったとわかった"],
@@ -510,9 +512,50 @@ FOOTPRINTS_MODE_EXAMPLES = build_mode_examples(
     extra_fields=lambda item: {
         "gave_up_on_noticing": getattr(item, "gave_up_on_noticing", False),
         "proposed_name": getattr(item, "proposed_name", ""),
+        "participant_suggested_own_footprints": getattr(
+            item, "participant_suggested_own_footprints", False
+        ),
     },
 )
-FOOTPRINTS_INTERPRET_EXAMPLES = build_interpret_examples(FOOTPRINTS_TRAINSET)
+# interpret()だけに見せる例：プーの応答が正体を勝手に言ってしまった場合、
+# 参加者は何も言い当てていないのでrealized_own_footprintsではなく、
+# pooh_suggested_own_footprintsを報告する（実ログで確認：
+# logs/session_20261106T184627896130_3ac3ec64.jsonl では、このプーのセリフを
+# 根拠にrealized_own_footprintsが報告され、気づきの誘導が丸ごと止まった）。
+# 応答段の手本にはしないよう、FOOTPRINTS_TRAINSETには入れない。
+_POOH_LEAKED_TWIST_EXAMPLES = [
+    example(
+        current_situation=FOOTPRINTS_SITUATION.model_copy(
+            update={
+                "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
+                "events": [
+                    *_FOLLOWING_STARTED_EVENTS,
+                    "足跡が２匹分になっていることに気づいた",
+                    "足跡が４匹分に増えていることに気づいた",
+                ],
+                "unresolved": [IDENTITY_UNRESOLVED],
+            },
+            deep=True,
+        ),
+        user_action="そうだねえ、",
+        history=(
+            "Turn 7\n参加者の生入力: まあたふえたの？\n応答モード: narrative\n"
+            "参考場面ID: 6\n物語アクション: []\n"
+            "プーの応答: そうなんだ。また足あとが増えちゃったね。"
+            "これからどうしようか、少し考えないとね。"
+        ),
+        interaction_mode="narrative",
+        current_scene="6",
+        narrative_actions=["pooh_suggested_own_footprints"],
+        bot_response=(
+            "足跡が僕たちのだったなんて、なんだかおかしいね！"
+            "でも、これで一緒に新しい冒険に出かけられるね。"
+        ),
+    ),
+]
+FOOTPRINTS_INTERPRET_EXAMPLES = build_interpret_examples(
+    FOOTPRINTS_TRAINSET + _POOH_LEAKED_TWIST_EXAMPLES
+)
 FOOTPRINTS_RESPONSE_EXAMPLES = build_response_examples(
     FOOTPRINTS_TRAINSET, preferences=FOOTPRINTS_POOH_PREFERENCES,
 )

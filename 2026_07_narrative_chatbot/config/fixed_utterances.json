@@ -175,7 +175,7 @@
     "arm_next": ["onegai"]
   },
   "footprints.start_following": {
-    "text": "よし、ウズウズを追いかけてみよう。きみも一緒に来てくれない？",
+    "text": "この足あとをたどっていけば、ウズウズに会えるかもしれないね。よし、追いかけてみよう。きみも一緒に来てくれない？",
     "wav": "footprints.start_following.wav",
     "motion": {
       "eyebrow": "happy",

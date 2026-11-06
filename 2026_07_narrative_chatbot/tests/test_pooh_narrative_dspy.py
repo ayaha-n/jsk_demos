@@ -105,6 +105,12 @@ from eeyore_birthday_events import (
     POOH_GIFT_TOPIC,
     HoneyGiftEventController,
 )
+from footprints_events import (
+    REVEAL_HINT_RESPONSE,
+    START_FOLLOWING_RESPONSE,
+    TWIST_LEAK_REPLACEMENT,
+    FootprintsEventController,
+)
 
 
 
@@ -2649,6 +2655,97 @@ class HoneyRequestTests(unittest.TestCase):
         self.assertEqual(requests["食べちゃだめだよ"], ["ask_pooh_not_to_eat_honey"])
         self.assertEqual(requests["ケーキのほうがいいと思うな"], ["decline_honey_jar_gift"])
         self.assertTrue(any(value == [] for value in requests.values()))
+
+
+class FootprintsTwistGuardTests(unittest.TestCase):
+    def controller(self):
+        controller = FootprintsEventController(
+            10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, clock=lambda: 0.0,
+        )
+        controller.state.named = True
+        controller.state.name = "ウズウズ"
+        controller.state.following_started = True
+        return controller
+
+    def turn(self, controller, suggested, bot_response, actions):
+        controller.fixed_line_for(SimpleNamespace(
+            participant_suggested_own_footprints=suggested,
+            gave_up_on_noticing=False, proposed_name="",
+        ))
+        return controller.enforce_response_invariants(
+            "そうだねえ、", "", bot_response, narrative_actions=actions,
+        )
+
+    def test_unprompted_twist_is_replaced(self):
+        # The leaked line from logs/session_20261106T184627896130_3ac3ec64.jsonl.
+        controller = self.controller()
+        # Lines are held back only from fourth_animal on.
+        self.assertFalse(controller.response_may_be_replaced("そうだねえ、", ""))
+        controller.state.completed_event_ids.update({"second_animal", "fourth_animal"})
+        self.assertTrue(controller.response_may_be_replaced("そうだねえ、", ""))
+        line = self.turn(
+            controller, False, "足跡が僕たちのだったなんて、なんだかおかしいね！",
+            ["pooh_suggested_own_footprints", "realized_own_footprints"],
+        )
+        self.assertEqual(line, TWIST_LEAK_REPLACEMENT)
+
+    def test_line_is_kept_unless_interpret_reports_a_leak(self):
+        controller = self.controller()
+        line = "ぼくたちが気づかないうちに、増えてるのかもしれないね。"
+        self.assertEqual(self.turn(controller, False, line, []), line)
+
+    def test_interpret_cannot_resolve_without_the_participant(self):
+        controller = self.controller()
+        self.turn(controller, False, "ふしぎだね。", [])
+        controller.observe_actions(["realized_own_footprints"])
+        self.assertFalse(controller.state.resolved)
+
+    def test_participant_suggestion_lets_pooh_agree_and_resolves(self):
+        controller = self.controller()
+        line = "そうか、ぼくたちの足あとだったんだね！"
+        actions = ["realized_own_footprints", "pooh_suggested_own_footprints"]
+        self.assertEqual(self.turn(controller, True, line, actions), line)
+        controller.observe_actions(actions)
+        self.assertTrue(controller.state.resolved)
+        self.assertFalse(controller.response_may_be_replaced("", ""))
+        # The flag is turn-scoped.
+        self.assertFalse(controller._participant_suggested_own_footprints)
+
+    def test_after_reveal_direct_pooh_may_say_it(self):
+        controller = self.controller()
+        controller.state.completed_event_ids.add("reveal_direct")
+        line = "やっぱり、ぼくたちの足あとだったんだね。"
+        self.assertEqual(
+            self.turn(controller, False, line, ["pooh_suggested_own_footprints"]), line,
+        )
+
+    def test_leak_example_teaches_interpret_only(self):
+        from pooh_footprints_examples import (
+            FOOTPRINTS_INTERPRET_EXAMPLES, FOOTPRINTS_MODE_EXAMPLES, FOOTPRINTS_TRAINSET,
+        )
+        leaks = [
+            item for item in FOOTPRINTS_INTERPRET_EXAMPLES
+            if "pooh_suggested_own_footprints" in item.narrative_actions
+        ]
+        self.assertEqual(len(leaks), 1)
+        self.assertNotIn("realized_own_footprints", leaks[0].narrative_actions)
+        self.assertFalse(any(
+            "pooh_suggested_own_footprints" in item.narrative_actions
+            for item in FOOTPRINTS_TRAINSET
+        ))
+        suggested = [
+            item.user_action for item in FOOTPRINTS_MODE_EXAMPLES
+            if item.participant_suggested_own_footprints
+        ]
+        self.assertIn("あれ、これって、もしかして僕たちの足跡じゃない？", suggested)
+
+    def test_start_following_says_tracking_leads_to_the_creature(self):
+        self.assertIn("たどっていけば", START_FOLLOWING_RESPONSE)
+        controller = self.controller()
+        controller.state.following_started = False
+        controller.state.name = "ゆきまる"
+        event = FootprintsEventController._fire_start_following(controller.state)
+        self.assertIn("ゆきまるに会えるかもしれない", event.fallback_response)
 
 
 if __name__ == "__main__":

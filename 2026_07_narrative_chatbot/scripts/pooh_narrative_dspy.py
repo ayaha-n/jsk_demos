@@ -1465,6 +1465,9 @@ class NarrativeSession:
         if self.controller is not None:
             result.bot_response = self.controller.enforce_response_invariants(
                 user_input, history, str(result.bot_response),
+                narrative_actions=[
+                    str(action) for action in getattr(result, "narrative_actions", []) or []
+                ],
             )
         if str(result.interaction_mode) == "exit":
             # DSPy decides that the participant is leaving; the goodbye itself

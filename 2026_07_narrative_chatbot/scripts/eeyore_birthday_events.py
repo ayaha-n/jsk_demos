@@ -578,6 +578,7 @@ class HoneyGiftEventController(NarrativeEventController):
 
     def enforce_response_invariants(
         self, user_action: str, history: str, bot_response: str,
+        narrative_actions: list[str] | tuple[str, ...] = (),
     ) -> str:
         """Apply small deterministic guards for requirements LM output may violate."""
         hesitation = any(marker in user_action for marker in HESITATION_MARKERS)

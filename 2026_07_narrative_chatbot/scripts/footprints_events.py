@@ -49,6 +49,7 @@ FootprintsAction = Literal[
     "noticed_second_animal",
     "noticed_fourth_animal",
     "realized_own_footprints",
+    "pooh_suggested_own_footprints",
     "gave_hint_directly",
 ]
 KNOWN_FOOTPRINTS_ACTIONS = {
@@ -56,6 +57,7 @@ KNOWN_FOOTPRINTS_ACTIONS = {
     "noticed_second_animal",
     "noticed_fourth_animal",
     "realized_own_footprints",
+    "pooh_suggested_own_footprints",
     "gave_hint_directly",
 }
 
@@ -79,6 +81,23 @@ class FootprintsAnalyzeInteraction(AnalyzeInteraction):
             "まだ気づけていない曖昧な聞き返し・反応も含めてtrue"
             "（もう一度ぼんやり促しても堂々巡りになるだけなので、ヒントを出す）。"
             "そのような問いかけが直前になければfalse。"
+        )
+    )
+    # Whether the participant themselves has floated the twist this turn.
+    # Read from the participant's words alone, before Pooh's line exists:
+    # interpret() judges the turn together with Pooh's line, so a line that
+    # leaked the twist on its own was once enough for it to report
+    # realized_own_footprints (confirmed live; see docs/known_issues.md).
+    participant_suggested_own_footprints: bool = dspy.OutputField(
+        desc=(
+            "参加者がこのターンの自分の発話で、この足跡はプーと参加者自身の足跡"
+            "なのではないか（自分たちが歩いてつけた・増やした、など）と言った・"
+            "疑問として持ち出した場合だけtrue。"
+            "プーが直前に「このあしあとはぼくのあし、こっちはきみのあしと同じ大きさ」"
+            "のような手がかりを出し、参加者がそれに「ほんとだ」「そうかも」のように"
+            "同意・納得した場合もtrue。"
+            "「誰の足跡だろう」「増えたね」「足跡をたどろう」のように、足跡の話を"
+            "しているだけで自分たちの足跡だとは言っていない場合はfalse。"
         )
     )
     proposed_name: str = dspy.OutputField(
@@ -124,7 +143,11 @@ _FOOTPRINTS_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
         "２匹分の段階を経ていなくてもよい)、"
         "realized_own_footprints(自分たちの足跡だったと、参加者が自分の言葉で"
         "明確に言い当てた場合のみ。「え，なんだろう」のような曖昧な返答・"
-        "聞き返しだけでは判定しない)。"
+        "聞き返しだけでは判定しない。プーの応答だけがそう言っている場合は"
+        "対象外)、"
+        "pooh_suggested_own_footprints(プーの応答が、足跡はプーと参加者自身の"
+        "ものだ、またはそうかもしれないと言った・ほのめかした場合。参加者が"
+        "言ったかどうかに関係なく、プーの応答だけを見て判定する)。"
         "該当しなければ空リスト。"
     )
 )
@@ -175,6 +198,8 @@ _FOOTPRINTS_RESPONSE_EXTRA_INSTRUCTIONS = (
     "推測）以外では、参加者が迷ったり「わからない」と答えたりした場合も含めて一切しない。"
     "この項目に話を戻すときも、正体の推測ではなく、追いかける・観察するなど周辺の行動や"
     "感想にとどめる。"
+    "足あとを追いかける話をするときは、「足あとをたどっていけば会えるかも」のように、"
+    "足あとをたどることと、その主に会えることのつながりが分かる言い方にする。"
     "「なにか気づかない？」と尋ねた後に参加者が「なんのこと？」「わからない」のように"
     "聞き返した・答えなかった場合も、具体的な手がかり（足あとの大きさがぼくたちと同じ、"
     "など）や推測を自分から明かさない。もう一度ぼんやりと促す、または「気のせいかもしれ"
@@ -233,6 +258,17 @@ REVEAL_PROMPT_RESPONSE = fixed_utterance("footprints.reveal_prompt")
 REVEAL_HINT_RESPONSE = fixed_utterance("footprints.reveal_hint")
 REVEAL_DIRECT_EVENT = "実はウズウズの足跡は自分たちの足跡だったとわかった"
 REVEAL_DIRECT_RESPONSE = fixed_utterance("footprints.reveal_direct")
+
+# A generated line that states or hints the twist (that the tracks are the
+# pair's own) before the participant raised it and before reveal_direct is
+# replaced (see FootprintsEventController.enforce_response_invariants). The
+# response instructions already forbid this, but gpt-4o still did it live,
+# unprompted, right after fourth_animal ("足跡が僕たちのだったなんて"). Whether
+# a line does is judged by interpret() (pooh_suggested_own_footprints), not by
+# a keyword list, which would miss rephrasings.
+# What Pooh says instead: stays with following the tracks, the activity the
+# hint cascade expects to still be under way.
+TWIST_LEAK_REPLACEMENT = "ふしぎだなあ。もうすこし、足あとをたどってみようよ。"
 
 
 @dataclass
@@ -293,6 +329,8 @@ class FootprintsEventController(NarrativeEventController):
         self.second_animal_delay_seconds = second_animal_delay_seconds
         self.fourth_animal_delay_seconds = fourth_animal_delay_seconds
         self.reveal_step_delay_seconds = reveal_step_delay_seconds
+        # Set per participant turn by fixed_line_for; see there.
+        self._participant_suggested_own_footprints = False
         super().__init__(
             state=FootprintsState(),
             required_events=required_events or self._default_required_events(
@@ -458,9 +496,14 @@ class FootprintsEventController(NarrativeEventController):
                 self.state.completed_event_ids.add("second_animal")
                 self.state.completed_event_ids.add("fourth_animal")
             elif action == "realized_own_footprints":
-                self.state.resolved = True
+                # Only the participant's own words count (see
+                # FootprintsAnalyzeInteraction.participant_suggested_own_footprints);
+                # a world-event turn has no participant words at all.
+                if self._participant_suggested_own_footprints:
+                    self.state.resolved = True
             elif action == "gave_hint_directly":
                 self.state.completed_event_ids.add("reveal_hint")
+        self._participant_suggested_own_footprints = False
         self._arm_required_events()
 
     def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
@@ -544,7 +587,10 @@ class FootprintsEventController(NarrativeEventController):
         line = (
             START_FOLLOWING_RESPONSE
             if state.name == "ウズウズ"
-            else f"よし、{state.name}を追いかけてみよう。きみも一緒に来てくれない？"
+            else (
+                f"この足あとをたどっていけば、{state.name}に会えるかもしれないね。"
+                "よし、追いかけてみよう。きみも一緒に来てくれない？"
+            )
         )
         return WorldEvent(
             event_id="start_following",
@@ -666,6 +712,11 @@ class FootprintsEventController(NarrativeEventController):
         still say later (see extra_actions_for, which marks reveal_hint done
         once this fires).
         """
+        # Turn-scoped: read by enforce_response_invariants and observe_actions
+        # later in this same turn, then cleared by observe_actions.
+        self._participant_suggested_own_footprints = bool(
+            getattr(classification, "participant_suggested_own_footprints", False)
+        )
         proposed_name = str(getattr(classification, "proposed_name", "") or "").strip()
         if proposed_name and not self.state.named:
             self.state.named = True
@@ -720,6 +771,40 @@ class FootprintsEventController(NarrativeEventController):
                 situation, SituationUpdate(add_unresolved=[APPEARANCE_UNRESOLVED]),
             )
         return situation
+
+    def _twist_still_hidden(self) -> bool:
+        return not self.state.resolved and "reveal_direct" not in self.state.completed_event_ids
+
+    def response_may_be_replaced(self, user_action: str, history: str) -> bool:
+        """Hold the line back (no early streaming) from fourth_animal until
+        the twist is out: both leaks seen live (today's "僕たちのだった" and
+        the earlier "ぼくたちの影", see pooh_footprints_examples.py) came right
+        after the count reached eight, when Pooh is pressed to explain it.
+        Holding from start_following instead would cover most of the story
+        and delay nearly every line. Before fourth_animal a leak is still
+        replaced, but if it was already streamed the robot has said it
+        (NarrativeSession.submit warns); without a robot nothing is streamed,
+        so the replacement always applies."""
+        return (
+            "fourth_animal" in self.state.completed_event_ids
+            and self._twist_still_hidden()
+        )
+
+    def enforce_response_invariants(
+        self, user_action: str, history: str, bot_response: str,
+        narrative_actions: list[str] | tuple[str, ...] = (),
+    ) -> str:
+        """Replace a generated line that gives away the twist before the
+        participant raised it and before reveal_direct, as interpret() judged
+        it (pooh_suggested_own_footprints). Once the participant suggested it
+        themselves, Pooh may agree."""
+        if (
+            self._twist_still_hidden()
+            and not self._participant_suggested_own_footprints
+            and "pooh_suggested_own_footprints" in narrative_actions
+        ):
+            return TWIST_LEAK_REPLACEMENT
+        return bot_response
 
     def extra_actions_for(self, bot_response: str) -> list[str]:
         """narrative_actions to record as if the model had reported them,
