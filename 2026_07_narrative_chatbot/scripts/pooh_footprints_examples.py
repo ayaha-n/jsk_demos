@@ -113,7 +113,7 @@ FOOTPRINTS_TRAINSET = [
         history=(
             "Turn 1\n参加者の生入力: なにかって？\n応答モード: narrative\n参考場面ID: 1\n"
             "物語アクション: []\nプーの応答: あのね、雪の上に足跡があって、"
-            "何の生き物か知りたくて追っているんだ。"
+            "それが誰のものなのか知りたくて追っているんだ。"
         ),
         interaction_mode="narrative",
         current_scene="1",
@@ -130,7 +130,7 @@ FOOTPRINTS_TRAINSET = [
         history=(
             "Turn 1\n参加者の生入力: なにかって？\n応答モード: narrative\n参考場面ID: 1\n"
             "物語アクション: []\nプーの応答: あのね、雪の上に足跡があって、"
-            "何の生き物か知りたくて追っているんだ。"
+            "それが誰のものなのか知りたくて追っているんだ。"
         ),
         interaction_mode="narrative",
         current_scene="1",

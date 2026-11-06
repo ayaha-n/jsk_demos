@@ -131,7 +131,7 @@
       }
   },
   "footprints.opening": {
-    "text": "やあ、ぼくね、いま、何かを追ってるんだ。",
+    "text": "やあ、ぼくね、いま、何かを追いかけているんだ。",
     "wav": "footprints.opening.wav",
     "motion": {
       "eyebrow": "surprised",
@@ -148,7 +148,7 @@
     }
   },
   "footprints.ask_name": {
-    "text": "名前がないと呼びにくいから、なんて呼ぼうか考えているんだ。",
+    "text": "足あとのぬしが、なんのいきものかわからないけど、名前がないと呼びにくいから、なんて呼ぼうか考えているんだ。",
     "wav": "footprints.ask_name.wav",
     "motion": {
       "eyebrow": "normal",
