@@ -458,12 +458,22 @@ class SessionIllustrations:
     pictures already available. Failures leave the bundled pictures intact.
     """
 
-    def __init__(self, generate_image=None, summarize=None, generate_plain_image=None):
+    def __init__(self, generate_image=None, summarize=None, generate_plain_image=None, max_workers=None):
         self.generate_image = generate_image or generate
         self._use_default_image_generator = generate_image is None
         self.generate_plain_image = generate_plain_image or generate_plain
         self.summarize = summarize or summarize_scene
-        self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="illustrations")
+        # One shared pool across every session (there is only one instance of
+        # this class per server process; see web_server.create_storybook_listeners),
+        # but each session's own jobs already run one at a time, chained
+        # through _tails below -- so this is really "how many different
+        # sessions can have a picture drawing at once", not a per-session
+        # limit. Higher than the old default of 2 so a handful of people
+        # chatting at once do not queue behind each other's illustrations.
+        self._pool = ThreadPoolExecutor(
+            max_workers=max_workers if max_workers is not None else int(os.getenv("STORYBOOK_MAX_WORKERS", "8")),
+            thread_name_prefix="illustrations",
+        )
         self._lock = threading.Lock()
         self._turns: dict[str, list[storybook.StoryTurn]] = {}
         self._jobs: dict[tuple[str, str], Future] = {}
