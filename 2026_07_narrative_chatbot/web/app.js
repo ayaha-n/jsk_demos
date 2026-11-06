@@ -29,6 +29,7 @@ const storybookCloseButton = document.getElementById("storybook-close-button");
 const storybookLayout = document.getElementById("storybook-layout");
 const storybookPdf = document.getElementById("storybook-pdf");
 const storybookStatus = document.getElementById("storybook-status");
+const storybookProgress = document.getElementById("storybook-progress");
 const storybookViewer = document.getElementById("storybook-viewer");
 // Yomogi's ascender + descender in ems (storybook.YOMOGI_HEIGHT_EM): the
 // tablet's text px is that whole height.
@@ -338,6 +339,11 @@ function handleMessage(message) {
       ended = true;
       endedSessionId = sessionId;
       storybookButton.hidden = false;
+      // Offer the finished book right away instead of waiting for a click;
+      // its pictures may still be drawing, so the dialog polls and shows
+      // progress until they are (see loadOwnStorybook / the setInterval below).
+      if (!storybookDialog.open) storybookDialog.showModal();
+      loadOwnStorybook();
       break;
     case "error":
       appendNotice(message.message, true);
@@ -468,15 +474,35 @@ async function loadOwnStorybook(quiet = false) {
     const response = await fetch(`${base}?layout=${layout}`, { headers: authenticatedHeaders() });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-    const snapshot = JSON.stringify(body);
-    if (snapshot !== ownStorybookSnapshot || !quiet) {
+    // A page with illustration set but no illustration_url yet is still
+    // being drawn in the background (SessionIllustrations finishes after
+    // the conversation, not necessarily before the session itself ends).
+    // The book is worth reading as a whole once drawn, not page by page with
+    // raw filenames standing in for missing pictures, so it only appears
+    // once every one of them is ready; the bar is what shows until then.
+    const illustrated = body.pages.filter((page) => page.illustration);
+    const ready = illustrated.filter((page) => page.illustration_url).length;
+    if (illustrated.length > 0 && ready < illustrated.length) {
       storybookViewer.replaceChildren();
-      body.pages.forEach((page) => appendStoryPage(page, body, storybookViewer));
-      ownStorybookSnapshot = snapshot;
+      ownStorybookSnapshot = "";
+      storybookStatus.textContent =
+        `${body.title || "絵本"} · 挿絵を準備しています（${ready}/${illustrated.length}）…`;
+      storybookProgress.max = illustrated.length;
+      storybookProgress.value = ready;
+      storybookProgress.hidden = false;
+    } else {
+      const snapshot = JSON.stringify(body);
+      if (snapshot !== ownStorybookSnapshot || !quiet) {
+        storybookViewer.replaceChildren();
+        body.pages.forEach((page) => appendStoryPage(page, body, storybookViewer));
+        ownStorybookSnapshot = snapshot;
+      }
+      storybookStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
+      storybookProgress.hidden = true;
     }
-    storybookStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
   } catch (error) {
     if (!quiet) storybookStatus.textContent = `絵本を読み込めませんでした: ${error.message}`;
+    storybookProgress.hidden = true;
   } finally {
     ownStorybookLoading = false;
   }

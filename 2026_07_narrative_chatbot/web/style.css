@@ -203,7 +203,16 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
   border-radius: 8px;
 }
 
-#log-viewer-status { min-height: 1.6em; color: var(--muted); font-size: 0.85rem; }
+#log-viewer-status, #storybook-status { min-height: 1.6em; color: var(--muted); font-size: 0.85rem; }
+
+#storybook-progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin: 2px 0 10px;
+  accent-color: var(--accent);
+}
+#storybook-progress[hidden] { display: none; }
 
 #log-viewer, .storybook-viewer {
   display: flex;
