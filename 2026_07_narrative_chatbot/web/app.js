@@ -39,6 +39,10 @@ let socket = null;
 let sessionId = null;
 let ended = false;
 let endedSessionId = null;  // the session whose book 絵本を見る opens
+// The session the storybook popup has already been auto-opened for, so a
+// later reconnect (or a duplicate "ended") does not reopen it once the
+// participant has closed it.
+let storybookOfferedFor = null;
 let busy = false;
 let reconnectDelay = 1000;
 let reconnectTimer = null;
@@ -326,6 +330,10 @@ function handleMessage(message) {
       if (ended) {
         endedSessionId = sessionId;
         storybookButton.hidden = false;
+        // The session may have ended while this browser was disconnected
+        // (backgrounded tab, dropped socket, page reload) -- show the same
+        // popup a live "ended" message would have, not just the button.
+        offerStorybook(sessionId);
       }
       break;
     case "output":
@@ -342,8 +350,7 @@ function handleMessage(message) {
       // Offer the finished book right away instead of waiting for a click;
       // its pictures may still be drawing, so the dialog polls and shows
       // progress until they are (see loadOwnStorybook / the setInterval below).
-      if (!storybookDialog.open) storybookDialog.showModal();
-      loadOwnStorybook();
+      offerStorybook(sessionId);
       break;
     case "error":
       appendNotice(message.message, true);
@@ -506,6 +513,16 @@ async function loadOwnStorybook(quiet = false) {
   } finally {
     ownStorybookLoading = false;
   }
+}
+
+// Auto-open once per session: live ("ended") or discovered on reconnect
+// ("transcript" with ended=true) both call this; neither reopens a dialog
+// the participant already closed for the same session.
+function offerStorybook(forSessionId) {
+  if (storybookOfferedFor === forSessionId) return;
+  storybookOfferedFor = forSessionId;
+  if (!storybookDialog.open) storybookDialog.showModal();
+  loadOwnStorybook();
 }
 
 storybookButton.addEventListener("click", () => {
