@@ -320,3 +320,24 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
 #bear-canvas { background: radial-gradient(ellipse 100px 12px at 50% 89%, #a47e4533, transparent); }
 
 #bear-stage[hidden] { display: none; }
+
+/* Study completion is opt-in; the regular conversation keeps its controls. */
+#study-goal-notice {
+  padding: 10px 16px;
+  background: var(--pooh);
+  border-bottom: 1px solid var(--pooh-border);
+}
+#end-button.goal-ready {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--pooh);
+  font-weight: 700;
+}
+#study-completion { padding-top: 12px; border-top: 1px solid var(--border); margin-top: 12px; }
+#study-completion p { margin: 4px 0 10px; }
+#study-code { display: block; width: 100%; margin: 6px 0 10px; font-family: monospace; }
+#study-completion-status { min-height: 1.6em; margin-top: 8px; color: var(--muted); font-size: .85rem; }
+.study-book-end { flex: none; height: 1px; width: 100%; }
+#study-goal-notice[hidden], #study-completion[hidden], #study-code-panel[hidden] { display: none; }
+body[data-crowdsourcing="true"] #storybook-viewer { max-height: 50dvh; }

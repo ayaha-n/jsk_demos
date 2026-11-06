@@ -22,12 +22,15 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 from uuid import uuid4
 
 from aiohttp import WSMsgType, web
+
+from crowdsourcing import (IDLE_CLOSE_EVENTS, SUPPORTED_SCENARIOS, Progress,
+                          ProgressStore, book_ready, book_revision, reached_goal, timestamp)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = PROJECT_ROOT / "web"
@@ -77,6 +80,7 @@ class WebSession:
     last_active: float = field(default_factory=time.monotonic)
     timer_task: asyncio.Task | None = None
     busy: bool = False
+    study: Progress | None = None
 
 
 class SessionRegistry:
@@ -90,8 +94,10 @@ class SessionRegistry:
         max_sessions: int = DEFAULT_MAX_SESSIONS,
         clock: Callable[[], float] = time.monotonic,
         local_output_listeners: Sequence[Any] = (),
+        study_store: ProgressStore | None = None,
     ) -> None:
         self.factory = factory
+        self.study_store = study_store
         # Given only to sessions started on this PC itself (e.g. the live
         # picture book on the tablet next to the robot).
         self.local_output_listeners = tuple(local_output_listeners)
@@ -117,6 +123,17 @@ class SessionRegistry:
                 listener for listener in self.local_output_listeners if listener not in existing
             )
         entry = WebSession(session, last_active=self.clock())
+        if self.study_store is not None:
+            controller = getattr(session, "controller", None)
+            if controller is not None:
+                controller.required_events = tuple(
+                    event for event in controller.required_events
+                    if event.event_id not in IDLE_CLOSE_EVENTS
+                )
+            log_path = getattr(session, "log_path", None)
+            entry.study = Progress(session_id, _session_scenario(entry),
+                                   Path(log_path).name if log_path else None, timestamp())
+            await asyncio.to_thread(self.study_store.save, entry.study)
         self.sessions[session_id] = entry
         async with entry.lock:
             opening = await asyncio.to_thread(entry.session.start)
@@ -180,11 +197,26 @@ class SessionRegistry:
         await self._broadcast(entry, message)
 
     async def _emit(self, entry: WebSession, output: SessionOutputLike | None) -> None:
+        await self._sync_study(entry)
         if output is None:
             return
         await self._record(entry, {"type": "output", "output": output.to_dict()})
         if entry.session.ended:
             await self._broadcast(entry, {"type": "ended"})
+
+    async def _sync_study(self, entry: WebSession) -> None:
+        if entry.study is None:
+            return
+        progress = replace(entry.study)
+        if progress.goal_reached_at is None and reached_goal(entry.session):
+            progress.goal_reached_at = timestamp()
+        if progress.ended_at is None and entry.session.ended:
+            progress.ended_at = timestamp()
+            progress.ended_before_goal = progress.goal_reached_at is None
+        if progress != entry.study:
+            await asyncio.to_thread(self.study_store.save, progress)
+            entry.study = progress
+            await self._broadcast(entry, {"type": "study_status", "study": progress.public()})
 
     async def run_call(
         self,
@@ -283,7 +315,7 @@ def _asset_version() -> str:
     """Changes whenever a frontend asset does: the page asks for them by
     this, so a browser never keeps using a copy cached before an update."""
     return str(max(
-        (WEB_ROOT / name).stat().st_mtime_ns for name in ("app.js", "style.css", "bear.js")
+        (WEB_ROOT / name).stat().st_mtime_ns for name in ("app.js", "style.css", "bear.js", "crowdsourcing.js")
     ))
 
 
@@ -359,6 +391,10 @@ async def static_stylesheet(request: web.Request) -> web.FileResponse:
 
 async def static_bear_script(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_ROOT / "bear.js", headers=NO_CACHE)
+
+
+async def static_crowdsourcing_script(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(WEB_ROOT / "crowdsourcing.js", headers=NO_CACHE)
 
 
 def _resolve_log_path(log_dir: Path, name: str) -> Path | None:
@@ -612,7 +648,61 @@ async def read_session_storybook(request: web.Request) -> web.Response:
         book = await asyncio.to_thread(_storybook_dict, records, layout, scenario_key)
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=422)
+    if entry.study is not None:
+        book["study_revision"] = book_revision(book)
     return web.json_response(book)
+
+
+async def session_completion(request: web.Request) -> web.Response:
+    """Restore a receipt or accept browser-reported book reading events."""
+    if not _authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    registry = request.app[REGISTRY_KEY]
+    if registry.study_store is None:
+        return web.json_response({"error": "crowdsourcing is disabled"}, status=404)
+    session_id = request.match_info["session_id"]
+    try:
+        entry = registry.get(session_id)
+        progress = entry.study if entry else await asyncio.to_thread(registry.study_store.load, session_id)
+    except ValueError:
+        return web.json_response({"error": "invalid session id"}, status=400)
+    if progress is None:
+        return web.json_response({"error": "session not found"}, status=404)
+    if request.method == "GET":
+        return web.json_response(progress.public(), headers=NO_CACHE)
+    if entry is None:
+        return web.json_response({"error": "session expired"}, status=410)
+    try:
+        payload = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    if (not isinstance(payload, dict) or not isinstance(payload.get("event"), str)
+            or payload["event"] not in {"book_opened", "last_page", "read_confirmed"}):
+        return web.json_response({"error": "unknown reading event"}, status=400)
+    layout = payload.get("layout", "landscape")
+    if layout not in STORYBOOK_LAYOUTS:
+        return web.json_response({"error": "unknown layout"}, status=400)
+    async with entry.lock:
+        if not entry.session.ended:
+            return web.json_response({"error": "会話が終わってから絵本を確認してください。"}, status=409)
+        if entry.study.completion_code:
+            return web.json_response(entry.study.public(), headers=NO_CACHE)
+        log_path = getattr(entry.session, "log_path", None)
+        records = await asyncio.to_thread(_session_records, Path(log_path) if log_path else None)
+        try:
+            book = await asyncio.to_thread(_storybook_dict, records, layout, _session_scenario(entry))
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=422)
+        if not book_ready(book) or payload.get("revision") != book_revision(book):
+            return web.json_response({"error": "絵本を準備中です。表示が更新されてから確認してください。"}, status=409)
+        progress = replace(entry.study)
+        try:
+            progress.report(payload["event"], payload["revision"])
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        await asyncio.to_thread(registry.study_store.save, progress)
+        entry.study = progress
+        return web.json_response(progress.public(), headers=NO_CACHE)
 
 
 async def read_session_storybook_pdf(request: web.Request) -> web.StreamResponse:
@@ -689,6 +779,7 @@ async def session_socket(request: web.Request) -> web.WebSocketResponse:
         "ended": entry.session.ended,
         "busy": entry.busy,
         "touch_supported": True,
+        "study": entry.study.public() if entry.study else {"enabled": False},
     })
     try:
         async for message in socket:
@@ -706,7 +797,10 @@ async def session_socket(request: web.Request) -> web.WebSocketResponse:
                 if text:
                     await registry.submit(entry, text)
             elif kind == "close":
-                await registry.close(entry)
+                if entry.study is not None and entry.study.goal_reached_at is None:
+                    await socket.send_json({"type": "error", "message": "物語がひと区切りつくと、終了ボタンが使えるようになります。"})
+                else:
+                    await registry.close(entry)
             elif kind == "touch":
                 await registry.touch(entry, payload.get("part") if isinstance(payload.get("part"), str) else "")
     finally:
@@ -733,23 +827,26 @@ def create_app(
     scene_intro: str = "",
     log_dir: Path | None = None,
     local_output_listeners: Sequence[Any] = (),
+    crowdsourcing: bool = False,
 ) -> web.Application:
     app = web.Application()
+    effective_log_dir = log_dir or Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
     registry = SessionRegistry(
         factory,
         ttl_seconds=ttl_seconds,
         max_sessions=max_sessions,
         local_output_listeners=local_output_listeners,
+        study_store=ProgressStore(effective_log_dir / "crowdsourcing") if crowdsourcing else None,
     )
     app[REGISTRY_KEY] = registry
     app[TOKEN_KEY] = access_token
-    app[LOG_DIR_KEY] = log_dir or Path(
-        os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs"))
-    )
+    app[LOG_DIR_KEY] = effective_log_dir
     index_template = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
     app[INDEX_HTML_KEY] = index_template.replace(
         "{{SCENARIO_TITLE}}", html.escape(scenario_title)
-    ).replace("{{SCENE_INTRO}}", html.escape(scene_intro))
+    ).replace("{{SCENE_INTRO}}", html.escape(scene_intro)).replace(
+        "{{CROWDSOURCING}}", "true" if crowdsourcing else "false"
+    )
 
     async def lifecycle(app: web.Application):
         sweeper = asyncio.create_task(_sweep_forever(registry))
@@ -769,11 +866,14 @@ def create_app(
     app.router.add_delete("/api/sessions/{session_id}", delete_session)
     app.router.add_get("/api/sessions/{session_id}/storybook", read_session_storybook)
     app.router.add_get("/api/sessions/{session_id}/storybook.pdf", read_session_storybook_pdf)
+    app.router.add_get("/api/sessions/{session_id}/completion", session_completion)
+    app.router.add_post("/api/sessions/{session_id}/completion", session_completion)
     app.router.add_get("/ws/{session_id}", session_socket)
     # Do not expose index.html as a static file: it would bypass per-peer UI hiding.
     app.router.add_get("/static/app.js", static_app_script)
     app.router.add_get("/static/style.css", static_stylesheet)
     app.router.add_get("/static/bear.js", static_bear_script)
+    app.router.add_get("/static/crowdsourcing.js", static_crowdsourcing_script)
     return app
 
 
@@ -875,6 +975,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--session-ttl", type=float, default=DEFAULT_SESSION_TTL_SECONDS,
                         help="切断後、再接続を待つ秒数。")
     parser.add_argument("--max-sessions", type=int, default=DEFAULT_MAX_SESSIONS)
+    parser.add_argument("--crowdsourcing", action="store_true",
+                        help="ゴール後に終了ボタンを有効化し、絵本の読了確認後に提出用コードを発行する。")
     parser.add_argument("--ros-relay", action="store_true",
                         help="指定時、各ターンをROS中継へ送る（入力は受けない）。")
     parser.add_argument("--ros-relay-host", default="127.0.0.1")
@@ -885,7 +987,10 @@ def parse_args() -> argparse.Namespace:
     from pooh_narrative_dspy import add_storybook_arguments
 
     add_storybook_arguments(parser)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.crowdsourcing and args.scenario not in SUPPORTED_SCENARIOS:
+        parser.error("--crowdsourcing は footprints / eeyore_birthday で使えます。")
+    return args
 
 
 def main() -> int:
@@ -918,6 +1023,7 @@ def main() -> int:
         scenario_title=scenario_title,
         scene_intro=scene_intro,
         local_output_listeners=listeners,
+        crowdsourcing=args.crowdsourcing,
     )
     suffix = f"/?token={access_token}" if access_token else "/"
     print(f"Web UI: http://{args.host}:{args.port}{suffix}")

@@ -4,6 +4,7 @@
 const SESSION_KEY = "pooh-session-id";
 const TOKEN_KEY = "pooh-access-token";
 const MAX_RECONNECT_DELAY_MS = 10000;
+const crowd = window.PoohCrowdsourcing;
 
 const log = document.getElementById("log");
 const statusLine = document.getElementById("status");
@@ -76,7 +77,12 @@ function updateControls() {
   const canType = connected && !ended && !busy;
   inputText.disabled = !canType;
   sendButton.disabled = !canType;
-  endButton.disabled = !connected || ended || busy;
+  endButton.disabled = !connected || ended || busy || Boolean(crowd && !crowd.goalReached);
+  if (crowd) {
+    endButton.textContent = "終了して絵本を見る";
+    endButton.classList.toggle("goal-ready", crowd.goalReached && !ended);
+    crowd.updateControls({ ended });
+  }
   if (ended) statusLine.textContent = "終了しました。「はじめから」で新しく開始できます。";
   else if (!connected) statusLine.textContent = "接続しています…";
   else if (busy) statusLine.textContent = "プーが考えています…";
@@ -329,6 +335,7 @@ function handleMessage(message) {
   switch (message.type) {
     case "transcript":
       touchSupported = message.touch_supported === true;
+      crowd?.setState(message.study, sessionId);
       clearLog();
       message.messages.forEach(renderMessage);
       ended = message.ended;
@@ -349,6 +356,9 @@ function handleMessage(message) {
     case "status":
       busy = message.busy;
       break;
+    case "study_status":
+      crowd?.setState(message.study, sessionId);
+      break;
     case "touch_recorded":
       document.dispatchEvent(new CustomEvent("pooh-touch-recorded", { detail: { part: message.part } }));
       break;
@@ -365,6 +375,7 @@ function handleMessage(message) {
       appendNotice(message.message, true);
       break;
     case "expired":
+      if (crowd && sessionId) crowd.restoreReceipt(sessionId);
       storageSet(SESSION_KEY, null);
       sessionId = null;
       ended = true;
@@ -398,6 +409,11 @@ function connect() {
 }
 
 async function startNewSession() {
+  crowd?.reset();
+  endedSessionId = null;
+  storybookOfferedFor = null;
+  ownStorybookSnapshot = "";
+  if (storybookDialog.open) storybookDialog.close();
   clearTimeout(reconnectTimer);
   if (socket !== null) {
     const old = socket;
@@ -452,7 +468,7 @@ document.addEventListener("pooh-touch", (event) => {
 });
 
 endButton.addEventListener("click", () => {
-  if (socket !== null && !ended && confirm("本当に終了しますか？")) {
+  if (!endButton.disabled && socket !== null && !ended && confirm("本当に終了しますか？")) {
     socket.send(JSON.stringify({ type: "close" }));
   }
 });
@@ -497,9 +513,11 @@ async function loadOwnStorybook(quiet = false) {
   // The PDF in the orientation shown here.
   storybookPdf.href = `${base}.pdf?token=${token}&layout=${layout}`;
   if (!quiet) storybookStatus.textContent = "読み込んでいます…";
+  const requestedSessionId = endedSessionId;
   try {
     const response = await fetch(`${base}?layout=${layout}`, { headers: authenticatedHeaders() });
     const body = await response.json();
+    if (requestedSessionId !== endedSessionId) return;
     if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
     // A page with illustration set but no illustration_url yet is still
     // being drawn in the background (SessionIllustrations finishes after
@@ -517,6 +535,7 @@ async function loadOwnStorybook(quiet = false) {
       storybookProgress.max = illustrated.length;
       storybookProgress.value = ready;
       storybookProgress.hidden = false;
+      crowd?.pendingBook();
     } else {
       const snapshot = JSON.stringify(body);
       if (snapshot !== ownStorybookSnapshot || !quiet) {
@@ -526,6 +545,7 @@ async function loadOwnStorybook(quiet = false) {
       }
       storybookStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
       storybookProgress.hidden = true;
+      crowd?.bookReady(body, requestedSessionId);
     }
   } catch (error) {
     if (!quiet) storybookStatus.textContent = `絵本を読み込めませんでした: ${error.message}`;
@@ -562,6 +582,6 @@ logSelect.addEventListener("change", loadSelectedLog);
 logStorybookToggle.addEventListener("change", loadSelectedLog);
 logStorybookLayout.addEventListener("change", loadSelectedLog);
 
-sessionId = storageGet(SESSION_KEY);
+sessionId = storageGet(SESSION_KEY) || crowd?.savedSessionId || null;
 if (sessionId) connect();
 else startNewSession();

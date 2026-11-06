@@ -133,6 +133,7 @@ Choose one of these, by who should reach it (add `--storybook-eink`, `--ros-rela
 - **過去ログ** opens a read-only viewer of `logs/session_*.jsonl`. It, and the log API, work only from this PC (`127.0.0.1` / `::1`), whatever the token.
 - Sessions run their LLM calls concurrently (calls within one session are serialized); `--max-sessions` (default 20) caps them.
 - `--ros-relay` also sends every Web turn to the robot (output only); use it with a single participant.
+- `--crowdsourcing` (footprints / eeyore_birthday) enables ending after the story goal and issues a submission code after picture-book reading confirmation, including for an early spoken goodbye. See [the study workflow](docs/web_ui.md#クラウドソーシング用の完了確認--crowdsourcing).
 
 ### Connect to the Pooh body
 

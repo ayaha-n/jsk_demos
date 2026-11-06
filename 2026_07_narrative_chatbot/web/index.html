@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/style.css?v={{ASSET_VERSION}}">
   <style>{{LOCAL_LOG_STYLE}}</style>
 </head>
-<body>
+<body data-crowdsourcing="{{CROWDSOURCING}}">
   <header>
     <h1>{{SCENARIO_TITLE}}</h1>
     <div class="controls">
@@ -18,6 +18,7 @@
       <button type="button" id="restart-button" class="secondary">はじめから</button>
     </div>
   </header>
+  <div id="study-goal-notice" role="status" hidden>お話がひと区切りつきました。「終了して絵本を見る」から、今回のお話を絵本で振り返れます。</div>
 
   <section id="bear-stage" aria-label="プーの3D表示">
     <canvas id="bear-canvas" tabindex="0" role="img" aria-label="立体のクマ。頭・腕・お腹・足をタップすると触れます。ドラッグまたは左右キーで回転、Homeキーで向きを戻せます。"></canvas>
@@ -67,11 +68,23 @@
     <div id="storybook-status" role="status"></div>
     <progress id="storybook-progress" hidden></progress>
     <div id="storybook-viewer" class="storybook-viewer"></div>
+    <section id="study-completion" aria-label="体験の完了" hidden>
+      <p id="study-reading-hint">最後のページまで進んだら、読了を確認してください。</p>
+      <button type="button" id="study-read-button" disabled>絵本を読み終えた</button>
+      <div id="study-code-panel" hidden>
+        <label for="study-code">完了コード</label>
+        <input id="study-code" type="text" readonly spellcheck="false">
+        <button type="button" id="study-copy-button">完了コードをコピー</button>
+        <p>このコードをクラウドソーシングの回答欄に入力してください。</p>
+      </div>
+      <div id="study-completion-status" role="status"></div>
+    </section>
   </dialog>
 
   <!-- Scenario-authored scene description; display only, not model input. -->
   <template id="scene-intro-template"><div class="scene-intro">{{SCENE_INTRO}}</div></template>
 
+  <script src="/static/crowdsourcing.js?v={{ASSET_VERSION}}"></script>
   <script src="/static/app.js?v={{ASSET_VERSION}}"></script>
   <script src="/static/bear.js?v={{ASSET_VERSION}}"></script>
 </body>
