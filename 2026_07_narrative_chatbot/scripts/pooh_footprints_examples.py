@@ -22,6 +22,7 @@ from footprints_events import (
     APPEARANCE_UNRESOLVED,
     ASK_APPEARANCE_RESPONSE,
     ASK_NAME_RESPONSE,
+    ASK_WHAT_NOTICED_RESPONSE,
     FOURTH_ANIMAL_EVENT,
     FOURTH_ANIMAL_RESPONSE,
     IDENTITY_UNRESOLVED,
@@ -397,6 +398,40 @@ FOOTPRINTS_TRAINSET = [
         gave_up_on_noticing=True,
         bot_response=REVEAL_HINT_RESPONSE,
     ),
+    # 気づきの促しに「気づいた！」とだけ答えた（何に気づいたかは言っていない）
+    # 場合：まだ言い当てていないので、プーが答えを言ってはいけない。
+    # 「なにに気づいたの？」と聞き返す（実ログで確認：
+    # logs/session_20261106T210454... では、この返答が「自分たちの足跡だと
+    # 言った」と判定され、プーが「その足あとは、ぼくたちのだったんだね」と
+    # 答えを先に言ってしまった）。vague_noticing=True、
+    # participant_suggested_own_footprints=False の教師データ。聞き返しは
+    # FootprintsEventController.fixed_line_for の固定セリフ。
+    *example_variants(
+        current_situation=FOOTPRINTS_SITUATION.model_copy(
+            update={
+                "props": ["雪の積もった地面", "茂み", "足あと（８つ）"],
+                "events": [
+                    *_FOLLOWING_STARTED_EVENTS,
+                    "足跡が２匹分になっていることに気づいた",
+                    "足跡が４匹分に増えていることに気づいた",
+                ],
+                "unresolved": [IDENTITY_UNRESOLVED],
+            },
+            deep=True,
+        ),
+        user_action=["きづいた！", "わかった！", "あっ、そういうことか"],
+        history=(
+            "Turn 7\n世界イベント: プーが参加者に、何か気づかないかと問いかけた。"
+            "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 7a\n"
+            "物語アクション: []\nプーの応答: ねえ，きみ，なにか気づかない？"
+        ),
+        interaction_mode="narrative",
+        current_scene="7a",
+        narrative_actions=[],
+        vague_noticing=True,
+        bot_response=ASK_WHAT_NOTICED_RESPONSE,
+        question_kind="participant_own",
+    ),
     # --- 場面7-best：参加者が時限イベントより先に自分で気づく。
     # narrative_actionsでrealized_own_footprintsを報告し、以降の時限イベント
     # （気づきの誘導3段階）が発火しないようにする。
@@ -502,7 +537,7 @@ FOOTPRINTS_OPENING_LINE = _TURN1_BOT_RESPONSE
 # プー自身が決めるべきことについて、参加者が迷ったときに持つ既定の考え
 # (narrative_state.relevant_preferences参照)。
 FOOTPRINTS_POOH_PREFERENCES = {
-    NAMING_TOPIC: "「ウズウズ」って呼びたいな。",
+    NAMING_TOPIC: "あしあとが茂みのまわりをぐるぐる回っていて、うずうずしてる感じがするから、「ウズウズ」って呼びたいな。",
     APPEARANCE_UNRESOLVED: "ふわふわの茶色い毛で、まん丸い生き物だと思う。",
 }
 
@@ -511,6 +546,7 @@ FOOTPRINTS_MODE_EXAMPLES = build_mode_examples(
     FOOTPRINTS_TRAINSET,
     extra_fields=lambda item: {
         "gave_up_on_noticing": getattr(item, "gave_up_on_noticing", False),
+        "vague_noticing": getattr(item, "vague_noticing", False),
         "proposed_name": getattr(item, "proposed_name", ""),
         "participant_suggested_own_footprints": getattr(
             item, "participant_suggested_own_footprints", False

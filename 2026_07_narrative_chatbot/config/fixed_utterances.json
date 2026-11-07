@@ -165,7 +165,7 @@
     }
   },
   "footprints.naming": {
-    "text": "あしあとがぐるぐる渦を巻いてるみたいだね。なんだか、うずうずして落ち着きのない生き物なのかもなあ。よし、「ウズウズ」って呼ぶことにしよう。",
+    "text": "あしあとが、茂みのまわりをぐるぐる回っているね。じっとしていられなくて、うずうずしている生き物なのかもなあ。よし、「ウズウズ」って呼ぶことにしよう。",
     "wav": "footprints.naming.wav",
     "motion": {
       "eyebrow": "happy",
@@ -203,6 +203,14 @@
   "footprints.reveal_prompt": {
     "text": "ねえ、きみ、なにか気づかない？",
     "wav": "footprints.reveal_prompt.wav",
+    "motion": {
+      "eyebrow": "surprised",
+      "neck": "tilt"
+    }
+  },
+  "footprints.ask_what_noticed": {
+    "text": "ほんとう？なにに気づいたの？",
+    "wav": "footprints.ask_what_noticed.wav",
     "motion": {
       "eyebrow": "surprised",
       "neck": "tilt"

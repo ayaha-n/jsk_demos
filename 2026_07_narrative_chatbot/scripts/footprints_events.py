@@ -98,6 +98,22 @@ class FootprintsAnalyzeInteraction(AnalyzeInteraction):
             "同意・納得した場合もtrue。"
             "「誰の足跡だろう」「増えたね」「足跡をたどろう」のように、足跡の話を"
             "しているだけで自分たちの足跡だとは言っていない場合はfalse。"
+            "「気づいた！」「わかった！」のように、気づいたと言うだけで何に気づいたかを"
+            "言っていない場合もfalse（中身を言うまでは言い当てたことにならない）。"
+        )
+    )
+    # A participant who answers "何か気づかない？" with only "気づいた！"
+    # has not said what; gpt-4o read exactly that as having said the tracks
+    # were their own (3 of 3 times on logs/session_20261106T210454...), and
+    # Pooh then gave the answer away himself. Python asks what, instead (see
+    # FootprintsEventController.fixed_line_for).
+    vague_noticing: bool = dspy.OutputField(
+        desc=(
+            "プーが「なにか気づかない？」と気づきを促したあとの参加者の発話が、"
+            "「気づいた！」「わかった！」「あっ、そういうことか」のように、"
+            "気づいた・わかったと言うだけで、何に気づいたか（足跡がだれのものか）を"
+            "言っていない場合だけtrue。何に気づいたかを言っている場合、"
+            "「わからない」と言っている場合、そのような問いかけが直前にない場合はfalse。"
         )
     )
     proposed_name: str = dspy.OutputField(
@@ -256,6 +272,7 @@ FOURTH_ANIMAL_EVENT = "足跡が４匹分に増えていることに気づいた
 FOURTH_ANIMAL_RESPONSE = fixed_utterance("footprints.fourth_animal")
 REVEAL_PROMPT_RESPONSE = fixed_utterance("footprints.reveal_prompt")
 REVEAL_HINT_RESPONSE = fixed_utterance("footprints.reveal_hint")
+ASK_WHAT_NOTICED_RESPONSE = fixed_utterance("footprints.ask_what_noticed")
 REVEAL_DIRECT_EVENT = "実はウズウズの足跡は自分たちの足跡だったとわかった"
 REVEAL_DIRECT_RESPONSE = fixed_utterance("footprints.reveal_direct")
 
@@ -284,6 +301,8 @@ class FootprintsState:
     appearance_settled: bool = False
     # Settled early (the participant's own realization) or by _fire_reveal_direct.
     resolved: bool = False
+    # Pooh has asked "なにに気づいたの？" after a bare "気づいた！" once.
+    asked_what_noticed: bool = False
     completed_event_ids: set[str] = field(default_factory=set)
 
 
@@ -689,7 +708,7 @@ class FootprintsEventController(NarrativeEventController):
         )
 
     def fixed_line_for(self, classification: Any) -> str | None:
-        """A fixed line for this turn's classify-stage result, for the two
+        """A fixed line for this turn's classify-stage result, for the
         cases generation proved unreliable at handling on its own.
 
         proposed_name (FootprintsAnalyzeInteraction.proposed_name): once the
@@ -711,12 +730,31 @@ class FootprintsEventController(NarrativeEventController):
         never duplicates what the timed reveal_hint event would otherwise
         still say later (see extra_actions_for, which marks reveal_hint done
         once this fires).
+
+        vague_noticing: after "何か気づかない？", a bare "気づいた！" is
+        answered with "なにに気づいたの？" (once; a second bare one gets the
+        hint), never with the answer itself (confirmed live: Pooh said "その
+        足あとは、ぼくたちのだったんだね" to it). The timed hint and reveal
+        go on as usual if no answer comes.
         """
         # Turn-scoped: read by enforce_response_invariants and observe_actions
         # later in this same turn, then cleared by observe_actions.
         self._participant_suggested_own_footprints = bool(
             getattr(classification, "participant_suggested_own_footprints", False)
         )
+        noticing = (
+            "reveal_prompt" in self.state.completed_event_ids and not self.state.resolved
+        )
+        if noticing and getattr(classification, "vague_noticing", False):
+            # 「気づいた！」 alone has not said what: not a realization, so
+            # Pooh may not agree with an answer nobody gave. He asks what;
+            # asked once already, he gives the hint instead of asking again.
+            self._participant_suggested_own_footprints = False
+            if not self.state.asked_what_noticed:
+                self.state.asked_what_noticed = True
+                return ASK_WHAT_NOTICED_RESPONSE
+            if "reveal_hint" not in self.state.completed_event_ids:
+                return REVEAL_HINT_RESPONSE
         proposed_name = str(getattr(classification, "proposed_name", "") or "").strip()
         if proposed_name and not self.state.named:
             self.state.named = True
