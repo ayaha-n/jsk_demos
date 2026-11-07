@@ -77,14 +77,24 @@ function authenticatedHeaders() {
   return { "X-Pooh-Token": accessToken() };
 }
 
+function isSpeaking() {
+  // Mirrors the robot's own ~speaking: busy ends once a reply is ready, but
+  // like narrative_motion_bridge.py waiting out ~speaking before treating a
+  // turn as over, the UI should not feel free to race ahead of Pooh's own
+  // voice while it is still reading a line out. A line stuck on the
+  // autoplay policy is not actually making any sound, so it does not count.
+  return audioQueue.length > 0 && !audioBlocked;
+}
+
 function updateControls() {
   const connected = socket !== null && socket.readyState === WebSocket.OPEN;
+  const speaking = isSpeaking();
   const bearStage = document.getElementById("bear-stage");
   if (bearStage) bearStage.dataset.touchEnabled = String(connected && !ended);
-  const canType = connected && !ended && !busy;
+  const canType = connected && !ended && !busy && !speaking;
   inputText.disabled = !canType;
   sendButton.disabled = !canType;
-  endButton.disabled = !connected || ended || busy || Boolean(crowd && !crowd.goalReached);
+  endButton.disabled = !connected || ended || busy || speaking || Boolean(crowd && !crowd.goalReached);
   if (crowd) {
     endButton.textContent = "終了して絵本を見る";
     endButton.classList.toggle("goal-ready", crowd.goalReached && !ended);
@@ -179,6 +189,7 @@ function ensureAudioElement() {
     audioQueue.shift();
     audioBlocked = false;
     playNextAudio();
+    updateControls();
   };
   audioElement.addEventListener("ended", advance);
   audioElement.addEventListener("error", advance);
@@ -192,14 +203,17 @@ function playNextAudio() {
   audio.src = url;
   audio.play().then(() => {
     audioBlocked = false;
+    updateControls();
   }).catch(() => {
     audioBlocked = true;
+    updateControls();
   });
 }
 
 function queueAudio(url) {
   audioQueue.push(url);
   if (audioQueue.length === 1) playNextAudio();
+  updateControls();
 }
 
 document.addEventListener("click", () => {
@@ -518,6 +532,11 @@ async function startNewSession() {
   clearLog();
   ended = false;
   busy = false;
+  // A restart must not leave the new session waiting on the previous one's
+  // still-playing or still-queued line.
+  if (audioElement) audioElement.pause();
+  audioQueue.length = 0;
+  audioBlocked = false;
   storybookButton.hidden = true;
   sessionId = null;
   storageSet(SESSION_KEY, null);
