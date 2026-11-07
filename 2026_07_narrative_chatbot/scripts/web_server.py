@@ -345,7 +345,7 @@ def _asset_version() -> str:
 
 async def index(request: web.Request) -> web.Response:
     body = request.app[INDEX_HTML_KEY].replace(
-        "{{LOCAL_LOG_STYLE}}", _local_log_style(_local_peer(request))
+        "{{LOCAL_ONLY_STYLE}}", _local_only_style(_local_peer(request))
     ).replace("{{ASSET_VERSION}}", _asset_version())
     return web.Response(text=body, content_type="text/html", headers=NO_CACHE)
 
@@ -367,10 +367,11 @@ def _is_loopback_address(address: str | None) -> bool:
     )
 
 
-def _local_log_style(address: str | None) -> str:
+def _local_only_style(address: str | None) -> str:
+    """Hides host-PC-only controls (past logs, response details) elsewhere."""
     if _is_loopback_address(address):
         return ""
-    return ".local-log-feature { display: none !important; }"
+    return ".local-only-feature { display: none !important; }"
 
 
 def _via_public_tunnel(request: web.Request) -> bool:

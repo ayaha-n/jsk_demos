@@ -130,7 +130,7 @@ Choose one of these, by who should reach it (add `--storybook-eink`, `--ros-rela
 - Timed world events reach the browser even when the participant says nothing.
 - Closing or reloading the tab does not end the story; it reconnects until `--session-ttl` seconds (default 600) of inactivity, after which the session is dropped without the ending.
 - **終了** (or `exit`) plays the scenario's fixed ending line and motion, as does the model judging that the participant is leaving. **はじめから** ends the current session the same way and starts a new one.
-- **詳細** shows each turn's interaction mode, reference scene, narrative actions and state changes.
+- **詳細** shows each turn's interaction mode, reference scene, narrative actions and state changes. Like **過去ログ**, it only works from this PC (`127.0.0.1` / `::1`), whatever the token: participants never see it.
 - **過去ログ** opens a read-only viewer of `logs/session_*.jsonl`. It, and the log API, work only from this PC (`127.0.0.1` / `::1`), whatever the token.
 - Sessions run their LLM calls concurrently (calls within one session are serialized); `--max-sessions` (default 20) caps them.
 - `--ros-relay` also sends every Web turn to the robot (output only); use it with a single participant.

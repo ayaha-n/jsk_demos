@@ -209,6 +209,10 @@ class WebServerTests(AioHTTPTestCase):
         )
         self.assertNotIn("{{SCENE_INTRO}}", body)
 
+    async def test_response_details_toggle_is_host_pc_only(self):
+        body = await (await self.client.get("/")).text()
+        self.assertIn('class="toggle local-only-feature"', body)
+
     async def test_sessions_are_isolated(self):
         first = await self.new_session()
         second = await self.new_session()
@@ -469,11 +473,11 @@ class LogLocalAccessTests(unittest.IsolatedAsyncioTestCase):
     def test_accepts_only_loopback_peer_addresses(self):
         for address in ("127.0.0.1", "127.10.20.30", "::1", "::ffff:127.0.0.1"):
             self.assertTrue(web_server._is_loopback_address(address), address)
-            self.assertEqual(web_server._local_log_style(address), "")
+            self.assertEqual(web_server._local_only_style(address), "")
 
         for address in (None, "localhost", "0.0.0.0", "192.168.1.20", "::"):
             self.assertFalse(web_server._is_loopback_address(address), address)
-            self.assertIn("display: none", web_server._local_log_style(address))
+            self.assertIn("display: none", web_server._local_only_style(address))
 
     async def test_remote_peer_cannot_list_logs(self):
         request = SimpleNamespace(remote="192.168.1.20")

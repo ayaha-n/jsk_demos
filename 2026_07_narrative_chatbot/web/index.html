@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SCENARIO_TITLE}}</title>
   <link rel="stylesheet" href="/static/style.css?v={{ASSET_VERSION}}">
-  <style>{{LOCAL_LOG_STYLE}}</style>
+  <style>{{LOCAL_ONLY_STYLE}}</style>
 </head>
 <body data-crowdsourcing="{{CROWDSOURCING}}">
   <header>
     <h1>{{SCENARIO_TITLE}}</h1>
     <div class="controls">
-      <label class="toggle"><input type="checkbox" id="show-details"> 詳細</label>
+      <label class="toggle local-only-feature"><input type="checkbox" id="show-details"> 詳細</label>
       <button type="button" id="storybook-button" class="secondary" hidden>絵本を見る</button>
-      <button type="button" id="log-button" class="secondary local-log-feature">過去ログ</button>
+      <button type="button" id="log-button" class="secondary local-only-feature">過去ログ</button>
       <button type="button" id="end-button" class="secondary" disabled>終了</button>
       <button type="button" id="restart-button" class="secondary">はじめから</button>
     </div>
@@ -35,7 +35,7 @@
     <button type="submit" id="send-button" disabled>送る</button>
   </form>
 
-  <dialog id="log-dialog" class="local-log-feature">
+  <dialog id="log-dialog" class="local-only-feature">
     <div class="dialog-header">
       <h2>過去ログ</h2>
       <button type="button" id="log-close-button" class="secondary">閉じる</button>
