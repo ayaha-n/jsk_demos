@@ -170,6 +170,14 @@ button.secondary {
 
 button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
 
+#start-button {
+  display: block;
+  margin: 12px auto;
+  padding: 12px 36px;
+  font-size: 1.1rem;
+}
+#start-button[hidden] { display: none; }
+
 dialog {
   width: min(820px, calc(100% - 24px));
   max-height: calc(100% - 24px);

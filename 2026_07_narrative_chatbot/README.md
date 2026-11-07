@@ -126,6 +126,7 @@ Choose one of these, by who should reach it (add `--storybook-eink`, `--ros-rela
 
 `--public` needs no `--host`: the tunnel reaches the server on this PC, and the key is `POOH_WEB_TOKEN` or a fresh random one. Without `--public`, the server refuses a non-loopback `--host` unless `POOH_WEB_TOKEN` is set. Through `--host` or `--public`, participants get the conversation and their own picture book, not the past logs or the tablet; read [`docs/web_ui.md`](docs/web_ui.md) before publishing.
 
+- A fresh tab shows only the scene and an **はじめる** button; the story (and its opening line's audio, if `--tts-server-url` is set) starts on that tap, not on page load.
 - Timed world events reach the browser even when the participant says nothing.
 - Closing or reloading the tab does not end the story; it reconnects until `--session-ttl` seconds (default 600) of inactivity, after which the session is dropped without the ending.
 - **終了** (or `exit`) plays the scenario's fixed ending line and motion, as does the model judging that the participant is leaving. **はじめから** ends the current session the same way and starts a new one.

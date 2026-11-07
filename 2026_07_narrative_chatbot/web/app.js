@@ -8,6 +8,7 @@ const crowd = window.PoohCrowdsourcing;
 
 const log = document.getElementById("log");
 const statusLine = document.getElementById("status");
+const startButton = document.getElementById("start-button");
 const form = document.getElementById("input-form");
 const inputText = document.getElementById("input-text");
 const sendButton = document.getElementById("send-button");
@@ -48,6 +49,12 @@ let busy = false;
 let touchSupported = false;
 let reconnectDelay = 1000;
 let reconnectTimer = null;
+// A brand-new session's opening line arrives in the same "transcript" message
+// as a reconnect's replayed history, which must stay silent -- this tells
+// handleMessage's "transcript" case that, this one time, it is actually the
+// first live content this browser has ever shown for this session, so it
+// should autoplay like a freshly arriving "output" would.
+let justCreatedSession = false;
 
 function storageGet(key) {
   try { return sessionStorage.getItem(key); } catch { return null; }
@@ -137,6 +144,17 @@ function detailsText(output) {
   return lines.join("\n");
 }
 
+// 50ms of silent 8-bit PCM, used only to unlock audio playback (see
+// unlockAudio below) -- a real decodable clip is needed for the browser to
+// count it as "played" for that purpose, an empty <audio> is not enough.
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICA";
+
 // A single reusable <audio> element, queued so lines play one at a time in
 // order, never overlapping (mirrors the robot's own synth/play queue).
 let audioElement = null;
@@ -149,21 +167,30 @@ const audioQueue = [];
 // calls play() synchronously inside that gesture so it is allowed.
 let audioBlocked = false;
 
+// Created once, by whichever of playNextAudio/unlockAudio runs first, so the
+// ended/error listener below (which advances the queue) is never skipped --
+// it used to live inline in playNextAudio's own "if (!audioElement)", which
+// silently went unregistered when unlockAudio had already created the
+// element first, leaving every line after the first one stuck unplayed.
+function ensureAudioElement() {
+  if (audioElement) return audioElement;
+  audioElement = new Audio();
+  const advance = () => {
+    audioQueue.shift();
+    audioBlocked = false;
+    playNextAudio();
+  };
+  audioElement.addEventListener("ended", advance);
+  audioElement.addEventListener("error", advance);
+  return audioElement;
+}
+
 function playNextAudio() {
   const url = audioQueue[0];
   if (!url) return;
-  if (!audioElement) {
-    audioElement = new Audio();
-    const advance = () => {
-      audioQueue.shift();
-      audioBlocked = false;
-      playNextAudio();
-    };
-    audioElement.addEventListener("ended", advance);
-    audioElement.addEventListener("error", advance);
-  }
-  audioElement.src = url;
-  audioElement.play().then(() => {
+  const audio = ensureAudioElement();
+  audio.src = url;
+  audio.play().then(() => {
     audioBlocked = false;
   }).catch(() => {
     audioBlocked = true;
@@ -178,6 +205,22 @@ function queueAudio(url) {
 document.addEventListener("click", () => {
   if (audioBlocked) playNextAudio();
 }, true);
+
+// Called synchronously from the "はじめる" button's own click handler: a
+// real play() of a decodable (if silent) clip there satisfies browsers that
+// require the gesture and the call to be the same event, so the opening
+// line's actual audio_url -- which only arrives after the session-creation
+// round trip, well outside that gesture -- is allowed to autoplay too.
+function unlockAudio() {
+  const audio = ensureAudioElement();
+  audio.src = SILENT_WAV;
+  audio.play().then(() => {
+    // A real line can start (and change .src) before this resolves, since
+    // it only needs to win the race against the session-creation round
+    // trip, not against this 50ms clip; pausing then would cut it off.
+    if (audio.src === SILENT_WAV) audio.pause();
+  }).catch(() => {});
+}
 
 function appendOutput(output, { autoplay = false } = {}) {
   // Sensor-style observations belong to the book, not to the spoken chat.
@@ -378,13 +421,17 @@ function renderMessage(message, options) {
 
 function handleMessage(message) {
   switch (message.type) {
-    case "transcript":
+    case "transcript": {
       touchSupported = message.touch_supported === true;
       crowd?.setState(message.study, sessionId);
       clearLog();
-      // Replayed history is shown silently; forEach's own (value, index,
-      // array) args must not be mistaken for renderMessage's options.
-      message.messages.forEach((entry) => renderMessage(entry));
+      // A genuine reconnect's replayed history must stay silent, but a
+      // brand-new session's opening line also arrives this way (the very
+      // first "transcript", sent the moment this socket connects) and
+      // should autoplay just like any other freshly arriving line.
+      const autoplay = justCreatedSession;
+      justCreatedSession = false;
+      message.messages.forEach((entry) => renderMessage(entry, { autoplay }));
       ended = message.ended;
       busy = message.busy;
       if (ended) {
@@ -396,6 +443,7 @@ function handleMessage(message) {
         offerStorybook(sessionId);
       }
       break;
+    }
     case "output":
     case "user_input":
       renderMessage(message, { autoplay: true });
@@ -493,6 +541,7 @@ async function startNewSession() {
   }
   sessionId = body.session_id;
   storageSet(SESSION_KEY, sessionId);
+  justCreatedSession = true;
   connect();
 }
 
@@ -629,6 +678,19 @@ logSelect.addEventListener("change", loadSelectedLog);
 logStorybookToggle.addEventListener("change", loadSelectedLog);
 logStorybookLayout.addEventListener("change", loadSelectedLog);
 
+startButton.addEventListener("click", () => {
+  startButton.hidden = true;
+  // Synchronous, inside this click: see unlockAudio's own comment.
+  unlockAudio();
+  startNewSession();
+});
+
 sessionId = storageGet(SESSION_KEY) || crowd?.savedSessionId || null;
-if (sessionId) connect();
-else startNewSession();
+if (sessionId) {
+  connect();
+} else {
+  // Wait for a deliberate tap instead of auto-starting: the session (and so
+  // the opening line's audio) must not begin before unlockAudio() has run.
+  clearLog();
+  startButton.hidden = false;
+}
