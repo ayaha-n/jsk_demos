@@ -174,9 +174,22 @@ button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
   display: block;
   margin: 12px auto;
   padding: 12px 36px;
+  max-width: min(90%, 360px);
   font-size: 1.1rem;
 }
 #start-button[hidden] { display: none; }
+/* Only promises sound when a line can actually be heard. A block child
+   naturally wraps onto its own line below "はじめる", without needing a
+   separate wrapper around that text. */
+#start-button-sound-badge {
+  display: none;
+  margin-top: 4px;
+  font-size: 0.65em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  opacity: 0.9;
+}
+body[data-tts="true"] #start-button-sound-badge { display: block; }
 
 dialog {
   width: min(820px, calc(100% - 24px));

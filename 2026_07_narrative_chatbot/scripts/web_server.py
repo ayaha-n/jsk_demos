@@ -888,6 +888,8 @@ def create_app(
         "{{SCENARIO_TITLE}}", html.escape(scenario_title)
     ).replace("{{SCENE_INTRO}}", html.escape(scene_intro)).replace(
         "{{CROWDSOURCING}}", "true" if crowdsourcing else "false"
+    ).replace(
+        "{{TTS}}", "true" if tts is not None else "false"
     )
 
     async def lifecycle(app: web.Application):
