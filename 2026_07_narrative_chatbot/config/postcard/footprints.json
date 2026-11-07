@@ -1,0 +1,60 @@
+{
+  "_comment": "Postcard settings for this scenario (scripts/postcard.py, docs/postcard.md). items: the small pictures shown beside the text; beats: which item each scene (beat) shows. An item is {\"file\": an existing picture}, {\"combine\": [{\"file\", \"half\": \"left\"|\"right\"}, ...]} (halves side by side, made by scripts/postcard_items.py), {\"prompt\": ...} (drawn once by scripts/postcard_items.py), or {\"trail\": [item, ...]} (those items as footprints in a winding line down the card's right edge, taking turns; count, wiggle_mm). anchor (top_right / top_left / bottom_right / bottom_left) and size_mm place a single item; placement gives the defaults.",
+  "placement": {
+    "anchor": "top_right",
+    "size_mm": 16
+  },
+  "items": {
+    "paw_print": {
+      "combine": [
+        {
+          "file": "footprints/paw_print_reference.png",
+          "half": "left"
+        }
+      ]
+    },
+    "oval_print": {
+      "combine": [
+        {
+          "file": "footprints/oval_print_reference.png",
+          "half": "left"
+        }
+      ]
+    },
+    "paw_trail": {
+      "trail": [
+        "paw_print"
+      ],
+      "size_mm": 7,
+      "count": 6,
+      "wiggle_mm": 2.5
+    },
+    "together_trail": {
+      "trail": [
+        "paw_print",
+        "oval_print"
+      ],
+      "size_mm": 7,
+      "count": 6,
+      "wiggle_mm": 2.5
+    }
+  },
+  "beats": {
+    "opening": "paw_trail",
+    "ask_appearance": "paw_trail",
+    "start_following": "paw_trail",
+    "second_animal": "paw_trail",
+    "fourth_animal": null,
+    "reveal_hint": "together_trail",
+    "reveal_direct": "together_trail",
+    "session_close": "together_trail"
+  },
+  "frame": {
+    "style": "lines",
+    "color": [
+      0.55,
+      0.67,
+      0.78
+    ]
+  }
+}
