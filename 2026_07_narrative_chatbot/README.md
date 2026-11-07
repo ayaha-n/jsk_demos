@@ -126,13 +126,16 @@ Choose one of these, by who should reach it (add `--storybook-eink`, `--ros-rela
 
 `--public` needs no `--host`: the tunnel reaches the server on this PC, and the key is `POOH_WEB_TOKEN` or a fresh random one. Without `--public`, the server refuses a non-loopback `--host` unless `POOH_WEB_TOKEN` is set. Through `--host` or `--public`, participants get the conversation and their own picture book, not the past logs or the tablet; read [`docs/web_ui.md`](docs/web_ui.md) before publishing.
 
+- A fresh tab shows only the scene and an **はじめる** button; the story (and its opening line's audio, if `--tts-server-url` is set) starts on that tap, not on page load.
 - Timed world events reach the browser even when the participant says nothing.
 - Closing or reloading the tab does not end the story; it reconnects until `--session-ttl` seconds (default 600) of inactivity, after which the session is dropped without the ending.
-- **終了** (or `exit`) plays the scenario's fixed ending line and motion, as does the model judging that the participant is leaving. **はじめから** ends the current session the same way and starts a new one.
-- **詳細** shows each turn's interaction mode, reference scene, narrative actions and state changes.
+- **終了** (or `exit`) plays the scenario's fixed ending line and motion, as does the model judging that the participant is leaving. **はじめから** ends the current session the same way and starts a new one; under `--crowdsourcing` it is hidden instead, since a restart's new session gets its own, separate completion code.
+- **詳細** shows each turn's interaction mode, reference scene, narrative actions and state changes. Like **過去ログ**, it only works from this PC (`127.0.0.1` / `::1`), whatever the token: participants never see it.
 - **過去ログ** opens a read-only viewer of `logs/session_*.jsonl`. It, and the log API, work only from this PC (`127.0.0.1` / `::1`), whatever the token.
 - Sessions run their LLM calls concurrently (calls within one session are serialized); `--max-sessions` (default 20) caps them.
 - `--ros-relay` also sends every Web turn to the robot (output only); use it with a single participant.
+- `--crowdsourcing` (footprints / eeyore_birthday) enables ending after the story goal and issues a submission code after picture-book reading confirmation, including for an early spoken goodbye. See [the study workflow](docs/web_ui.md#クラウドソーシング用の完了確認--crowdsourcing).
+- `--tts-server-url` (or `POOH_TTS_SERVER_URL`) speaks Pooh's lines with a Style-Bert-VITS2 editor server (same voice as the robot); without it, or if synthesis fails, the line just shows as text. See [the TTS section](docs/web_ui.md#音声合成--tts-server-url試作).
 
 ### Connect to the Pooh body
 

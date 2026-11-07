@@ -5,23 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SCENARIO_TITLE}}</title>
   <link rel="stylesheet" href="/static/style.css?v={{ASSET_VERSION}}">
-  <style>{{LOCAL_LOG_STYLE}}</style>
+  <style>{{LOCAL_ONLY_STYLE}}</style>
 </head>
-<body>
+<body data-crowdsourcing="{{CROWDSOURCING}}" data-tts="{{TTS}}">
   <header>
     <h1>{{SCENARIO_TITLE}}</h1>
     <div class="controls">
-      <label class="toggle"><input type="checkbox" id="show-details"> 詳細</label>
+      <label class="toggle local-only-feature"><input type="checkbox" id="show-details"> 詳細</label>
       <button type="button" id="storybook-button" class="secondary" hidden>絵本を見る</button>
-      <button type="button" id="log-button" class="secondary local-log-feature">過去ログ</button>
+      <button type="button" id="log-button" class="secondary local-only-feature">過去ログ</button>
       <button type="button" id="end-button" class="secondary" disabled>終了</button>
       <button type="button" id="restart-button" class="secondary">はじめから</button>
     </div>
   </header>
+  <div id="study-goal-notice" role="status" hidden>お話がひと区切りつきました。「終了して絵本を見る」から、今回のお話を絵本で振り返れます。</div>
 
+  <section id="bear-stage" aria-label="プーの3D表示">
+    <canvas id="bear-canvas" tabindex="0" role="img" aria-label="立体のクマ。頭・腕・お腹・足をタップすると触れます。ドラッグまたは左右キーで回転、Homeキーで向きを戻せます。"></canvas>
+  </section>
   <main id="log" aria-live="polite"></main>
 
   <div id="status" role="status"></div>
+
+  <button type="button" id="start-button" hidden>
+    はじめる
+    <span id="start-button-sound-badge">🔊 音が出る設定にしてください</span>
+  </button>
 
   <form id="input-form" autocomplete="off">
     <input id="input-text" type="text" maxlength="500"
@@ -29,7 +38,7 @@
     <button type="submit" id="send-button" disabled>送る</button>
   </form>
 
-  <dialog id="log-dialog" class="local-log-feature">
+  <dialog id="log-dialog" class="local-only-feature">
     <div class="dialog-header">
       <h2>過去ログ</h2>
       <button type="button" id="log-close-button" class="secondary">閉じる</button>
@@ -64,11 +73,24 @@
     <div id="storybook-status" role="status"></div>
     <progress id="storybook-progress" hidden></progress>
     <div id="storybook-viewer" class="storybook-viewer"></div>
+    <section id="study-completion" aria-label="体験の完了" hidden>
+      <p id="study-reading-hint">最後のページまで進んだら、読了を確認してください。</p>
+      <button type="button" id="study-read-button" disabled>絵本を読み終えた</button>
+      <div id="study-code-panel" hidden>
+        <label for="study-code">完了コード</label>
+        <input id="study-code" type="text" readonly spellcheck="false">
+        <button type="button" id="study-copy-button">完了コードをコピー</button>
+        <p>このコードをクラウドソーシングの回答欄に入力してください。</p>
+      </div>
+      <div id="study-completion-status" role="status"></div>
+    </section>
   </dialog>
 
   <!-- Scenario-authored scene description; display only, not model input. -->
   <template id="scene-intro-template"><div class="scene-intro">{{SCENE_INTRO}}</div></template>
 
+  <script src="/static/crowdsourcing.js?v={{ASSET_VERSION}}"></script>
   <script src="/static/app.js?v={{ASSET_VERSION}}"></script>
+  <script src="/static/bear.js?v={{ASSET_VERSION}}"></script>
 </body>
 </html>
