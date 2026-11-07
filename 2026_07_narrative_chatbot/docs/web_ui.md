@@ -137,3 +137,30 @@ UTC時刻と、`ended_before_goal`、`completion_code`を保持する。
 コードを発行する。提出されたコードだけで絵本や会話へアクセスすることはできない。
 
 関連テスト: `python -m unittest discover -s tests -p test_crowdsourcing.py`。
+
+## 音声合成（--tts-server-url、試作）
+
+```bash
+python scripts/web_server.py --scenario footprints --tts-server-url http://127.0.0.1:8000
+```
+
+`--tts-server-url`（または環境変数 `POOH_TTS_SERVER_URL`）を指定したときだけ、
+プーの発話をStyle-Bert-VITS2のeditorサーバー（`server_editor.py`、ロボットの声と同じ
+`pooh_body/scripts/style_bert_vits2_tts.py` 相当の設定）で音声合成し、ブラウザで再生する。
+指定しない場合はテキストのみで、`--crowdsourcing` など他の機能とは独立に切り替えられる。
+
+発話ごとに音声を順番に再生する（重ならない）。ブラウザの自動再生ポリシーにより、
+直前のユーザー操作とは別のタイミングで届く発話（WebSocket経由のため、送信ボタンの
+クリックそのものの範囲外になる）は再生がブロックされることがある。その場合は
+読み捨てず、次に画面のどこかをタップしたタイミングで再試行する。
+
+音声合成に失敗した場合（サーバ未起動・タイムアウトなど）は、該当の発話だけ
+音声なしでテキストのみ表示する。挿絵と同じく、フォールバック音声や再試行は行わない。
+合成結果はテキスト＋音声設定ごとにプロセス内メモリでキャッシュする
+（固定文は参加者間で共有され、サーバ再起動まで再利用される）。
+
+現時点ではTTSサーバーは単一プロセスを前提としており、常駐化・複数プロセスでの
+負荷分散は別途必要（クラウドソーシング規模での運用はまだ検証中）。
+
+関連テスト: `python -m unittest discover -s tests -p test_web_tts.py`、
+`python -m unittest tests.test_web_server.TTSTests tests.test_web_server.NoTTSTests`。

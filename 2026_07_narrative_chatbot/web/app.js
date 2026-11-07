@@ -137,7 +137,49 @@ function detailsText(output) {
   return lines.join("\n");
 }
 
-function appendOutput(output) {
+// A single reusable <audio> element, queued so lines play one at a time in
+// order, never overlapping (mirrors the robot's own synth/play queue).
+let audioElement = null;
+const audioQueue = [];
+// play() reaches the browser through a WebSocket push, outside the call
+// stack of whatever click/submit triggered it, so autoplay policies (most
+// strictly on Safari/iOS) can reject it even right after the participant
+// typed something. Rather than dropping that line, keep it queued and let
+// any later tap retry it -- see the document click listener below, which
+// calls play() synchronously inside that gesture so it is allowed.
+let audioBlocked = false;
+
+function playNextAudio() {
+  const url = audioQueue[0];
+  if (!url) return;
+  if (!audioElement) {
+    audioElement = new Audio();
+    const advance = () => {
+      audioQueue.shift();
+      audioBlocked = false;
+      playNextAudio();
+    };
+    audioElement.addEventListener("ended", advance);
+    audioElement.addEventListener("error", advance);
+  }
+  audioElement.src = url;
+  audioElement.play().then(() => {
+    audioBlocked = false;
+  }).catch(() => {
+    audioBlocked = true;
+  });
+}
+
+function queueAudio(url) {
+  audioQueue.push(url);
+  if (audioQueue.length === 1) playNextAudio();
+}
+
+document.addEventListener("click", () => {
+  if (audioBlocked) playNextAudio();
+}, true);
+
+function appendOutput(output, { autoplay = false } = {}) {
   // Sensor-style observations belong to the book, not to the spoken chat.
   if (output.source === "observed") return;
   const node = document.createElement("div");
@@ -153,6 +195,9 @@ function appendOutput(output) {
   node.append(speaker, body, details);
   log.appendChild(node);
   scrollToBottom();
+  // Only a freshly arriving line is spoken; replaying a reconnect's past
+  // transcript must not suddenly play every past line's audio at once.
+  if (autoplay && output.audio_url) queueAudio(output.audio_url);
 }
 
 function formatLogTime(value) {
@@ -326,8 +371,8 @@ async function refreshLogList() {
   }
 }
 
-function renderMessage(message) {
-  if (message.type === "output") appendOutput(message.output);
+function renderMessage(message, options) {
+  if (message.type === "output") appendOutput(message.output, options);
   else if (message.type === "user_input") appendUser(message.text);
 }
 
@@ -337,7 +382,9 @@ function handleMessage(message) {
       touchSupported = message.touch_supported === true;
       crowd?.setState(message.study, sessionId);
       clearLog();
-      message.messages.forEach(renderMessage);
+      // Replayed history is shown silently; forEach's own (value, index,
+      // array) args must not be mistaken for renderMessage's options.
+      message.messages.forEach((entry) => renderMessage(entry));
       ended = message.ended;
       busy = message.busy;
       if (ended) {
@@ -351,7 +398,7 @@ function handleMessage(message) {
       break;
     case "output":
     case "user_input":
-      renderMessage(message);
+      renderMessage(message, { autoplay: true });
       break;
     case "status":
       busy = message.busy;

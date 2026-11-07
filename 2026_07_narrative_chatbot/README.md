@@ -134,6 +134,7 @@ Choose one of these, by who should reach it (add `--storybook-eink`, `--ros-rela
 - Sessions run their LLM calls concurrently (calls within one session are serialized); `--max-sessions` (default 20) caps them.
 - `--ros-relay` also sends every Web turn to the robot (output only); use it with a single participant.
 - `--crowdsourcing` (footprints / eeyore_birthday) enables ending after the story goal and issues a submission code after picture-book reading confirmation, including for an early spoken goodbye. See [the study workflow](docs/web_ui.md#クラウドソーシング用の完了確認--crowdsourcing).
+- `--tts-server-url` (or `POOH_TTS_SERVER_URL`) speaks Pooh's lines with a Style-Bert-VITS2 editor server (same voice as the robot); without it, or if synthesis fails, the line just shows as text. See [the TTS section](docs/web_ui.md#音声合成--tts-server-url試作).
 
 ### Connect to the Pooh body
 

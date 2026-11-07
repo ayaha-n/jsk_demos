@@ -27,10 +27,12 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 from uuid import uuid4
 
+import requests
 from aiohttp import WSMsgType, web
 
 from crowdsourcing import (IDLE_CLOSE_EVENTS, SUPPORTED_SCENARIOS, Progress,
                           ProgressStore, book_ready, book_revision, reached_goal, timestamp)
+from web_tts import TTSCache, TTSConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = PROJECT_ROOT / "web"
@@ -95,9 +97,11 @@ class SessionRegistry:
         clock: Callable[[], float] = time.monotonic,
         local_output_listeners: Sequence[Any] = (),
         study_store: ProgressStore | None = None,
+        tts: TTSCache | None = None,
     ) -> None:
         self.factory = factory
         self.study_store = study_store
+        self.tts = tts
         # Given only to sessions started on this PC itself (e.g. the live
         # picture book on the tablet next to the robot).
         self.local_output_listeners = tuple(local_output_listeners)
@@ -138,7 +142,7 @@ class SessionRegistry:
         async with entry.lock:
             opening = await asyncio.to_thread(entry.session.start)
         if opening is not None:
-            entry.transcript.append({"type": "output", "output": opening.to_dict()})
+            entry.transcript.append({"type": "output", "output": await self._output_dict(opening)})
         entry.timer_task = asyncio.create_task(self._run_timer(entry))
         return entry
 
@@ -200,9 +204,29 @@ class SessionRegistry:
         await self._sync_study(entry)
         if output is None:
             return
-        await self._record(entry, {"type": "output", "output": output.to_dict()})
+        await self._record(entry, {"type": "output", "output": await self._output_dict(output)})
         if entry.session.ended:
             await self._broadcast(entry, {"type": "ended"})
+
+    async def _output_dict(self, output: SessionOutputLike) -> dict[str, Any]:
+        output_dict = output.to_dict()
+        output_dict["audio_url"] = await self._synthesize_audio(output.bot_response)
+        return output_dict
+
+    async def _synthesize_audio(self, text: str) -> str | None:
+        """A URL to the line's audio, or None if TTS is off or failed.
+
+        Best-effort like illustrations: a browser missing audio_url just
+        shows the text, same as a storybook page that never gets a picture.
+        """
+        if self.tts is None or not text.strip():
+            return None
+        try:
+            key, _wav = await asyncio.to_thread(self.tts.synthesize, text)
+        except (requests.RequestException, ValueError) as exc:
+            print(f"[tts] 合成に失敗しました: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return None
+        return f"/audio/{key}.wav"
 
     async def _sync_study(self, entry: WebSession) -> None:
         if entry.study is None:
@@ -743,6 +767,21 @@ async def storybook_font(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(storybook.FONT_PATH)
 
 
+# Content-addressed by the synthesis text+settings, so it never changes.
+AUDIO_CACHE_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
+async def synthesized_audio(request: web.Request) -> web.StreamResponse:
+    tts = request.app[REGISTRY_KEY].tts
+    name = request.match_info["name"]
+    if tts is None or not name.endswith(".wav"):
+        raise web.HTTPNotFound()
+    wav = tts.get(name[:-len(".wav")])
+    if wav is None:
+        raise web.HTTPNotFound()
+    return web.Response(body=wav, content_type="audio/wav", headers=AUDIO_CACHE_HEADERS)
+
+
 async def create_session(request: web.Request) -> web.Response:
     if not _authorized(request):
         return web.json_response({"error": "unauthorized"}, status=401)
@@ -828,6 +867,7 @@ def create_app(
     log_dir: Path | None = None,
     local_output_listeners: Sequence[Any] = (),
     crowdsourcing: bool = False,
+    tts: TTSCache | None = None,
 ) -> web.Application:
     app = web.Application()
     effective_log_dir = log_dir or Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
@@ -837,6 +877,7 @@ def create_app(
         max_sessions=max_sessions,
         local_output_listeners=local_output_listeners,
         study_store=ProgressStore(effective_log_dir / "crowdsourcing") if crowdsourcing else None,
+        tts=tts,
     )
     app[REGISTRY_KEY] = registry
     app[TOKEN_KEY] = access_token
@@ -862,6 +903,7 @@ def create_app(
     app.router.add_get("/api/logs/{name}/storybook.pdf", read_storybook_pdf)
     app.router.add_get("/storybook/{name:.+\\.png}", storybook_illustration)
     app.router.add_get("/static/storybook-font.ttf", storybook_font)
+    app.router.add_get("/audio/{name}", synthesized_audio)
     app.router.add_post("/api/sessions", create_session)
     app.router.add_delete("/api/sessions/{session_id}", delete_session)
     app.router.add_get("/api/sessions/{session_id}/storybook", read_session_storybook)
@@ -977,6 +1019,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-sessions", type=int, default=DEFAULT_MAX_SESSIONS)
     parser.add_argument("--crowdsourcing", action="store_true",
                         help="ゴール後に終了ボタンを有効化し、絵本の読了確認後に提出用コードを発行する。")
+    parser.add_argument("--tts-server-url", default=os.getenv("POOH_TTS_SERVER_URL", ""),
+                        help="Style-Bert-VITS2のeditorサーバーURL（例: http://127.0.0.1:8000）。"
+                             "指定時のみプーの発話を音声合成する。失敗時は音声なしで継続する。")
     parser.add_argument("--ros-relay", action="store_true",
                         help="指定時、各ターンをROS中継へ送る（入力は受けない）。")
     parser.add_argument("--ros-relay-host", default="127.0.0.1")
@@ -1015,6 +1060,7 @@ def main() -> int:
         # APIキーやLMリクエスト本文を含む可能性のある詳細tracebackは表示しない。
         print(f"エラー: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    tts = TTSCache(TTSConfig(server_url=args.tts_server_url.rstrip("/"))) if args.tts_server_url else None
     app = create_app(
         factory,
         ttl_seconds=args.session_ttl,
@@ -1024,6 +1070,7 @@ def main() -> int:
         scene_intro=scene_intro,
         local_output_listeners=listeners,
         crowdsourcing=args.crowdsourcing,
+        tts=tts,
     )
     suffix = f"/?token={access_token}" if access_token else "/"
     print(f"Web UI: http://{args.host}:{args.port}{suffix}")

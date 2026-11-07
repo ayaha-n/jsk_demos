@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import requests
 from aiohttp import WSMsgType
 from aiohttp.test_utils import AioHTTPTestCase
 
@@ -364,6 +365,83 @@ class WebServerTests(AioHTTPTestCase):
             await self.new_session()
         response = await self.client.post("/api/sessions")
         self.assertEqual(response.status, 503)
+
+
+@dataclass
+class FakeTTS:
+    """Stands in for web_tts.TTSCache: no real HTTP calls."""
+
+    fail_next: bool = False
+    calls: list[str] = field(default_factory=list)
+    _wavs: dict[str, bytes] = field(default_factory=dict)
+
+    def get(self, key: str) -> bytes | None:
+        return self._wavs.get(key)
+
+    def synthesize(self, text: str):
+        self.calls.append(text)
+        if self.fail_next:
+            self.fail_next = False
+            raise requests.ConnectionError("tts server unreachable")
+        key = f"key-{len(self._wavs)}"
+        wav = f"wav:{text}".encode()
+        self._wavs[key] = wav
+        return key, wav
+
+
+class TTSTests(AioHTTPTestCase):
+    async def get_application(self):
+        self.tts = FakeTTS()
+
+        def factory(session_id: str) -> FakeSession:
+            return FakeSession(session_id)
+
+        return web_server.create_app(factory, max_sessions=3, tts=self.tts)
+
+    async def new_session(self) -> str:
+        response = await self.client.post("/api/sessions")
+        return (await response.json())["session_id"]
+
+    async def receive_until(self, ws, message_type: str, timeout: float = 2.0) -> dict:
+        while True:
+            message = await asyncio.wait_for(ws.receive_json(), timeout=timeout)
+            if message["type"] == message_type:
+                return message
+
+    async def test_output_carries_a_fetchable_audio_url(self):
+        session_id = await self.new_session()
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            transcript = await self.receive_until(ws, "transcript")
+            audio_url = transcript["messages"][0]["output"]["audio_url"]
+            self.assertIsNotNone(audio_url)
+            response = await self.client.get(audio_url)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(await response.read(), "wav:やあ".encode())
+
+    async def test_failed_synthesis_leaves_audio_url_empty_but_keeps_the_turn(self):
+        self.tts.fail_next = True
+        session_id = await self.new_session()
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            transcript = await self.receive_until(ws, "transcript")
+            self.assertIsNone(transcript["messages"][0]["output"]["audio_url"])
+
+    async def test_unknown_audio_key_is_not_found(self):
+        response = await self.client.get("/audio/does-not-exist.wav")
+        self.assertEqual(response.status, 404)
+
+
+class NoTTSTests(AioHTTPTestCase):
+    async def get_application(self):
+        return web_server.create_app(FakeSession, max_sessions=3)
+
+    async def test_output_has_no_audio_and_route_is_absent(self):
+        response = await self.client.post("/api/sessions")
+        session_id = (await response.json())["session_id"]
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            transcript = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+            self.assertIsNone(transcript["messages"][0]["output"]["audio_url"])
+        response = await self.client.get("/audio/anything.wav")
+        self.assertEqual(response.status, 404)
 
 
 class BindSecurityTests(unittest.TestCase):
