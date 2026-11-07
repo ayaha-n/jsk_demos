@@ -228,10 +228,18 @@ class NarrativeEventController:
         Deadlines already set never move; events armed afterwards, and quiet
         time, count from the end of that speech.  ``awaiting_reply`` marks a
         line that asked the participant something; any later activity clears it.
+
+        A line starts at ``_speech_end`` (when the previous one, if any, is
+        due to finish), not at ``now``: a generated reply immediately
+        followed by a fixed follow-up (pop_due_event's own call below) calls
+        this twice back to back, and the two speech lengths must add up, not
+        collapse to whichever happens to be longer, or quiet time and newly
+        armed events would count as if only one of the two lines was ever
+        spoken.
         """
         self._awaiting_reply = awaiting_reply
         now = self.clock()
-        self._speech_end = max(self._speech_end, now + speech_seconds)
+        self._speech_end = max(now, self._speech_end) + speech_seconds
         self._last_activity = max(now, self._speech_end)
 
     def begin(self, opening_speech_seconds: float) -> None:

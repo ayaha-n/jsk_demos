@@ -1806,6 +1806,31 @@ class RegressionTests(unittest.TestCase):
         now[0] = 45.0
         self.assertEqual(controller.pop_due_event().event_id, "pooh_tastes_honey")
 
+    def test_back_to_back_speech_lengths_add_up_instead_of_collapsing(self):
+        # A generated reply immediately followed by a fixed follow-up (e.g.
+        # footprints' ask_appearance right after an organic answer) calls
+        # observe_activity twice at essentially the same clock reading; the
+        # two speech lengths must add up, not collapse to whichever is
+        # longer, or quiet time / newly armed events would count as if only
+        # one of the two lines was ever spoken.
+        now = [0.0]
+        controller = HoneyGiftEventController(
+            30.0, 30.0, 10.0, clock=lambda: now[0], quiet_seconds=12.0,
+        )
+        controller.observe_actions(["commit_honey_jar_gift"])
+        now[0] = 25.0
+        controller.observe_activity(8.0)   # the organic reply, 8s to speak
+        controller.observe_activity(3.0)   # a fixed follow-up, 3s, right behind it
+
+        # The buggy max()-based version would have the 3s follow-up's length
+        # swallowed by the 8s reply's already-later end, making this ready
+        # at 25+8+12=45 instead of the correct 25+8+3+12=48; check a point
+        # in between so a regression here is actually caught.
+        now[0] = 46.0
+        self.assertIsNone(controller.pop_due_event())
+        now[0] = 25.0 + 8.0 + 3.0 + 12.0
+        self.assertEqual(controller.pop_due_event().event_id, "pooh_tastes_honey")
+
     def test_speech_estimate_matches_measured_fixed_utterance_rate(self):
         # The eeyore opening WAV is 26.9 s long.
         self.assertAlmostEqual(
