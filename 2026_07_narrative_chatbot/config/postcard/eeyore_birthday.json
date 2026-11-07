@@ -1,0 +1,46 @@
+{
+  "_comment": "Postcard settings for this scenario (scripts/postcard.py, docs/postcard.md). items: the small pictures shown beside the text; beats: which item each scene (beat) shows. An item is {\"file\": an existing picture}, {\"combine\": [{\"file\", \"half\": \"left\"|\"right\"}, ...]} (halves side by side, made by scripts/postcard_items.py), or {\"prompt\": ...} (drawn once by scripts/postcard_items.py). anchor (top_right / top_left / bottom_right / bottom_left) and size_mm place it on the card; placement gives the defaults.",
+  "placement": {
+    "anchor": "top_right",
+    "size_mm": 16
+  },
+  "style_reference": "eeyore_birthday/story_wrap_up.png",
+  "items": {
+    "gift_box": {
+      "prompt": "A small wrapped present box with a loose blue ribbon bow."
+    },
+    "honey_pot": {
+      "prompt": "A round brown ceramic honey pot with golden honey dripping over its rim and a wooden lid resting beside it."
+    },
+    "honey_dipper": {
+      "prompt": "A wooden honey dipper with a drop of golden honey hanging from it."
+    },
+    "empty_pot": {
+      "prompt": "An empty round brown ceramic honey pot lying on its side, only a thin golden smear inside."
+    },
+    "balloon": {
+      "prompt": "A single round red balloon on a curling string."
+    },
+    "ribbon_bow": {
+      "prompt": "A single loose satin ribbon bow in soft light blue, two loops and two trailing tails, seen from the front, as if tied on a present."
+    }
+  },
+  "beats": {
+    "opening": "gift_box",
+    "honey_gift_committed": "honey_pot",
+    "pooh_tastes_honey": "honey_dipper",
+    "pooh_ate_honey": "empty_pot",
+    "story_wrap_up": "balloon"
+  },
+  "frame": {
+    "style": "ribbon",
+    "color": [
+      0.62,
+      0.76,
+      0.9
+    ],
+    "bow": "ribbon_bow",
+    "bow_anchor": "top_left",
+    "bow_size_mm": 24
+  }
+}
