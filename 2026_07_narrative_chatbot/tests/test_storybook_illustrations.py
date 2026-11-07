@@ -108,5 +108,60 @@ class ModerationTest(unittest.TestCase):
                 self.draw([error, error])
 
 
+class UnansweredBubbleTest(unittest.TestCase):
+    """footprints' ask_appearance: a thought bubble with the imagined creature."""
+
+    def test_nobody_said_what_it_looks_like_so_the_bundled_picture_stays(self):
+        # logs/session_20261106T210540...: nobody answered, yet a creature
+        # with wings and feelers was invented for the bubble.
+        import json
+        import tempfile
+        from dataclasses import replace
+        from unittest import mock
+
+        from storybook_illustrations import SceneSummary
+
+        config = replace(storybook.load_story_config("footprints"), session_id="unanswered-test")
+        drawn = []
+        illustrations = SessionIllustrations(
+            summarize=lambda *args: SceneSummary("クマが首をかしげている。", True, None, answered=False),
+            generate_plain_image=lambda prompt, output: drawn.append(prompt),
+            generate_image=lambda *args, **kwargs: drawn.append(args))
+        name = storybook.generated_illustration_name(config.scenario, config.session_id, "ask_appearance")
+        turns = [StoryTurn("session_open", "やあ。"),
+                 StoryTurn("world_event", "見た目はどんな感じだと思う？", world_event_id="ask_appearance")]
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(storybook, "ILLUSTRATION_ROOT", Path(tmp)):
+            try:
+                illustrations._generate(config, "ask_appearance", turns, name, False)
+            finally:
+                illustrations.close()
+            self.assertEqual(drawn, [])
+            saved = json.loads((Path(tmp) / name).with_suffix(".scene.json").read_text())
+            self.assertTrue(saved["use_bundled"])
+            self.assertFalse(saved["answered"])
+            self.assertIn(config.illustration_name("ask_appearance"),
+                          [config.beats["ask_appearance"].illustration,
+                           *config.beats["ask_appearance"].illustration_variants])
+
+
+class DetailBeatTest(unittest.TestCase):
+    def test_the_conversation_settling_the_look_opens_its_scene(self):
+        # logs/session_20261106T210612...: Pooh asked "どんな生き物だと思う？"
+        # himself, the timed question never came, and the book had no
+        # appearance scene (nor picture) at all.
+        config = storybook.load_story_config("footprints")
+        answer = StoryTurn("participant", "まりもみたいなんだね。", user_text="みどりいろの、まりもみたい",
+                           settled_topics=("正体の見た目はどんな様子か",))
+        self.assertEqual(storybook.narrate(answer, config)[0], "ask_appearance")
+        # Asked already by the timed question: not a second scene.
+        self.assertIsNone(storybook.narrate(answer, config, frozenset({"ask_appearance"}))[0])
+        record = {"source": "participant", "bot_response": "まりもみたいなんだね。",
+                  "user_action": "みどりいろの、まりもみたい",
+                  "settled_details": [{"topic": "正体の見た目はどんな様子か", "value": "まりも"}]}
+        self.assertEqual(storybook.turn_from_record(record).settled_topics,
+                         ("正体の見た目はどんな様子か",))
+
+
 if __name__ == "__main__":
     unittest.main()

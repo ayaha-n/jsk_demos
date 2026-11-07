@@ -153,6 +153,9 @@
       "fixed_utterance_beats": {
         "footprints.reveal_hint": "reveal_hint"
       },
+      "detail_beats": {
+        "正体の見た目はどんな様子か": "ask_appearance"
+      },
       "beats": {
         "opening": {
           "narration": "ゆきが つもった もりの なかで、プーは みなれない あしあとを みつけました。",

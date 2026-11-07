@@ -53,6 +53,10 @@ class SceneSummary:
     description: str
     illustration_needed: bool = True
     balloon_color: str | None = None
+    # For a beat that asks a question (elicits_description): whether it was
+    # answered at all. Not answered, a bubble beat's picture keeps the
+    # bundled one (an unknown "?") instead of inventing what is inside.
+    answered: bool = True
 
 
 def previous_illustration(config, turns):
@@ -282,7 +286,7 @@ def scene_cache_key(config, beat_id, turns):
         "model": os.getenv("STORYBOOK_SCENE_MODEL", SCENE_MODEL),
         "fixed_beats": sorted(storybook.FIXED_ILLUSTRATION_BEATS),
         "closing_fallback_beats": sorted(storybook.CLOSING_FALLBACK_BEATS),
-        "summary_policy": 5,
+        "summary_policy": 6,
     }
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
@@ -308,8 +312,9 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                 "question the bear asked (not a drawable moment), and the point of "
                 "this picture is specifically the thing being described in answer to "
                 "it (for example an imagined creature's appearance). Search all of "
-                "current_scene for the participant's answer to that question, even "
-                "if later turns moved on to another topic -- ignore what is most "
+                "current_scene for the answer to that question -- the participant's, "
+                "or the bear's own guess when the participant left it to the bear -- "
+                "even if later turns moved on to another topic -- ignore what is most "
                 "recent and describe the answered appearance/description itself, in "
                 "as much visual detail (shape, size, color, fur/feather texture) as "
                 "was actually given. If it was never actually answered anywhere in "
@@ -364,7 +369,11 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                 "object state, confirmed new gift/color or new location can "
                 "justify a new illustration. If there is no previous illustration, "
                 "set it to true. Return JSON with description (the short visual "
-                "description), illustration_needed (a boolean), and balloon_color. "
+                "description), illustration_needed (a boolean), answered (a boolean: "
+                "when elicits_description=true, whether that question was actually "
+                "answered anywhere in current_scene, by the participant or by the "
+                "bear's own guess; always true when elicits_description=false), "
+                "and balloon_color. "
                 "balloon_color is null unless a balloon is actually present in the final "
                 "scene. Otherwise use its agreed color in Japanese, or 未指定 when no "
                 "color was agreed. Preserve the final agreed balloon color in description "
@@ -375,8 +384,10 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                              "schema": {"type": "object", "properties": {
                                  "description": {"type": "string"},
                                  "illustration_needed": {"type": "boolean"},
+                                 "answered": {"type": "boolean"},
                                  "balloon_color": {"type": ["string", "null"]}},
-                                 "required": ["description", "illustration_needed", "balloon_color"],
+                                 "required": ["description", "illustration_needed", "answered",
+                                              "balloon_color"],
                                  "additionalProperties": False}}},
             max_output_tokens=1000,
             store=False,
@@ -391,7 +402,9 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
     balloon_color = result.get("balloon_color")
     if balloon_color is not None and (not isinstance(balloon_color, str) or not balloon_color.strip()):
         raise ValueError("風船の色の要約を取得できませんでした")
-    return SceneSummary(reference_descriptions(description.strip()), needed, balloon_color)
+    answered = result.get("answered")
+    return SceneSummary(reference_descriptions(description.strip()), needed, balloon_color,
+                        answered if isinstance(answered, bool) else True)
 
 
 # Holding several props and a touching hand, the bear tends to grow an extra arm.
@@ -568,7 +581,8 @@ class SessionIllustrations:
             if (not force and cached.get("cache_key") == cache_key
                     and isinstance(cached.get("illustration_needed"), bool)
                     and isinstance(cached.get("description"), str) and cached["description"]):
-                summary = SceneSummary(cached["description"], cached["illustration_needed"], cached.get("balloon_color"))
+                summary = SceneSummary(cached["description"], cached["illustration_needed"],
+                                       cached.get("balloon_color"), cached.get("answered", True))
             else:
                 summary = self.summarize(config, beat_id, turns)
             if isinstance(summary, str):
@@ -599,6 +613,7 @@ class SessionIllustrations:
                 "description": description,
                 "balloon_color": summary.balloon_color,
                 "illustration_needed": summary.illustration_needed,
+                "answered": summary.answered,
                 "image_prompt": prompt,
                 "reference_illustration": reference_name,
             }
@@ -610,6 +625,15 @@ class SessionIllustrations:
                 action = ("生成を省略し、クローズ用の既存絵を使います"
                           if beat_id in storybook.CLOSING_FALLBACK_BEATS else "挿絵を省略します")
                 print(f"[絵本] {beat_id}: 直前と同じ内容のため{action}", file=sys.stderr)
+                return
+            if config.beats[beat_id].bubble_bases and not summary.answered:
+                # Nobody said what it looks like: no made-up creature in the
+                # bubble; the bundled picture with its "?" says just that
+                # (storybook.StoryConfig.illustration_name reads use_bundled).
+                metadata["use_bundled"] = True
+                scene_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                succeeded = True
+                print(f"[絵本] {beat_id}: 答えがなかったため、同梱の挿絵を使います", file=sys.stderr)
                 return
             if not force and storybook.find_illustration(name):
                 succeeded = True

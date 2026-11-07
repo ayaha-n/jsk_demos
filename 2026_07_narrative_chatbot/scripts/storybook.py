@@ -149,6 +149,12 @@ class StoryConfig:
     # ordinary "participant"-source turn instead of its own scripted
     # WorldEvent -- the world_event_id check alone would miss it then.
     fixed_utterance_beats: dict[str, str] = field(default_factory=dict)
+    # Maps a settled_details topic (e.g. footprints' "正体の見た目はどんな様子か")
+    # to the beat about it, for a topic the conversation can settle on its
+    # own before the beat's scripted question is ever asked (Pooh asking
+    # "どんな生き物だと思う？" himself): the beat, and its picture, then
+    # start on the turn that settled it, instead of never at all.
+    detail_beats: dict[str, str] = field(default_factory=dict)
 
     def illustration_name(self, beat_id: str | None) -> str | None:
         beat = self.beats.get(beat_id or "")
@@ -162,17 +168,21 @@ class StoryConfig:
                 saved = json.loads(metadata.read_text(encoding="utf-8"))
                 if not isinstance(saved, dict):
                     saved = {}
-                if saved.get("illustration_needed") is False:
+                if (saved.get("illustration_needed") is False
+                        and saved.get("use_bundled") is not True):
                     return self._closing_fallback(beat, saved) if beat_id in CLOSING_FALLBACK_BEATS else None
             except (OSError, ValueError, AttributeError):
                 pass
-            if find_illustration(name):
-                return name
-            fallback = saved.get("fallback_illustration")
-            if isinstance(fallback, str) and fallback.startswith("generated/") and find_illustration(fallback):
-                return fallback
-            if beat_id in CLOSING_FALLBACK_BEATS:
-                return self._closing_fallback(beat, saved)
+            # use_bundled: nothing to draw from (a question nobody answered,
+            # see storybook_illustrations), so the beat's own bundled picture.
+            if saved.get("use_bundled") is not True:
+                if find_illustration(name):
+                    return name
+                fallback = saved.get("fallback_illustration")
+                if isinstance(fallback, str) and fallback.startswith("generated/") and find_illustration(fallback):
+                    return fallback
+                if beat_id in CLOSING_FALLBACK_BEATS:
+                    return self._closing_fallback(beat, saved)
         variants = [name for name in beat.illustration_variants if find_illustration(name)]
         if variants:
             # A session keeps the same random choice across Web/PDF/reopening.
@@ -332,6 +342,7 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
         cover_bubble_beat=cover.get("bubble_beat"),
         action_beats=spec.get("action_beats", {}),
         fixed_utterance_beats=spec.get("fixed_utterance_beats", {}),
+        detail_beats=spec.get("detail_beats", {}),
     )
 
 
@@ -361,6 +372,18 @@ class StoryTurn:
     # given directly once the participant seems stuck, with no WorldEvent of
     # its own). See StoryConfig.fixed_utterance_beats.
     fixed_utterance_id: str | None = None
+    # The topics of the settled_details this turn reported (see
+    # StoryConfig.detail_beats).
+    settled_topics: tuple[str, ...] = ()
+
+
+def _settled_topics(details: Any) -> tuple[str, ...]:
+    topics = []
+    for detail in details or ():
+        topic = detail.get("topic") if isinstance(detail, dict) else getattr(detail, "topic", None)
+        if isinstance(topic, str) and topic:
+            topics.append(topic)
+    return tuple(topics)
 
 
 def illustration_situation(value: Any) -> dict[str, Any]:
@@ -390,6 +413,7 @@ def turn_from_output(output: Any) -> StoryTurn:
         with_speech=bool(getattr(output, "observed_with_speech", False)),
         narrative_actions=tuple(getattr(output, "narrative_actions", ()) or ()),
         fixed_utterance_id=getattr(output, "fixed_utterance_id", None),
+        settled_topics=_settled_topics(getattr(turn, "settled_details", None)),
     )
 
 
@@ -411,6 +435,7 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
         with_speech=bool(record.get("with_speech")),
         narrative_actions=tuple(str(a) for a in record.get("narrative_actions") or ()),
         fixed_utterance_id=utterance_id,
+        settled_topics=_settled_topics(record.get("settled_details")),
     )
 
 
@@ -601,6 +626,13 @@ def narrate(
         # or an organically resolved session never gets it at all.
         for action in turn.narrative_actions:
             candidate = config.action_beats.get(action)
+            if candidate and candidate in config.beats and candidate not in covered_beats:
+                beat_id = candidate
+                break
+        # The conversation settling a topic its beat would only have asked
+        # about later (see StoryConfig.detail_beats).
+        for topic in turn.settled_topics if beat_id is None else ():
+            candidate = config.detail_beats.get(topic)
             if candidate and candidate in config.beats and candidate not in covered_beats:
                 beat_id = candidate
                 break
