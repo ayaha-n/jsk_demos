@@ -1741,7 +1741,9 @@ def run_comparison(compiled: Any, scenario: Scenario) -> None:
         print_result(label, result, scenario)
 
 
-def parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
+    """The command-line options (also read by scripts/launch.py, which offers
+    only the ones this version has)."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("chat", "compile", "compare"), default="chat")
     parser.add_argument(
@@ -1787,7 +1789,11 @@ def parse_args() -> argparse.Namespace:
              "抜けると終わりのセリフで終える（中継が閉じるまで繰り返す）。",
     )
     add_storybook_arguments(parser)
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
 
 
 def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:

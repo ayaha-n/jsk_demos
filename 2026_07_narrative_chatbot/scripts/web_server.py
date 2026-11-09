@@ -1072,7 +1072,9 @@ def build_factory(
     return factory, scenario.label, scenario.scene_intro, listeners
 
 
-def parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
+    """The command-line options (also read by scripts/launch.py, which offers
+    only the ones this version has)."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from scenarios import DEFAULT_SCENARIO, SCENARIOS
 
@@ -1104,7 +1106,12 @@ def parse_args() -> argparse.Namespace:
     from pooh_narrative_dspy import add_storybook_arguments
 
     add_storybook_arguments(parser)
-    args = parser.parse_args()
+    return parser
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = build_parser()
+    args = parser.parse_args(argv)
     if args.crowdsourcing and args.scenario not in SUPPORTED_SCENARIOS:
         parser.error("--crowdsourcing は footprints / eeyore_birthday で使えます。")
     if args.end_after_minutes is not None and args.end_after_minutes <= 0:

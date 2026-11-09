@@ -16,6 +16,7 @@ See [`CODEX_INSTRUCTIONS_POOH_DSPY.md`](CODEX_INSTRUCTIONS_POOH_DSPY.md) for the
 | [`docs/eeyore_scenario_flow.md`](docs/eeyore_scenario_flow.md) | The Eeyore-birthday scenario, scene by scene |
 | [`docs/eeyore_examples_overview.md`](docs/eeyore_examples_overview.md) | The `eeyore_birthday` training examples |
 | [`docs/timed_narrative_events.md`](docs/timed_narrative_events.md) | Timed world events: delays and when they fire |
+| [`docs/usage_details.md`](docs/usage_details.md) | Every command-line option, the robot protocol (in English) |
 | [`docs/web_ui.md`](docs/web_ui.md) | What the Web UI exposes to whom, and publishing it with `--public` |
 | [`docs/storybook.md`](docs/storybook.md) | The picture book: layout, the tablet app, reading back, illustrations |
 | [`docs/known_issues.md`](docs/known_issues.md) | Unverified concerns and open questions |
@@ -88,102 +89,36 @@ A scenario's own content lives entirely in its own files; `scripts/pooh_narrativ
 
 ## Usage
 
-### Compile the DSPy program
+1. Compile each scenario once, and again after changing its examples, the metric or the models (many API requests; stored in `.dspy_cache`):
 
-Compile each scenario once before chatting, and again after changing the examples, metric, or models:
+   ```bash
+   python scripts/pooh_narrative_dspy.py --mode compile --scenario eeyore_birthday
+   ```
 
-```bash
-python scripts/pooh_narrative_dspy.py --mode compile --scenario eeyore_birthday
-```
+2. Start it from the menu:
 
-`BootstrapFewShot` evaluates candidate traces against the manually reviewed full-turn examples in `TRAINSET`; each Predictor's teacher gets examples for its own task (interaction classification, mishearing planning, response generation). A separate DSPy evaluator scores narrative coherence, respect for participant intent, participant agency, openness for further engagement, and state-update quality. Compilation makes many API requests (time and charges); the program is stored in `.dspy_cache`. See [`docs/system_architecture.md`](docs/system_architecture.md).
+   ```bash
+   python scripts/run.py
+   ```
 
-### Chat in the terminal
+   Choose **Web UI** or **ロボット** on the first line, change only what differs from the shared defaults (`config/run_defaults.json`), and press `s`. It offers only the options this version has, shows the command it will run, and warns before starting about a port already in use, a TTS server or ROS relay that does not answer, or an empty passphrase. `--dry-run` only prints the command.
 
-```bash
-python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday
-```
-
-Chat mode only uses an already compiled program. Type speech or a physical action as text (`イーヨーのお皿も出しておこうか`, `プーの頭をなでる`); `exit`, end-of-file or Ctrl+C ends the session.
-
-To compare the `Predict`, `ChainOfThought` and `Compiled` outputs for one input:
-
-```bash
-python scripts/pooh_narrative_dspy.py --mode compare
-```
-
-### Web chat UI
-
-The Web UI lets other people try the same program from a browser. The API key stays on the server, and each browser tab gets its own session (story state, history, timers and log).
-
-Choose one of these, by who should reach it (add `--storybook-eink`, `--ros-relay` etc. to any):
-
-| Who can join | Command | URL to share |
+| | Web UI | Robot |
 |---|---|---|
-| This PC only | `python scripts/web_server.py --scenario eeyore_birthday` | `http://127.0.0.1:8080/` |
-| Also the same network (Wi-Fi, LAN) | `POOH_WEB_TOKEN='a-long-random-string' python scripts/web_server.py --scenario eeyore_birthday --host 0.0.0.0` | `http://<this PC's address>:8080/?token=...` (printed) |
-| Also outside the network | `python scripts/web_server.py --scenario eeyore_birthday --public` | `https://<random>.trycloudflare.com/?token=...` (printed) |
+| Runs | `scripts/web_server.py` | `scripts/pooh_narrative_dspy.py --ros-relay` (no Web UI) |
+| Participants | type in a browser: this PC, or anyone with the link when published | speak to the robot |
+| Menu switches | publish, crowdsourcing (passphrase, minutes until the end button), illustrations, TTS server, tablet | how a story starts (on the robot's cue every time, or once at launch), other scenarios to offer, keep going after the wrap-up, tablet, illustrations, where the bridge runs |
 
-`--public` needs no `--host`: the tunnel reaches the server on this PC, and the key is `POOH_WEB_TOKEN` or a fresh random one. Without `--public`, the server refuses a non-loopback `--host` unless `POOH_WEB_TOKEN` is set. Through `--host` or `--public`, participants get the conversation and their own picture book, not the past logs or the tablet; read [`docs/web_ui.md`](docs/web_ui.md) before publishing.
-
-- A fresh tab shows only the scene and an **はじめる** button; the story (and its opening line's audio, if `--tts-server-url` is set) starts on that tap, not on page load.
-- Timed world events reach the browser even when the participant says nothing.
-- Closing or reloading the tab does not end the story; it reconnects until `--session-ttl` seconds (default 600) of inactivity, after which the session is dropped without the ending.
-- **終了** (or `exit`) plays the scenario's fixed ending line and motion, as does the model judging that the participant is leaving. **はじめから** ends the current session the same way and starts a new one; under `--crowdsourcing` it is hidden instead, since a restart's new session gets its own, separate completion code.
-- **詳細** shows each turn's interaction mode, reference scene, narrative actions and state changes. Like **過去ログ**, it only works from this PC (`127.0.0.1` / `::1`), whatever the token: participants never see it.
-- **過去ログ** opens a read-only viewer of `logs/session_*.jsonl`. It, and the log API, work only from this PC (`127.0.0.1` / `::1`), whatever the token.
-- Sessions run their LLM calls concurrently (calls within one session are serialized); `--max-sessions` (default 20) caps them.
-- `--ros-relay` also sends every Web turn to the robot (output only); use it with a single participant.
-- `--crowdsourcing` (footprints / eeyore_birthday) enables ending after the story goal and issues a submission code after picture-book reading confirmation, including for an early spoken goodbye; `--passphrase TEXT` also shows a passphrase, the same for everyone in that run, under the code. See [the study workflow](docs/web_ui.md#クラウドソーシング用の完了確認--crowdsourcing).
-- `--tts-server-url` (or `POOH_TTS_SERVER_URL`) speaks Pooh's lines with a Style-Bert-VITS2 editor server (same voice as the robot); without it, or if synthesis fails, the line just shows as text. See [the TTS section](docs/web_ui.md#音声合成--tts-server-url試作).
-
-### Connect to the Pooh body
-
-The chatbot stays a plain Python 3.12 application without ROS. With `--ros-relay`, it takes recognized speech from, and sends each response as newline-delimited JSON to, the ROS-side bridge in [pooh_body](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/tree/add-pooh-model/pooh_body) over TCP (`127.0.0.1:8765`). The bridge subscribes to `/speech_to_text_final`, publishes the responses on `/pooh_narrative_response`, and moves the body.
-
-Run the two sides in separate terminals. The bridge keeps running, and it needs ROS's system Python, so start it in a terminal without the `.venv`:
+For the robot, start the ROS-side bridge first, in a terminal without the `.venv`. pooh_body's `pooh_operator.launch use_narrative:=true` starts the bridge and the chatbot itself; do not start the robot from the menu as well then (the menu warns if a chatbot on the robot is already running).
 
 ```bash
-# Terminal 1: the ROS-side bridge (system Python, no .venv)
 source /opt/ros/noetic/setup.bash && source ~/catkin_ws/devel/setup.bash
 python3 ~/catkin_ws/src/modular_robot_model_zoo/pooh_body/scripts/narrative_motion_bridge.py
 ```
 
-```bash
-# Terminal 2: the chatbot (.venv)
-source .venv/bin/activate
-python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday --ros-relay
-```
+To chat in the terminal instead: `python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday` (`exit` or Ctrl+C ends it).
 
-To watch the turns, or to send text instead of speaking, use a ROS terminal:
-
-```bash
-rostopic echo /pooh_narrative_response
-rostopic pub -1 /speech_to_text_final std_msgs/String "data: '青い風船がいいな'"
-```
-
-Scripted lines (opening, ending, fixed events) carry a stable `fixed_utterance_id`; `config/fixed_utterances.json` lists each one's text, WAV file and body `motion`, which the relay sends with the line. The robot's TTS plays the WAV, generating it only if missing. See the [pooh_body guide](https://gitlab.jsk.imi.i.u-tokyo.ac.jp/nagata/modular_robot_model_zoo/-/blob/add-pooh-model/pooh_body/README.md) for the robot side.
-
-A generated line is sent to the relay sentence by sentence while the respond stage writes it (`narrative_response_chunk`, numbered by `index`; DSPy streams the `bot_response` field), so the robot starts speaking with the first sentence, before the line and the turn's last stage (interpret) are finished; a cached line comes whole and is sent at once. A meta turn's line is sent whole once the technical-term guard has checked it; the complete `narrative_response` that follows carries `"streamed": true` so that it is not spoken again. A turn whose line may still be replaced after that (an exit, the guards in `enforce_response_invariants`) is sent whole at the end as before; see `response_may_be_replaced`. A participant's request about the honey (not to eat it, or to give something else instead of Pooh's jar) is judged by the classify stage before generation, and while a fixed line answers it, no line is generated.
-
-The ROS side may also report what the robot saw the participant do (e.g. `参加者がはちみつの壺をプーの左手に手渡した`, from pooh_body's `handover_vision_relay.py`), with an utterance or on its own as `observed_actions`. These are added to the story's events without a reply of their own, before the utterance, if any, is answered; they are logged with source `observed` and retold in the picture book. Actions that came with an utterance (`with_speech`, e.g. a handover seen as 「どうぞ」 was said) are retold in one sentence with what was said; a touch, or actions whose utterance was dropped while Pooh was busy, are retold on their own.
-
-With `--start-on-mode` (and `--ros-relay`), the chatbot follows the robot's interaction mode, which the bridge passes on: entering the narrative mode starts a story with the opening line, leaving it ends the story with the ending line, and entering it again starts a running story over, without the ending line. The chatbot sends the scenario's start cues (`start_cues` in `scripts/scenarios.py`: the words that must all be heard, e.g. 「イーヨ」 and 「相談」 for 「プー、今日はイーヨーについて相談したいことがあるんだよね」) to the bridge, which turns to the narrative mode when it hears one outside it, and back to free talk when a story ends with its ending line (the participant's goodbye). In a story, a cue is ordinary speech; to start over, the participant says goodbye and then the cue. The chatbot keeps running between stories, waits for the bridge if it is not up yet, and is ended with Ctrl+C. `--no-idle-close` keeps a story going after the silence that follows its wrap-up, so it ends only when the participant leaves (or the mode is left). pooh_body's `pooh_operator.launch use_narrative:=true` starts the chatbot this way, with the bridge, TTS and camera relay.
-
-### Picture book
-
-The session can be retold as a picture book, written by hand live on a reMarkable Paper Pro and read back afterwards. It retells only what the session recorded (the participant's words, Pooh's lines, the motion of fixed lines and the timed events), with an illustrated page per scene. Install the tablet app `storybook_viewer/` once and open "Storybook" in AppLoad (see [`docs/storybook.md`](docs/storybook.md)), then add `--storybook-eink`:
-
-```bash
-python scripts/web_server.py --scenario eeyore_birthday --storybook-eink
-```
-
-- With the Web UI, only sessions started from a browser on this PC are written on the tablet.
-- When a book ends it is saved as a PDF in `logs/storybooks/`. Read it back by tapping the sides of the tablet, with **絵本を見る** in the Web UI (each participant sees only their own book), with 過去ログ → 絵本で見る, or with `python scripts/storybook_render.py <log>`.
-- `--storybook-preview DIR` writes the pages as PNGs, for working without the tablet.
-- Scenes, narration, illustrations (`assets/storybook/`) and motion phrases are set in `config/storybook.json`; the handwriting font is bundled in `assets/fonts/`.
-- Add `--storybook-generate` to generate session-specific illustrations in the background, or render a log with `scripts/storybook_render.py <log> --generate-illustrations`.
-- Only the tablet needs [plush_memory](https://github.com/ayaha-n/plush_memory) (see Setup); PDFs, 絵本を見る and 過去ログ work without it.
+Each option by hand, what participants can reach, the robot protocol and the picture book: [`docs/usage_details.md`](docs/usage_details.md), [`docs/web_ui.md`](docs/web_ui.md) (publishing, crowdsourcing, TTS) and [`docs/storybook.md`](docs/storybook.md).
 
 ## State, logs and caches
 
@@ -214,6 +149,7 @@ Model-output quality, state retention across generated turns, and the LLM evalua
 │   ├── narrative_events.py          # Timed world events, fixed lines
 │   ├── narrative_state.py           # NarrativeSituation and its updates
 │   ├── scenarios.py                 # Scenario registry and event delays
+│   ├── run.py                       # Menu to start the Web UI or the robot
 │   ├── web_server.py                # Web chat UI server
 │   ├── public_tunnel.py             # Cloudflare quick tunnel for --public
 │   ├── storybook.py                 # Session -> picture-book pages (narration, layout)

@@ -1,0 +1,27 @@
+{
+  "target": "web",
+  "web": {
+    "scenario": "footprints",
+    "ports": {"footprints": 8080, "eeyore_birthday": 8081, "tea_party": 8082},
+    "public": true,
+    "crowdsourcing": true,
+    "end_after_minutes": 10,
+    "storybook_generate": true,
+    "tts": true,
+    "tts_server_url": "http://127.0.0.1:8000",
+    "postcards": false,
+    "storybook_eink": false,
+    "ros_relay": false
+  },
+  "robot": {
+    "scenario": "eeyore_birthday",
+    "extra_scenarios": [],
+    "ros_relay_host": "127.0.0.1",
+    "ros_relay_port": 8765,
+    "start_on_mode": true,
+    "no_idle_close": true,
+    "storybook_eink": false,
+    "storybook_generate": true,
+    "postcards": false
+  }
+}
