@@ -91,7 +91,16 @@
 	  "eyebrow": "surprised",
 	  "arm": "onegai"
       },
-      "arm_next": ["right_hand_mouth", "onagai"]
+      "arm_next": ["right_hand_mouth", "onegai"]
+  },
+  "eeyore_birthday.ask_empty_jar": {
+    "text": "ねえ、このからっぽのつぼは、どうしたらいいかなあ？",
+      "wav": "eeyore_birthday.ask_empty_jar.wav",
+      "motion": {
+	  "arm": "left_hand_chin",
+	  "neck": "tilt"
+      },
+      "arm_next": ["onegai"]
   },
   "eeyore_birthday.story_wrap_up": {
     "text": "よかった。これでイーヨーも、きっとにっこりしてくれるよ。ほかにも、なにかぼくとおはなししたいこと、ある？",

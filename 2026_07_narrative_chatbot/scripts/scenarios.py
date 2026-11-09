@@ -29,6 +29,10 @@ EEYORE_HONEY_EATING_DELAY_SECONDS = 2.0
 EEYORE_EVENT_QUIET_SECONDS = 12.0
 # プーの直前のセリフが参加者への問いかけで答えを待っている間は、この秒数まで待つ。
 EEYORE_AWAITING_REPLY_QUIET_SECONDS = 30.0
+# 蜂蜜がなくなったあと、空の壺をどうするかも、壺に関係なく何をするかも決まらない
+# まま、蜂蜜がなくなったセリフを話し終えてからこの秒数たつと、プーが空の壺を
+# どうするか尋ねる。
+EEYORE_ASK_EMPTY_JAR_DELAY_SECONDS = 30.0
 # 贈り物が決まった締めのあと、この秒数の沈黙が続いたら終わりのセリフで終える。
 # 参加者が話し続けている間は終えない。
 EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS = 30.0
@@ -198,6 +202,7 @@ def _eeyore_birthday() -> Scenario:
             idle_close_seconds=EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS,
             speech_seconds=estimate_speech_seconds,
             awaiting_quiet_seconds=EEYORE_AWAITING_REPLY_QUIET_SECONDS,
+            ask_empty_jar_delay_seconds=EEYORE_ASK_EMPTY_JAR_DELAY_SECONDS,
         ),
         pooh_preferences=EEYORE_BIRTHDAY_POOH_PREFERENCES,
         # 「プー、今日はイーヨーについて相談したいことがあるんだよね」;

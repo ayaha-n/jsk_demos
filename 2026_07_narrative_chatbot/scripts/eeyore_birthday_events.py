@@ -117,7 +117,8 @@ _EEYORE_SETTLED_DETAILS_FIELD = dspy.OutputField(
     desc=(
         "このターンで一つに決まったこと。贈るもの、色、飲み物、ケーキなど何でもよい。"
         "topicは、current_situationの【未解決・未確定】の項目が決まったならその項目名を"
-        "そのまま使い、それ以外は短い名詞(例: 飲み物)にする。壺以外にイーヨーに贈るものが"
+        "そのまま使い、それ以外は短い名詞(例: 飲み物)にする。壺以外にイーヨーに贈るもの、"
+        "または壺の代わりのお祝い(飾り付け、パーティなど物でないものも含む)が"
         "決まったら、topicは「イーヨーに何をあげるか」にする。空になった壺を贈るかどうかは"
         "narrative_actionsで表し、ここには含めない。valueは決まった内容"
         "(例: 青、風船)で、一つに決まっていなければ含めない。"
@@ -247,10 +248,18 @@ BALLOON_COLOR_UNRESOLVED = "贈り物にする風船の色"
 RIBBON_COLOR_UNRESOLVED = "リボンの色"
 STORY_WRAP_UP_EVENT = "イーヨーへの贈り物が決まった"
 STORY_WRAP_UP_DESCRIPTION = (
-    "蜂蜜がなくなった後で、空になった壺を贈るか、壺の代わりに贈るものが決まり、"
-    "イーヨーへの贈り物が決まった。"
+    "蜂蜜がなくなった後で、空になった壺をどうするか、壺の代わりに贈るもの、"
+    "または壺とは別にイーヨーに何をするかが決まり、イーヨーへの贈り物が決まった。"
     "これは既に起きた出来事。"
 )
+# Asked when the honey is gone and nothing has been decided for a while:
+# the empty jar is what the story turns on, so Pooh brings it up himself.
+ASK_EMPTY_JAR_DESCRIPTION = (
+    "蜂蜜がなくなった後、空になった壺をどうするかがまだ決まっていないので、"
+    "プーが参加者に空の壺をどうするか尋ねた。これは既に起きた出来事。"
+)
+ASK_EMPTY_JAR_EVENT = "プーが空になった壺をどうするか尋ねた"
+ASK_EMPTY_JAR_RESPONSE = fixed_utterance("eeyore_birthday.ask_empty_jar")
 # Pooh cannot move, so the wrap-up only reflects on the gift and leaves the
 # choice to keep talking with the participant.
 STORY_WRAP_UP_RESPONSE = fixed_utterance("eeyore_birthday.story_wrap_up")
@@ -290,13 +299,15 @@ class HoneyGiftState:
         return self.gift_status == "committed" and self.honey_status == "full"
 
     def story_complete(self) -> bool:
-        """Honey gone, then either the empty jar or something else to give.
+        """Honey gone, then either what to do with the empty jar is decided
+        (given or not), or something to do for Eeyore is, jar or no jar.
 
         Pooh need not say "instead of the jar": any detail settled after the
-        honey is gone counts as something else to give.
+        honey is gone counts. If neither comes up, Pooh asks about the jar
+        (ask_empty_jar).
         """
         return self.honey_status == "empty" and (
-            self.jar_decision == GIVE_EMPTY_JAR or self.decided_after_honey
+            self.jar_decision is not None or self.decided_after_honey
         )
 
 
@@ -314,6 +325,7 @@ class HoneyGiftEventController(NarrativeEventController):
         idle_close_seconds: float | None = None,
         speech_seconds: Callable[[str], float] = lambda text: 0.0,
         awaiting_quiet_seconds: float | None = None,
+        ask_empty_jar_delay_seconds: float = 30.0,
     ) -> None:
         if gift_decision_delay_seconds < 0:
             raise ValueError("gift_decision_delay_seconds must be non-negative")
@@ -333,6 +345,7 @@ class HoneyGiftEventController(NarrativeEventController):
                 tasting_delay_seconds,
                 eating_delay_seconds,
                 idle_close_seconds,
+                ask_empty_jar_delay_seconds,
             ),
             clock=clock,
             quiet_seconds=quiet_seconds,
@@ -346,6 +359,7 @@ class HoneyGiftEventController(NarrativeEventController):
         tasting_delay_seconds: float,
         eating_delay_seconds: float,
         idle_close_seconds: float | None = None,
+        ask_empty_jar_delay_seconds: float = 30.0,
     ) -> tuple[RequiredNarrativeEvent, ...]:
         events = (
             RequiredNarrativeEvent(
@@ -377,6 +391,17 @@ class HoneyGiftEventController(NarrativeEventController):
                     and "pooh_tastes_honey" in state.completed_event_ids
                 ),
                 fire=HoneyGiftEventController._fire_honey_eating,
+            ),
+            RequiredNarrativeEvent(
+                event_id="ask_empty_jar",
+                # Counted from the end of Pooh's "the honey is gone" line,
+                # which itself asks what to do: the participant answers first.
+                delay_seconds=ask_empty_jar_delay_seconds,
+                waits_for_quiet=True,
+                prerequisite=lambda state: (
+                    state.honey_status == "empty" and not state.story_complete()
+                ),
+                fire=HoneyGiftEventController._fire_ask_empty_jar,
             ),
             RequiredNarrativeEvent(
                 event_id="story_wrap_up",
@@ -519,6 +544,18 @@ class HoneyGiftEventController(NarrativeEventController):
                 remove_unresolved=[HONEY_PREPARATION_UNRESOLVED],
                 add_unresolved=[EMPTY_JAR_UNRESOLVED],
             ),
+            fixed_response=True,
+        )
+
+    @staticmethod
+    def _fire_ask_empty_jar(state: HoneyGiftState) -> WorldEvent:
+        state.completed_event_ids.add("ask_empty_jar")
+        return WorldEvent(
+            event_id="ask_empty_jar",
+            description=ASK_EMPTY_JAR_DESCRIPTION,
+            scene_id="3",
+            fallback_response=ASK_EMPTY_JAR_RESPONSE,
+            situation_update=SituationUpdate(add_events=[ASK_EMPTY_JAR_EVENT]),
             fixed_response=True,
         )
 

@@ -1896,27 +1896,44 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn(EMPTY_JAR_UNRESOLVED, updated.unresolved)
         self.assertIn("空になった壺をどうするか：あげる", updated.decided)
 
-    def test_not_giving_the_jar_needs_another_gift_to_complete(self):
+    def test_deciding_not_to_give_the_jar_completes_the_story_too(self):
+        # Either what to do with the empty jar, or what to do for Eeyore.
         now = [0.0]
         controller = self._controller_after_honey_eaten(now)
         controller.observe_actions(["not_give_empty_jar"])
 
-        self.assertIsNone(controller.pop_due_event(follow_up=True))
-        waiting = controller.synchronize_situation(
+        self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "story_wrap_up")
+        done = controller.synchronize_situation(
             pooh.get_scenario("eeyore_birthday").initial_situation.model_copy(
-                update={"unresolved": []},
+                update={"unresolved": [EMPTY_JAR_UNRESOLVED]},
             )
         )
-        self.assertEqual(waiting.unresolved, [GIFT_UNRESOLVED])
-        self.assertEqual(waiting.decided, ["空になった壺をどうするか：あげない"])
-
-        controller.observe_settled_details([SettledDetail(topic=GIFT_UNRESOLVED, value="風船")])
-        self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "story_wrap_up")
-        done = controller.synchronize_situation(waiting)
         self.assertEqual(done.unresolved, [])
-        self.assertEqual(
-            done.decided, ["空になった壺をどうするか：あげない", "イーヨーに何をあげるか：風船"],
-        )
+        self.assertEqual(done.decided, ["空になった壺をどうするか：あげない"])
+
+    def test_pooh_asks_about_the_empty_jar_when_nothing_is_decided(self):
+        now = [0.0]
+        controller = self._controller_after_honey_eaten(now)
+        now[0] = 40.0 + 29.0
+        self.assertIsNone(controller.pop_due_event(follow_up=True))
+        now[0] = 40.0 + 30.0
+        event = controller.pop_due_event(follow_up=True)
+        self.assertEqual(event.event_id, "ask_empty_jar")
+        self.assertEqual(event.fallback_response, "ねえ、このからっぽのつぼは、どうしたらいいかなあ？")
+        self.assertTrue(event.fixed_response)
+        # Asked once; the answer then completes the story.
+        now[0] = 200.0
+        self.assertIsNone(controller.pop_due_event(follow_up=True))
+        controller.observe_actions(["give_empty_jar"])
+        self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "story_wrap_up")
+
+    def test_pooh_does_not_ask_about_the_jar_once_something_is_decided(self):
+        now = [0.0]
+        controller = self._controller_after_honey_eaten(now)
+        controller.observe_settled_details([SettledDetail(topic="飲み物", value="オレンジジュース")])
+        self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "story_wrap_up")
+        now[0] = 200.0
+        self.assertIsNone(controller.pop_due_event(follow_up=True))
 
     def test_gift_decisions_before_the_honey_is_eaten_do_not_complete_the_story(self):
         now = [0.0]

@@ -557,6 +557,39 @@ EEYORE_BIRTHDAY_TRAINSET = [
             "イーヨー、きっと喜ぶよ。"
         ),
     ),
+    # 壺の代わりは物でなくてもよい。飾り付けやパーティでお祝いすると決まれば、
+    # それが壺の代わりの贈り物（イーヨーに何をあげるか）として決まったことになる。
+    *example_variants(
+        current_situation=_HONEY_EATEN_OPEN_SITUATION,
+        user_action=[
+            "じゃあぷー、そのはちみつのつぼはあきらめて、飾り付けだけしよう",
+            "壺はもういいから、飾り付けしてパーティしよう",
+        ],
+        history=_HONEY_EATEN_OPEN_HISTORY,
+        interaction_mode="narrative",
+        current_scene="3",
+        narrative_actions=["not_give_empty_jar"],
+        settled_details=[SettledDetail(topic=GIFT_UNRESOLVED, value="飾り付けでお祝いする")],
+        situation_update=SituationUpdate(remove_unresolved=[EMPTY_JAR_UNRESOLVED]),
+        bot_response="そうだね、壺のかわりに、飾り付けでイーヨーをよろこばせよう！風船やリボンで、にぎやかにしようよ。",
+    ),
+    # 代わりのお祝いが蜂蜜より前に決まっていれば、蜂蜜がなくてもそれでいいと
+    # 言われた時点で、空になった壺は贈らないと決まる（決まったお祝いは繰り返さない）。
+    *example_variants(
+        current_situation=_HONEY_EATEN_OPEN_SITUATION.model_copy(
+            update={"decided": [f"{GIFT_UNRESOLVED}：パーティーでお祝いする"]}, deep=True,
+        ),
+        user_action=[
+            "はちみつなくてもパーティはできるよ",
+            "ハチミツがなくても、パーティでお祝いすればいいよ",
+        ],
+        history=_HONEY_EATEN_OPEN_HISTORY,
+        interaction_mode="narrative",
+        current_scene="3",
+        narrative_actions=["not_give_empty_jar"],
+        situation_update=SituationUpdate(remove_unresolved=[EMPTY_JAR_UNRESOLVED]),
+        bot_response="うん、そうだね。ハチミツがなくても、みんなでパーティーをすれば、イーヨーもきっと喜ぶよ。",
+    ),
 
     # --- 場面4a：空になった壺をそのまま贈ることにする -----------------------
     # 場面4a：ツボをあげることを決める(言い回しが変わっても受け入れる)
