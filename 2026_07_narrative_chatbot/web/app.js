@@ -310,6 +310,17 @@ function appendLogRecord(record, index) {
   logViewer.appendChild(item);
 }
 
+function retryFailedStoryImages(container) {
+  for (const image of container.querySelectorAll("img")) {
+    if (!image.complete || image.naturalWidth > 0) continue;
+    // A failed request can remain broken even though the JSON and URL are
+    // unchanged. Retry only failed images without resetting reading position.
+    const url = new URL(image.src, location.href);
+    url.searchParams.set("_retry", String(Date.now()));
+    image.src = url.href;
+  }
+}
+
 function appendStoryPage(page, book, container = logViewer) {
   // Laid out at the tablet's own coordinates, scaled to the sheet's width,
   // so columns and line breaks read as they did on the e-ink page.
@@ -331,6 +342,10 @@ function appendStoryPage(page, book, container = logViewer) {
     });
     if (page.illustration_url) {
       const image = document.createElement("img");
+      image.addEventListener("error", () => {
+        image.alt = "挿絵を読み込めませんでした。絵本を開いている間に再試行します。";
+      });
+      image.addEventListener("load", () => { image.alt = ""; });
       image.src = page.illustration_url;
       image.alt = "";
       picture.appendChild(image);
@@ -672,6 +687,8 @@ async function loadOwnStorybook(quiet = false) {
         storybookViewer.replaceChildren();
         body.pages.forEach((page) => appendStoryPage(page, body, storybookViewer));
         ownStorybookSnapshot = snapshot;
+      } else {
+        retryFailedStoryImages(storybookViewer);
       }
       storybookStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
       storybookProgress.hidden = true;
