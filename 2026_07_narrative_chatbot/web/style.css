@@ -365,3 +365,9 @@ body[data-crowdsourcing="true"] #storybook-viewer { max-height: 50dvh; }
 /* A restart would silently orphan the current completion code (a new
    session gets its own), so crowdsourcing keeps participants on one run. */
 body[data-crowdsourcing="true"] #restart-button { display: none; }
+
+#bear-canvas[hidden] { display: none; }
+.bear-render-error { padding: 12px 16px; color: var(--muted); font-size: .9rem; }
+.bear-render-error details { margin-top: 8px; color: var(--text); }
+.bear-render-error summary { cursor: pointer; }
+.bear-render-error pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }

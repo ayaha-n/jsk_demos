@@ -195,3 +195,14 @@ python scripts/web_server.py --scenario footprints --tts-server-url http://127.0
 
 関連テスト: `python -m unittest discover -s tests -p test_web_tts.py`、
 `python -m unittest tests.test_web_server.TTSTests tests.test_web_server.NoTTSTests`。
+
+### クマを表示できない環境での案内
+
+WebGLの初期化・シェーダーのコンパイル／リンク・コンテキスト喪失の失敗時は、
+「クマを表示できませんでした。会話は続けられます。」という短い案内を残す。
+接触操作は使えないが、会話と絵本の操作は継続できる。
+技術的な「表示エラーの詳細」は既存の `local-only-feature` と同じ接続元判定で、
+このPCのループバック接続から開いた場合だけ画面に表示する。
+LAN・公開トンネル経由では詳細欄をCSSで非表示にする（診断情報の機密保護ではない）。
+開発者コンソールには接続元によらず `[bear] 3D rendering unavailable` を出す。
+原因調査で使った初期化条件ごとのエラー・ブラウザー情報は、このローカル用の詳細に残す。

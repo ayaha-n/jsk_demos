@@ -6,26 +6,26 @@ const vm = require('node:vm');
 function setup(options={}) {
   let clock=0;
   const handlers = {};
-  const contextRequests=[];
-  const gl = new Proxy({}, {get: (_, key) => key.startsWith('get') ? () => true : () => {}});
+  const contextRequests=[],notices=[],errors=[];
+  const gl = new Proxy({}, {get: (_, key) => key.startsWith('get') ? () => !(key==='getShaderParameter' && options.shaderFailure) : () => {}});
   const elements = {};
   for(const id of ['bear-stage','bear-canvas','bear-caption','bear-motion','log','input-text','send-button','input-form']) {
-    elements[id]={querySelectorAll:()=>[],dataset:{touchEnabled:"true"},value:'書きかけ',disabled:false,addEventListener:(type,fn)=>{handlers[`${id}:${type}`]=fn;}};
+    elements[id]={querySelector:()=>null,appendChild:node=>notices.push(node),querySelectorAll:()=>[],dataset:{touchEnabled:"true"},value:'書きかけ',disabled:false,addEventListener:(type,fn)=>{handlers[`${id}:${type}`]=fn;}};
   }
   const canvas=elements['bear-canvas'];
   Object.assign(canvas,{width:600,height:300,clientWidth:600,clientHeight:300,
-    getContext:(_type,settings)=>{contextRequests.push(settings);return options.noAntialias && settings.antialias ? null : gl;},getBoundingClientRect:()=>({left:0,top:0,width:600,height:300}),setPointerCapture:()=>{}});
+    getContext:(_type,settings)=>{contextRequests.push(settings);return options.noWebGL || (options.noAntialias && settings.antialias) ? null : gl;},getBoundingClientRect:()=>({left:0,top:0,width:600,height:300}),setPointerCapture:()=>{}});
   const sent=[];
   elements['input-form'].requestSubmit=()=>{sent.push(elements['input-text'].value);elements['input-text'].value='';};
-  const context=vm.createContext({CustomEvent:class {constructor(type, options){this.type=type;this.detail=options.detail;}},
-    document:{dispatchEvent:event=>sent.push(event.detail.part),getElementById:id=>elements[id],querySelectorAll:()=>[],addEventListener:(type,fn)=>{handlers[`document:${type}`]=fn;}},
+  const context=vm.createContext({console:{error:(...args)=>errors.push(args)},CustomEvent:class {constructor(type, options){this.type=type;this.detail=options.detail;}},
+    document:{createElement:()=>({children:[],setAttribute(){},appendChild(node){this.children.push(node);}}),dispatchEvent:event=>sent.push(event.detail.part),getElementById:id=>elements[id],querySelectorAll:()=>[],addEventListener:(type,fn)=>{handlers[`document:${type}`]=fn;}},
     matchMedia:()=>({matches:false,addEventListener:()=>{}}),devicePixelRatio:1,
     MutationObserver:class {observe(){}},ResizeObserver:class {observe(){}},
     performance:{now:()=>clock},requestAnimationFrame:()=>1,cancelAnimationFrame:()=>{}});
   let source=fs.readFileSync('web/bear.js','utf8');
   source=source.replace(/  refresh\(\);\n\}\)\(\);\s*$/, '  yaw=0; draw(0); globalThis.api={pick,touch,pose(name,time=0){motion=typeof name==="string"?{arm:name}:name;started=0;duration=6000;draw(time);return shapes;},reaction(){return touchMotion;}};\n})();');
   vm.runInContext(source,context);
-  return {api:context.api,elements,sent,handlers,contextRequests,setTime:time=>{clock=time;}};
+  return {api:context.api,elements,sent,handlers,contextRequests,notices,errors,setTime:time=>{clock=time;}};
 }
 test('nearest visible body parts are picked; background is not',()=>{
   const {api}=setup();
@@ -144,8 +144,29 @@ test('recorded touches select robot-style gestures with a shared five-second coo
 });
 
 test('WebGL initialization retries without antialiasing',()=>{
-  const {api,elements,contextRequests}=setup({noAntialias:true});
+  const {elements,contextRequests}=setup({noAntialias:true});
   assert.deepEqual(contextRequests.map(settings=>settings.antialias),[true,false]);
-  assert.notEqual(elements['bear-stage'].hidden,true);
-  assert.ok(api);
+  assert.equal(elements['bear-stage'].dataset.bearRenderer,'webgl');
+});
+test('unavailable WebGL is reported visibly instead of hiding the bear area',()=>{
+  const {elements,notices,errors}=setup({noWebGL:true});
+  assert.equal(elements['bear-stage'].hidden,false);
+  assert.equal(elements['bear-stage'].dataset.bearRenderer,'unavailable');
+  assert.equal(elements['bear-canvas'].hidden,true);
+  assert.equal(notices[0].textContent,'クマを表示できませんでした。会話は続けられます。');
+  assert.equal(notices[0].children[0].className,'local-only-feature');
+  assert.equal(errors.length,1);
+  const diagnostic=notices[0].children[0].children[1].textContent;
+  assert.ok(diagnostic.includes('antialias=true'));
+  assert.ok(diagnostic.includes('antialias=false'));
+  assert.ok(diagnostic.includes('ブラウザから詳細なし'));
+});
+test('shader failure and context loss also produce a visible explanation',()=>{
+  const failed=setup({shaderFailure:true});
+  assert.equal(failed.elements['bear-stage'].dataset.bearRenderer,'unavailable');
+  assert.ok(failed.notices[0].children[0].children[1].textContent.includes('描画プログラム'));
+  const running=setup();
+  running.handlers['bear-canvas:webglcontextlost']({preventDefault(){}});
+  assert.equal(running.elements['bear-stage'].dataset.bearRenderer,'unavailable');
+  assert.ok(running.notices[0].children[0].children[1].textContent.includes('中断'));
 });

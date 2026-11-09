@@ -8,20 +8,53 @@
   // Older running servers retain their startup HTML. Remove obsolete UI
   // there too, so refreshing the updated script is enough.
   host.querySelectorAll(".bear-toolbar, .bear-touch-controls, [data-bear-touch]").forEach(node=>node.remove());
+  let contextError="";
+  const contextAttempts=[];
+  canvas.addEventListener("webglcontextcreationerror",event=>{contextError=event.statusMessage || "";});
+  function renderingFailed(reason, error) {
+    host.hidden=false;
+    host.dataset.bearRenderer="unavailable";
+    canvas.hidden=true;
+    host.querySelector(".bear-render-error")?.remove();
+    const notice=document.createElement("div");
+    notice.className="bear-render-error";
+    notice.setAttribute("role","alert");
+    notice.textContent="クマを表示できませんでした。会話は続けられます。";
+    const details=document.createElement("details");
+    details.className="local-only-feature";
+    const summary=document.createElement("summary");
+    summary.textContent="表示エラーの詳細";
+    const report=document.createElement("pre");
+    const browser=typeof navigator!=="undefined" ? navigator.userAgent : "unknown";
+    report.textContent=[reason,error?.message || String(error || ""),...contextAttempts,
+      "Browser: "+browser].filter(Boolean).join("\n");
+    details.appendChild(summary);details.appendChild(report);notice.appendChild(details);
+    host.appendChild(notice);
+    console.error("[bear] 3D rendering unavailable",error || contextError || reason);
+  }
+  function context(antialias) {
+    contextError="";
+    let result=null;
+    try { result=canvas.getContext("webgl",{alpha:true,antialias}); }
+    catch(error) { contextError=error.message; }
+    if(!result) contextAttempts.push("WebGL (antialias="+antialias+"): "+
+      (contextError || "コンテキストを取得できませんでした。ブラウザから詳細なし。"));
+    return result;
+  }
   // Some GPU/driver combinations cannot create a multisampled context.
-  const gl = canvas.getContext("webgl", { alpha: true, antialias: true })
-    || canvas.getContext("webgl", { alpha: true, antialias: false });
-  if (!gl) {
-    host.hidden = true;
+  const gl=context(true) || context(false);
+  if(!gl) {
+    renderingFailed("クマの3D表示を開始できませんでした。");
     return;
   }
   function shader(type, source) {
     const s = gl.createShader(type);
     gl.shaderSource(s, source); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error((type===gl.VERTEX_SHADER ? "Vertex shader: " : "Fragment shader: ")+gl.getShaderInfoLog(s));
     return s;
   }
   const program = gl.createProgram();
+  try {
   gl.attachShader(program, shader(gl.VERTEX_SHADER, `
     attribute vec3 p, vertexNormal; uniform bool isMesh; uniform vec3 center, scale; uniform float yaw, aspect, lean, pitch;
     varying mediump vec3 normal, surface;
@@ -48,6 +81,11 @@
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
   gl.useProgram(program);
+  } catch(error) {
+    renderingFailed("クマの描画プログラムを開始できませんでした。",error);
+    return;
+  }
+  host.dataset.bearRenderer="webgl";
   const vertices = [];
   const point = (a,b) => [Math.sin(a)*Math.cos(b), Math.cos(a), Math.sin(a)*Math.sin(b)];
   for (let i=0;i<24;i++) for (let j=0;j<32;j++) {
@@ -341,6 +379,7 @@
   canvas.addEventListener("webglcontextlost",e=>{
     e.preventDefault(); if(animation!==null) cancelAnimationFrame(animation);
     animation=null;
+    renderingFailed("クマの3D表示が中断しました。");
   });
   const labels={眉:"eyebrow",腕:"arm",首:"neck",鼻:"nose"};
   // Observe only the current conversation, never the past-log/book dialogs.
