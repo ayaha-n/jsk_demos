@@ -8,7 +8,9 @@
   // Older running servers retain their startup HTML. Remove obsolete UI
   // there too, so refreshing the updated script is enough.
   host.querySelectorAll(".bear-toolbar, .bear-touch-controls, [data-bear-touch]").forEach(node=>node.remove());
-  const gl = canvas.getContext("webgl", { alpha: true, antialias: true });
+  // Some GPU/driver combinations cannot create a multisampled context.
+  const gl = canvas.getContext("webgl", { alpha: true, antialias: true })
+    || canvas.getContext("webgl", { alpha: true, antialias: false });
   if (!gl) {
     host.hidden = true;
     return;
@@ -22,7 +24,7 @@
   const program = gl.createProgram();
   gl.attachShader(program, shader(gl.VERTEX_SHADER, `
     attribute vec3 p, vertexNormal; uniform bool isMesh; uniform vec3 center, scale; uniform float yaw, aspect, lean, pitch;
-    varying vec3 normal, surface;
+    varying mediump vec3 normal, surface;
     void main() {
       mat3 limb = mat3(cos(lean),sin(lean),0., -sin(lean),cos(lean),0., 0.,0.,1.);
       vec3 n = limb * normalize(isMesh ? vertexNormal : p / scale);
@@ -35,7 +37,7 @@
       gl_Position = vec4(v.x * 3.3 / aspect, (v.y - 1.65) * 3.3, -v.z * .12 * depth, depth);
     }`));
   gl.attachShader(program, shader(gl.FRAGMENT_SHADER, `
-    precision mediump float; uniform vec3 color; varying vec3 normal, surface;
+    precision mediump float; uniform vec3 color; varying mediump vec3 normal, surface;
     void main() {
       float diffuse = max(dot(normalize(normal), normalize(vec3(-.6,1.,1.5))),0.);
       float light = .67 + .30 * diffuse;

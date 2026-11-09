@@ -3,9 +3,10 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-function setup() {
+function setup(options={}) {
   let clock=0;
   const handlers = {};
+  const contextRequests=[];
   const gl = new Proxy({}, {get: (_, key) => key.startsWith('get') ? () => true : () => {}});
   const elements = {};
   for(const id of ['bear-stage','bear-canvas','bear-caption','bear-motion','log','input-text','send-button','input-form']) {
@@ -13,7 +14,7 @@ function setup() {
   }
   const canvas=elements['bear-canvas'];
   Object.assign(canvas,{width:600,height:300,clientWidth:600,clientHeight:300,
-    getContext:()=>gl,getBoundingClientRect:()=>({left:0,top:0,width:600,height:300}),setPointerCapture:()=>{}});
+    getContext:(_type,settings)=>{contextRequests.push(settings);return options.noAntialias && settings.antialias ? null : gl;},getBoundingClientRect:()=>({left:0,top:0,width:600,height:300}),setPointerCapture:()=>{}});
   const sent=[];
   elements['input-form'].requestSubmit=()=>{sent.push(elements['input-text'].value);elements['input-text'].value='';};
   const context=vm.createContext({CustomEvent:class {constructor(type, options){this.type=type;this.detail=options.detail;}},
@@ -24,7 +25,7 @@ function setup() {
   let source=fs.readFileSync('web/bear.js','utf8');
   source=source.replace(/  refresh\(\);\n\}\)\(\);\s*$/, '  yaw=0; draw(0); globalThis.api={pick,touch,pose(name,time=0){motion=typeof name==="string"?{arm:name}:name;started=0;duration=6000;draw(time);return shapes;},reaction(){return touchMotion;}};\n})();');
   vm.runInContext(source,context);
-  return {api:context.api,elements,sent,handlers,setTime:time=>{clock=time;}};
+  return {api:context.api,elements,sent,handlers,contextRequests,setTime:time=>{clock=time;}};
 }
 test('nearest visible body parts are picked; background is not',()=>{
   const {api}=setup();
@@ -140,4 +141,11 @@ test('recorded touches select robot-style gestures with a shared five-second coo
     assert.ok(response.neck || response.arm);
     assert.ok(['left_hand_chin','right_hand_mouth','onegai',''].includes(response.arm));
   }
+});
+
+test('WebGL initialization retries without antialiasing',()=>{
+  const {api,elements,contextRequests}=setup({noAntialias:true});
+  assert.deepEqual(contextRequests.map(settings=>settings.antialias),[true,false]);
+  assert.notEqual(elements['bear-stage'].hidden,true);
+  assert.ok(api);
 });
