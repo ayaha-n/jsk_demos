@@ -1192,8 +1192,9 @@ def extractive_dialogue_plan(scenes: list[Scene], cards: int, style: Style | Non
     scene allows (opening_window), the one where the participant said the
     most right after a Pooh line: that Pooh line (its last sentence:
     usually what he asked), the participant's words, and Pooh's answer if
-    it follows (DIALOGUE_SHAPES); the answer is trimmed, then dropped,
-    until it fits. A card with no such exchange (Pooh talking on his own)
+    it follows (DIALOGUE_SHAPES); the answer is trimmed, then dropped, then
+    the participant's words are cut from the end, until it fits (another
+    exchange if even that does not). A card with no such exchange (Pooh talking on his own)
     gets the first sentence of his first line there."""
     utterances = utterances_of(scenes)
     plan = []
@@ -1206,28 +1207,72 @@ def extractive_dialogue_plan(scenes: list[Scene], cards: int, style: Style | Non
             text = dialogue_line(own[0], 0, 0) if own else ""
             plan.append(with_item(CardPlan(first, last, picture, text), scenes))
             continue
-        said = max(candidates, key=lambda i: len(_normalize("".join(utterances[i].sentences))))
-        # (utterance, first sentence, last sentence)
-        question = utterances[said - 1]
-        before = (question, len(question.sentences) - 1, len(question.sentences) - 1)
-        reply = (utterances[said], 0, len(utterances[said].sentences) - 1)
-        after: tuple[Utterance, int, int] | None = None
-        if said + 1 < len(utterances) and utterances[said + 1].speaker == "pooh" \
-                and utterances[said + 1].scene <= last:
-            answer = utterances[said + 1]
-            after = (answer, 0, len(answer.sentences) - 1)
+        fits = lambda card: dialogue_fits(card, style or DIALOGUE, scenes, measure)
 
-        def card_for() -> CardPlan:
-            picks = [pick for pick in (before, reply, after) if pick]
-            card = CardPlan(first, last, picture, "\n".join(
-                dialogue_line(u, start, end) for u, start, end in picks))
-            return with_item(card, scenes)
+        def card_from(said: int) -> CardPlan:
+            """The exchange around utterances[said], cut until it fits: Pooh's
+            answer first, then the participant's words from the end (the
+            first sentence is always kept)."""
+            question = utterances[said - 1]
+            # (utterance, first sentence, last sentence)
+            before = (question, len(question.sentences) - 1, len(question.sentences) - 1)
+            reply = (utterances[said], 0, len(utterances[said].sentences) - 1)
+            after: tuple[Utterance, int, int] | None = None
+            if said + 1 < len(utterances) and utterances[said + 1].speaker == "pooh" \
+                    and utterances[said + 1].scene <= last:
+                answer = utterances[said + 1]
+                after = (answer, 0, len(answer.sentences) - 1)
 
-        card = card_for()
-        while after is not None and not dialogue_fits(card, style or DIALOGUE, scenes, measure):
-            after = (after[0], after[1], after[2] - 1) if after[2] > after[1] else None
+            def card_for() -> CardPlan:
+                picks = [pick for pick in (before, reply, after) if pick]
+                card = CardPlan(first, last, picture, "\n".join(
+                    dialogue_line(u, start, end) for u, start, end in picks))
+                return with_item(card, scenes)
+
+            def longest(first: int, last: int, fits_upto) -> int | None:
+                """The last sentence index in first..last that still fits,
+                found by halving (a few layouts, not one per sentence)."""
+                best = None
+                while first <= last:
+                    middle = (first + last) // 2
+                    if fits_upto(middle):
+                        best, first = middle, middle + 1
+                    else:
+                        last = middle - 1
+                return best
+
             card = card_for()
-        plan.append(card)
+            if fits(card):
+                return card
+            if after is not None:
+                answer, start, end = after
+
+                def answer_fits(upto: int) -> bool:
+                    nonlocal after
+                    after = (answer, start, upto)
+                    return fits(card_for())
+
+                kept = longest(start, end, answer_fits)
+                after = (answer, start, kept) if kept is not None else None
+                card = card_for()
+                if fits(card):
+                    return card
+            words, start, end = reply
+
+            def words_fit(upto: int) -> bool:
+                nonlocal reply
+                reply = (words, start, upto)
+                return fits(card_for())
+
+            # The first sentence is always kept, fitting or not.
+            reply = (words, start, longest(start, end - 1, words_fit) or start)
+            return card_for()
+
+        # Where the participant said the most, unless even cut down it does
+        # not fit (one very long sentence): then the next, and so on.
+        ordered = sorted(candidates, key=lambda i: -len(_normalize("".join(utterances[i].sentences))))
+        cards_tried = (card_from(said) for said in ordered)
+        plan.append(next((card for card in cards_tried if fits(card)), None) or card_from(ordered[0]))
     return plan
 
 

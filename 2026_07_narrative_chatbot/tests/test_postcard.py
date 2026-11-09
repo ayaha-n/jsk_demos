@@ -284,6 +284,20 @@ class PostcardTests(unittest.TestCase):
         self.assertTrue(card.text.startswith("プー「ぼくの"), card.text)
         self.assertNotIn("6", card.text)
 
+    def test_extractive_dialogue_cuts_a_long_answer_to_fit(self):
+        # Codex's review: a participant who said a lot left the card with
+        # its picture only (the words did not fit, yet it was offered).
+        long = "色とりどりの風船で飾り付けをしたいです。" * 20
+        talk = [Scene("opening", PICTURE, [
+            StoryEntry("speech", "「どんなお祝いがいいかな？」", "pooh"),
+            StoryEntry("speech", f"「{long}」と、あなたは いいました。", "participant"),
+        ])]
+        for style in (postcard.DIALOGUE, postcard.DIALOGUE_PORTRAIT):
+            plan = postcard.extractive_dialogue_plan(talk, 1, style)
+            self.assertEqual(postcard.check_dialogue_plan(plan, talk, 1, style), [])
+            self.assertIn("色とりどりの風船で飾り付けをしたいです。", plan[0].text)
+            self.assertNotIn(long, plan[0].text)  # cut to fit
+
     def test_extractive_dialogue_fits_both_orientations(self):
         talk = [Scene(beat, PICTURE, [
             StoryEntry("speech", f"「{beat}は どうかな？」", "pooh"),

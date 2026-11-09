@@ -46,6 +46,15 @@ def postcard_path(log_path: Path) -> Path:
     return log_path.parent / "postcards" / f"{log_path.stem}.pdf"
 
 
+def usable_cards(plan: list, scenes: list, style: Any) -> list:
+    """The cards that can be printed as they are: words that fit (a card
+    whose words do not fit is drawn with its picture only). Fewer cards
+    rather than none, when the plan as a whole misses a condition."""
+    import postcard
+
+    return [card for card in plan if card.text.strip() and postcard.dialogue_fits(card, style, scenes)]
+
+
 def make_postcards(log_path: Path, pdf: Path) -> str:
     """The postcards of a finished log, as scripts/postcard.py makes them by
     default; returns how the plan was made ("lm" or "extractive")."""
@@ -66,6 +75,12 @@ def make_postcards(log_path: Path, pdf: Path) -> str:
     if errors:
         plan, source = postcard.extractive_dialogue_plan(scenes, postcard.DEFAULT_CARDS, style), "extractive"
         errors = postcard.check_dialogue_plan(plan, scenes, postcard.DEFAULT_CARDS, style)
+        if errors:
+            plan = usable_cards(plan, scenes, style)
+            if not plan:
+                raise ValueError("カードを作れません: " + " / ".join(errors))
+            print(f"[ポストカード] {log_path.name}: 条件を満たさないカードを除き、{len(plan)}枚で作ります: "
+                  + " / ".join(errors), file=sys.stderr)
     postcard.write_pdf(plan, scenes, builder.config.title, pdf, style)
     pdf.with_suffix(".json").write_text(postcard.plan_to_json(plan, style, source, errors),
                                         encoding="utf-8")

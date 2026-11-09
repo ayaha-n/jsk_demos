@@ -17,6 +17,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 
 import web_server
+import postcard_service
 from postcard_service import PostcardMaker, postcard_path
 from test_web_server import FakeSession
 
@@ -169,6 +170,20 @@ class PostcardsAtTheGoalTest(PostcardMakerTest):
         finally:
             maker.close()
         self.assertEqual(len(self.made), 1)
+
+
+class UsableCardsTest(unittest.TestCase):
+    def test_fewer_cards_rather_than_one_without_words(self):
+        import postcard
+        from postcard import CardPlan, Scene
+        from storybook import StoryEntry
+
+        scenes = [Scene(beat, None, [StoryEntry("speech", "「うん。」", "pooh")]) for beat in "abc"]
+        fits = CardPlan(0, 0, None, "プー「うん。」")
+        too_long = CardPlan(1, 1, None, "プー「" + "ながいはなし。" * 80 + "」")
+        empty = CardPlan(2, 2, None, "")
+        style = postcard.STYLES[postcard.DEFAULT_STYLE]
+        self.assertEqual(postcard_service.usable_cards([fits, too_long, empty], scenes, style), [fits])
 
 
 class ReadyMaker:
