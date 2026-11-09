@@ -136,6 +136,41 @@ class PostcardsOptionTest(unittest.TestCase):
         self.assertIs(maker.illustrations, pictures)
 
 
+class GoalPictures(Pictures):
+    """SessionIllustrations at the goal: open scenes flushed, then drawn."""
+
+    def __init__(self):
+        super().__init__()
+        self.flushed = []
+
+    def flush(self, session_id):
+        self.flushed.append(session_id)
+
+    def drawn(self, session_id):
+        return bool(self.flushed)
+
+
+class PostcardsAtTheGoalTest(PostcardMakerTest):
+    def goal_session(self, resolved):
+        return SimpleNamespace(session_id="s1", log_path=self.log,
+                               scenario=SimpleNamespace(key="footprints"),
+                               controller=SimpleNamespace(state=SimpleNamespace(resolved=resolved)))
+
+    def test_cards_are_made_once_the_goal_is_reached_without_waiting_for_the_end(self):
+        pictures = GoalPictures()  # settled() stays False: the session goes on
+        maker = PostcardMaker(pictures, make=self.make, poll_sec=0.01)
+        try:
+            maker(self.goal_session(False), ended(source="participant"))
+            self.assertIsNone(maker.status("s1"))
+            maker(self.goal_session(True), ended(source="participant"))
+            self.assertEqual(pictures.flushed, ["s1"])
+            self.assertTrue(wait_for(lambda: maker.status("s1").status == "ready"))
+            maker(self.goal_session(True), ended())  # the end later: not made again
+        finally:
+            maker.close()
+        self.assertEqual(len(self.made), 1)
+
+
 class ReadyMaker:
     """A maker whose job for session "s1" is done."""
 

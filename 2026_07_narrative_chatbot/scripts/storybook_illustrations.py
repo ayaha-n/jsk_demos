@@ -779,6 +779,24 @@ class SessionIllustrations:
             jobs += [job for (sid, _), job in self._jobs.items() if sid == session_id]
         return all(job.done() for job in jobs)
 
+    def flush(self, session_id):
+        """Draw the session's open scenes now, from the conversation so far
+        (for the postcards at the story's goal, while it may go on). Later
+        turns of those scenes no longer change their pictures."""
+        with self._lock:
+            open_scenes = [scene for scene in (self._deferred.pop(session_id, None),
+                                               self._active.get(session_id)) if scene]
+            turns = list(self._turns.get(session_id, []))
+        for config, beat_id in open_scenes:
+            self.submit(config, beat_id, turns)
+
+    def drawn(self, session_id):
+        """Whether every picture asked for so far has been dealt with, open
+        scenes aside (see flush)."""
+        with self._lock:
+            jobs = [job for (sid, _), job in self._jobs.items() if sid == session_id]
+        return all(job.done() for job in jobs)
+
     def wait(self, session_id, beat_id, cancelled=None):
         with self._lock:
             job = self._promises.get((session_id, beat_id))

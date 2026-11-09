@@ -5,6 +5,7 @@ No image or text model is called.
 
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -199,6 +200,29 @@ class SettledTest(unittest.TestCase):
             self.assertTrue(illustrations.settled("s1"))
             illustrations._deferred["s2"] = (config, "ask_appearance")
             self.assertFalse(illustrations.settled("s2"))
+        finally:
+            illustrations.close()
+
+
+class FlushTest(unittest.TestCase):
+    def test_open_scenes_are_drawn_now_and_then_count_as_drawn(self):
+        # The postcards at the story's goal, while the session goes on.
+        drawn = []
+        illustrations = SessionIllustrations(generate_image=lambda *a, **k: None)
+        illustrations._generate = lambda config, beat_id, turns, name, force: drawn.append((beat_id, len(turns)))
+        try:
+            config = replace(storybook.load_story_config("footprints"), session_id="s1")
+            illustrations._active["s1"] = (config, "second_animal")
+            illustrations._deferred["s1"] = (config, "ask_appearance")
+            illustrations._turns["s1"] = [object(), object()]
+            illustrations.flush("s1")
+            illustrations._pool.submit(lambda: None).result()
+            for job in list(illustrations._jobs.values()):
+                job.result(timeout=5)
+            self.assertEqual(sorted(drawn), [("ask_appearance", 2), ("second_animal", 2)])
+            self.assertTrue(illustrations.drawn("s1"))
+            self.assertFalse(illustrations.settled("s1"))  # the session goes on
+            self.assertNotIn("s1", illustrations._deferred)
         finally:
             illustrations.close()
 

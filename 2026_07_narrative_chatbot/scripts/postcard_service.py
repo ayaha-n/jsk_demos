@@ -1,11 +1,15 @@
 """Make each session's postcards in the background once it has ended.
 
-An output listener, like the picture book's: when a session ends it waits
-until that session's illustrations are all dealt with (drawn or given up
-on, see storybook_illustrations.SessionIllustrations.settled), so the cards
-can use the pictures drawn from this very conversation, then makes the
-postcards the way ``scripts/postcard.py`` does and saves them next to the
+An output listener, like the picture book's: once a session reaches its
+story's goal (crowdsourcing.reached_goal: footprints solved, Eeyore's gift
+decided), or ends without it, it waits until that session's illustrations
+are dealt with (drawn or given up on), so the cards can use the pictures
+drawn from this very conversation, then makes the postcards the way
+``scripts/postcard.py`` does from the log so far, and saves them next to the
 log, as the live book saves its PDF (``<log dir>/postcards/<log name>.pdf``).
+At the goal the open scenes are drawn right away (SessionIllustrations.flush),
+so a robot session, which may go on until the participant says goodbye,
+does not have to end first. Made once per session.
 With ``--postcards`` (``web_server.py`` or the robot's
 ``pooh_narrative_dspy.py``) every session gets its postcards; the Web UI
 offers them on this PC only (the session's own book dialog, and the past-log
@@ -21,6 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+from crowdsourcing import reached_goal
 
 # How long to wait for a session's pictures before making the cards with
 # whatever pictures there are (the book's own fallbacks).
@@ -86,14 +92,22 @@ class PostcardMaker:
         ended = (getattr(output, "source", "") == "session_close"
                  or getattr(output, "interaction_mode", "") == "exit")
         log_path = getattr(session, "log_path", None)
-        if not ended or log_path is None or not Path(log_path).is_file():
-            return  # not the end, or closed before anything was said
+        if log_path is None or not Path(log_path).is_file():
+            return  # nothing said yet
         session_id = session.session_id
         with self._lock:
             if session_id in self.jobs:
                 return
+        goal = not ended and reached_goal(session)
+        if not ended and not goal:
+            return
+        with self._lock:
+            if session_id in self.jobs:
+                return
             self.jobs[session_id] = PostcardJob("waiting", postcard_path(Path(log_path)))
-        self._pool.submit(self._run, session_id, Path(log_path))
+        if goal and hasattr(self.illustrations, "flush"):
+            self.illustrations.flush(session_id)
+        self._pool.submit(self._run, session_id, Path(log_path), goal)
 
     def status(self, session_id: str) -> PostcardJob | None:
         with self._lock:
@@ -104,13 +118,15 @@ class PostcardMaker:
             job = self.jobs[session_id]
             job.status, job.error = status, error
 
-    def _pictures_settled(self, session_id: str) -> bool:
-        settled = getattr(self.illustrations, "settled", None)
-        return settled is None or settled(session_id)
+    def _pictures_ready(self, session_id: str, goal: bool) -> bool:
+        # At the goal the session goes on, so its scenes stay open: what was
+        # asked for so far (the open ones flushed) is enough.
+        ready = getattr(self.illustrations, "drawn" if goal else "settled", None)
+        return ready is None or ready(session_id)
 
-    def _run(self, session_id: str, log_path: Path) -> None:
+    def _run(self, session_id: str, log_path: Path, goal: bool = False) -> None:
         deadline = time.monotonic() + self.wait_sec
-        while not self._pictures_settled(session_id) and time.monotonic() < deadline:
+        while not self._pictures_ready(session_id, goal) and time.monotonic() < deadline:
             if self._closing.wait(self.poll_sec):
                 break  # closing: the pictures are as done as they will be
         self._set(session_id, "making")
