@@ -181,6 +181,28 @@ class UnansweredBubbleTest(unittest.TestCase):
         self.assertIn("no bear", prompt)
 
 
+class SettledTest(unittest.TestCase):
+    def test_a_session_is_settled_once_ended_and_every_picture_is_dealt_with(self):
+        from concurrent.futures import Future
+
+        illustrations = SessionIllustrations(generate_image=lambda *a, **k: None)
+        try:
+            config = storybook.load_story_config("footprints")
+            self.assertTrue(illustrations.settled("s1"))  # nothing asked for
+            illustrations._active["s1"] = (config, "opening")
+            self.assertFalse(illustrations.settled("s1"))  # still talking
+            del illustrations._active["s1"]
+            pending = Future()
+            illustrations._promises[("s1", "ask_appearance")] = pending
+            self.assertFalse(illustrations.settled("s1"))  # still drawing
+            pending.set_result(None)
+            self.assertTrue(illustrations.settled("s1"))
+            illustrations._deferred["s2"] = (config, "ask_appearance")
+            self.assertFalse(illustrations.settled("s2"))
+        finally:
+            illustrations.close()
+
+
 class DetailBeatTest(unittest.TestCase):
     def test_the_conversation_settling_the_look_opens_its_scene(self):
         # logs/session_20261106T210612...: Pooh asked "どんな生き物だと思う？"

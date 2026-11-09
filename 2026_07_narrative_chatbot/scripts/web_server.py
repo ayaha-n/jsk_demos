@@ -377,6 +377,8 @@ INDEX_HTML_KEY = web.AppKey("index_html", str)
 LOG_DIR_KEY = web.AppKey("log_dir", Path)
 # The local port the public tunnel forwards to (--public), if any.
 PUBLIC_PORT_KEY = web.AppKey("public_port", int)
+# The postcard maker (postcard_service.PostcardMaker) under --postcards.
+POSTCARDS_KEY = web.AppKey("postcards", object)
 
 
 def _authorized(request: web.Request) -> bool:
@@ -624,7 +626,61 @@ async def read_storybook(request: web.Request) -> web.Response:
         book = await asyncio.to_thread(_storybook_dict, records, layout)
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=422)
+    from postcard_service import postcard_path
+
+    if postcard_path(path).is_file():
+        book["postcards_url"] = f"/api/logs/{path.name}/postcards.pdf"
     return web.json_response({"name": path.name, **book})
+
+
+async def read_log_postcards_pdf(request: web.Request) -> web.StreamResponse:
+    """A past session's postcards, if they were made (this PC only)."""
+    from postcard_service import postcard_path
+
+    if not _local_log_access_allowed(request):
+        return web.json_response({"error": "local access only"}, status=403)
+    if not _authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    path = _resolve_log_path(request.app[LOG_DIR_KEY], request.match_info["name"])
+    pdf = postcard_path(path) if path is not None else None
+    if pdf is None or not pdf.is_file():
+        return web.json_response({"error": "no postcards"}, status=404)
+    return web.FileResponse(pdf, headers={"Content-Type": "application/pdf", **NO_CACHE})
+
+
+def _session_postcards(request: web.Request) -> Any:
+    """This session's postcard job, for this PC only; or a response saying why not."""
+    if not _local_log_access_allowed(request):
+        return web.json_response({"error": "local access only"}, status=403)
+    if not _authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    maker = request.app.get(POSTCARDS_KEY)
+    if maker is None:
+        return web.json_response({"status": "off"}, headers=NO_CACHE)
+    job = maker.status(request.match_info["session_id"])
+    if job is None:
+        return web.json_response({"status": "none"}, headers=NO_CACHE)
+    return job
+
+
+async def session_postcards(request: web.Request) -> web.Response:
+    """Whether this session's postcards are ready yet (made after it ends)."""
+    job = _session_postcards(request)
+    if isinstance(job, web.Response):
+        return job
+    body = {"status": job.status}
+    if job.status == "ready":
+        body["url"] = f"/api/sessions/{request.match_info['session_id']}/postcards.pdf"
+    return web.json_response(body, headers=NO_CACHE)
+
+
+async def session_postcards_pdf(request: web.Request) -> web.StreamResponse:
+    job = _session_postcards(request)
+    if isinstance(job, web.Response):
+        return job
+    if job.status != "ready" or not job.pdf.is_file():
+        return web.json_response({"error": "postcards not ready"}, status=404)
+    return web.FileResponse(job.pdf, headers={"Content-Type": "application/pdf", **NO_CACHE})
 
 
 async def read_storybook_pdf(request: web.Request) -> web.StreamResponse:
@@ -929,8 +985,11 @@ def create_app(
     passphrase: str | None = None,
     end_after_minutes: float | None = None,
     tts: TTSCache | None = None,
+    postcards: Any = None,
 ) -> web.Application:
     app = web.Application()
+    if postcards is not None:
+        app[POSTCARDS_KEY] = postcards
     effective_log_dir = log_dir or Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
     registry = SessionRegistry(
         factory,
@@ -967,6 +1026,7 @@ def create_app(
     app.router.add_get("/api/logs/{name}", read_log)
     app.router.add_get("/api/logs/{name}/storybook", read_storybook)
     app.router.add_get("/api/logs/{name}/storybook.pdf", read_storybook_pdf)
+    app.router.add_get("/api/logs/{name}/postcards.pdf", read_log_postcards_pdf)
     app.router.add_get("/storybook/{name:.+\\.png}", storybook_illustration)
     app.router.add_get("/static/storybook-font.ttf", storybook_font)
     app.router.add_get("/audio/{name}", synthesized_audio)
@@ -974,6 +1034,8 @@ def create_app(
     app.router.add_delete("/api/sessions/{session_id}", delete_session)
     app.router.add_get("/api/sessions/{session_id}/storybook", read_session_storybook)
     app.router.add_get("/api/sessions/{session_id}/storybook.pdf", read_session_storybook_pdf)
+    app.router.add_get("/api/sessions/{session_id}/postcards", session_postcards)
+    app.router.add_get("/api/sessions/{session_id}/postcards.pdf", session_postcards_pdf)
     app.router.add_get("/api/sessions/{session_id}/completion", session_completion)
     app.router.add_post("/api/sessions/{session_id}/completion", session_completion)
     app.router.add_get("/ws/{session_id}", session_socket)
@@ -1051,9 +1113,12 @@ def build_factory(
     # The live book on the tablet, for sessions started on this PC only (see
     # SessionRegistry.create): one book, following the newest of them.
     listeners = pooh.create_storybook_listeners(args)
+    # Pictures and (with --postcards) postcards are made for every session;
+    # the postcards are offered on this PC only.
+    from postcard_service import PostcardMaker
     from storybook_illustrations import SessionIllustrations
     shared_listeners = [listener for listener in listeners
-                        if isinstance(listener, SessionIllustrations)]
+                        if isinstance(listener, (SessionIllustrations, PostcardMaker))]
 
     def factory(session_id: str) -> NarrativeSessionLike:
         # A private agent per session lets different participants' LLM calls
@@ -1157,6 +1222,8 @@ def main() -> int:
         passphrase=args.passphrase,
         end_after_minutes=args.end_after_minutes,
         tts=tts,
+        postcards=next((listener for listener in listeners
+                        if type(listener).__name__ == "PostcardMaker"), None),
     )
     if args.crowdsourcing:
         print(f"合言葉: {args.passphrase}" if args.passphrase

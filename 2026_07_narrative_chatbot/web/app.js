@@ -26,6 +26,9 @@ const logViewer = document.getElementById("log-viewer");
 const logStorybookToggle = document.getElementById("log-storybook");
 const logStorybookLayout = document.getElementById("log-storybook-layout");
 const logStorybookPdf = document.getElementById("log-storybook-pdf");
+const logPostcardsPdf = document.getElementById("log-postcards-pdf");
+const storybookPostcards = document.getElementById("storybook-postcards");
+const storybookPostcardsStatus = document.getElementById("storybook-postcards-status");
 const storybookButton = document.getElementById("storybook-button");
 const storybookDialog = document.getElementById("storybook-dialog");
 const storybookCloseButton = document.getElementById("storybook-close-button");
@@ -397,6 +400,10 @@ async function loadSelectedStorybook(name) {
   });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  if (body.postcards_url) {
+    logPostcardsPdf.href = `${body.postcards_url}?token=${token}`;
+    logPostcardsPdf.hidden = false;
+  }
   body.pages.forEach((page) => appendStoryPage(page, body));
   logViewerStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
 }
@@ -411,6 +418,7 @@ async function loadSelectedLog() {
   logViewerStatus.textContent = "読み込んでいます…";
   logViewer.replaceChildren();
   logStorybookPdf.hidden = true;
+  logPostcardsPdf.hidden = true;
   try {
     if (logStorybookToggle.checked) {
       await loadSelectedStorybook(name);
@@ -574,6 +582,9 @@ async function startNewSession() {
   audioQueue.length = 0;
   audioBlocked = false;
   storybookButton.hidden = true;
+  storybookPostcards.hidden = true;
+  storybookPostcardsStatus.hidden = true;
+  postcardsUnavailable = false;
   sessionId = null;
   storageSet(SESSION_KEY, null);
   statusLine.textContent = "準備しています…";
@@ -712,6 +723,36 @@ async function loadOwnStorybook(quiet = false) {
   }
 }
 
+// This session's postcards (--postcards), made in the background once its
+// pictures are drawn; offered on this PC only (the server refuses others).
+let postcardsUnavailable = false;
+async function refreshOwnPostcards() {
+  if (!endedSessionId || postcardsUnavailable) return;
+  const forSessionId = endedSessionId;
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(forSessionId)}/postcards`, {
+      headers: authenticatedHeaders(),
+    });
+    const body = await response.json();
+    if (forSessionId !== endedSessionId) return;
+    if (!response.ok || body.status === "off") {
+      postcardsUnavailable = true;
+      storybookPostcards.hidden = true;
+      storybookPostcardsStatus.hidden = true;
+      return;
+    }
+    const ready = body.status === "ready";
+    storybookPostcards.hidden = !ready;
+    if (ready) storybookPostcards.href = `${body.url}?token=${encodeURIComponent(accessToken())}`;
+    const note = { waiting: "ポストカードを準備中…", making: "ポストカードを準備中…",
+                   failed: "ポストカードを作れませんでした" }[body.status] || "";
+    storybookPostcardsStatus.textContent = note;
+    storybookPostcardsStatus.hidden = !note;
+  } catch (error) {
+    storybookPostcardsStatus.hidden = true;
+  }
+}
+
 // Auto-open once per session: live ("ended") or discovered on reconnect
 // ("transcript" with ended=true) both call this; neither reopens a dialog
 // the participant already closed for the same session.
@@ -720,17 +761,22 @@ function offerStorybook(forSessionId) {
   storybookOfferedFor = forSessionId;
   if (!storybookDialog.open) storybookDialog.showModal();
   loadOwnStorybook();
+  refreshOwnPostcards();
 }
 
 storybookButton.addEventListener("click", () => {
   storybookDialog.showModal();
   loadOwnStorybook();
+  refreshOwnPostcards();
 });
 storybookCloseButton.addEventListener("click", () => storybookDialog.close());
 storybookLayout.addEventListener("change", () => loadOwnStorybook());
-// Generated pictures may finish after the conversation has ended.
+// Generated pictures (and postcards) may finish after the conversation has ended.
 setInterval(() => {
-  if (storybookDialog.open) loadOwnStorybook(true);
+  if (storybookDialog.open) {
+    loadOwnStorybook(true);
+    refreshOwnPostcards();
+  }
 }, 5000);
 
 logCloseButton.addEventListener("click", () => logDialog.close());

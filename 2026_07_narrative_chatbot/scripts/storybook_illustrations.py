@@ -768,6 +768,17 @@ class SessionIllustrations:
             job = self._promises.get((session_id, beat_id))
         return job is not None and job.done()
 
+    def settled(self, session_id):
+        """Whether the session has ended (as far as pictures go) and every
+        picture it asked for has been dealt with (drawn, or given up on):
+        nothing is still being drawn, waiting to be drawn, or still open."""
+        with self._lock:
+            if session_id in self._active or session_id in self._deferred:
+                return False
+            jobs = [job for (sid, _), job in self._promises.items() if sid == session_id]
+            jobs += [job for (sid, _), job in self._jobs.items() if sid == session_id]
+        return all(job.done() for job in jobs)
+
     def wait(self, session_id, beat_id, cancelled=None):
         with self._lock:
             job = self._promises.get((session_id, beat_id))
