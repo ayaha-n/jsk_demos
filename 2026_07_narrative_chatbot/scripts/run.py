@@ -133,16 +133,23 @@ def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def running_robot_chatbots() -> list[int]:
-    """PIDs of chatbots already talking to a robot (pooh_narrative_dspy.py --ros-relay)."""
+    """PIDs of chatbots already talking to a robot through the bridge:
+    pooh_narrative_dspy.py --ros-relay, or the Web UI with --ros-relay."""
     found = []
     for entry in Path("/proc").glob("[0-9]*"):
         try:
             args = (entry / "cmdline").read_bytes().split(b"\0")
         except OSError:
             continue
-        if any(arg.endswith(b"pooh_narrative_dspy.py") for arg in args) and b"--ros-relay" in args:
+        script = any(arg.endswith((b"pooh_narrative_dspy.py", b"web_server.py")) for arg in args)
+        if script and b"--ros-relay" in args:
             found.append(int(entry.name))
     return found
+
+
+def uses_robot(settings: Settings) -> bool:
+    """Whether what is about to start talks to the robot through the bridge."""
+    return settings["target"] == "robot" or bool(settings["web"].get("ros_relay"))
 
 
 def robot_refusal(running: Callable[[], list[int]] = running_robot_chatbots) -> str | None:
@@ -151,8 +158,8 @@ def robot_refusal(running: Callable[[], list[int]] = running_robot_chatbots) -> 
     if not others:
         return None
     return ("ロボットにつながるチャットボットがもう動いています（PID " + ", ".join(map(str, others))
-            + "）。pooh_operator.launch を use_narrative:=true で起動していませんか。"
-            "2つ動かすことはできないので、ここからは起動しません。")
+            + "）。pooh_operator.launch を use_narrative:=true で起動したか、Web UI を「ロボットにも話させる」で"
+            "動かしていませんか。2つ動かすことはできないので、ここからは起動しません。")
 
 
 def warnings_for(settings: Settings, crowd_scenarios: frozenset[str],
@@ -342,7 +349,7 @@ def main() -> int:
         if not curses.wrapper(run_menu, settings, options, crowd_scenarios, sorted(SCENARIOS)):
             print("起動しませんでした。")
             return 0
-    if settings["target"] == "robot" and not args.dry_run:
+    if uses_robot(settings) and not args.dry_run:
         refusal = robot_refusal()
         if refusal:
             print("起動しません: " + refusal, file=sys.stderr)

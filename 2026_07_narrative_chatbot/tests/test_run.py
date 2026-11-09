@@ -102,6 +102,10 @@ class LaunchTest(unittest.TestCase):
         self.assertIsNone(launch.robot_refusal(running=lambda: []))
         refusal = launch.robot_refusal(running=lambda: [1234])
         self.assertIn("1234", refusal)  # e.g. pooh_operator.launch use_narrative:=true
+        # Checked for the robot, and for a Web UI that also talks to it.
+        self.assertTrue(launch.uses_robot(self.settings("robot")))
+        self.assertTrue(launch.uses_robot(self.settings(ros_relay=True)))
+        self.assertFalse(launch.uses_robot(self.settings(ros_relay=False)))
 
 
 DEFAULTS_TEXT = launch.DEFAULTS_PATH.read_text(encoding="utf-8")
