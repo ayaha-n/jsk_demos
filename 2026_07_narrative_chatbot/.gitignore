@@ -15,3 +15,6 @@ node_modules/
 AGENTS.md
 .claude/
 .codex/
+
+# The plush bear scan web/bear.js was modelled on: kept on this PC only.
+assets/*.stl
