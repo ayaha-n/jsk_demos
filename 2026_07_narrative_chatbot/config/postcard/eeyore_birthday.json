@@ -25,22 +25,13 @@
       "prompt": "A single loose satin ribbon bow in soft light blue, two loops and two trailing tails, seen from the front, as if tied on a present."
     }
   },
-  "beats": {
-    "opening": "gift_box",
-    "honey_gift_committed": "honey_pot",
-    "pooh_tastes_honey": "honey_dipper",
-    "pooh_ate_honey": "empty_pot",
-    "story_wrap_up": "balloon"
-  },
+  "beats": {},
   "frame": {
     "style": "ribbon",
     "color": [
       0.62,
       0.76,
       0.9
-    ],
-    "bow": "ribbon_bow",
-    "bow_anchor": "top_left",
-    "bow_size_mm": 24
+    ]
   }
 }
