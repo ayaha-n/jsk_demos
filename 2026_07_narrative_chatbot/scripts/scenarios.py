@@ -146,6 +146,7 @@ def _tea_party() -> Scenario:
 def _eeyore_birthday() -> Scenario:
     from eeyore_birthday_events import (
         EeyoreAnalyzeInteraction,
+        EeyoreGenerateResponse,
         EeyoreInterpretTurn,
         HoneyGiftEventController,
     )
@@ -205,6 +206,7 @@ def _eeyore_birthday() -> Scenario:
                     ("いーよ", "相談")),
         classify_signature=EeyoreAnalyzeInteraction,
         interpret_signature=EeyoreInterpretTurn,
+        response_signature=EeyoreGenerateResponse,
     )
 
 

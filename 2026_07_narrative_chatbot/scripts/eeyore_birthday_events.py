@@ -26,7 +26,14 @@ from narrative_events import (
     WorldEvent,
     fixed_utterance,
 )
-from narrative_signatures import AnalyzeInteraction, InterpretTurn, QuestionKind, _signature_field
+from narrative_signatures import (
+    AnalyzeInteraction,
+    GeneratePoohResponse,
+    InterpretTurn,
+    MishearingCandidate,
+    QuestionKind,
+    _signature_field,
+)
 from narrative_state import NarrativeSituation, SituationUpdate, apply_situation_update
 
 
@@ -86,8 +93,9 @@ class EeyoreAnalyzeInteraction(AnalyzeInteraction):
 # conditioned on less of the rest of the output, than generating it last
 # would. Rebuilt with type() instead, reusing InterpretTurn's own field
 # objects (and its instructions verbatim — see the EeyoreAnalyzeInteraction
-# note on docstrings above) so only the position and the one new field
-# differ from InterpretTurn itself.
+# note on docstrings above) so only the position, the one new field and
+# settled_details' own wording (the gift after the honey) differ from
+# InterpretTurn itself.
 _EEYORE_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
     desc=(
         "Pythonが検証する機械可読な提案。必要なものだけを返す。利用可能: "
@@ -101,6 +109,21 @@ _EEYORE_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
         "give_empty_jar(蜂蜜がなくなった後、空になった壺をイーヨーに贈ると決まった場合。"
         "中に何か入れる場合も含む)、not_give_empty_jar(空になった壺は贈らないと"
         "決まった場合。別の贈り物に替える場合など)。該当しなければ空リスト。"
+    )
+)
+# settled_details, with eeyore_birthday's own rules for the gift after the
+# honey (kept out of the shared InterpretTurn, which other scenarios use).
+_EEYORE_SETTLED_DETAILS_FIELD = dspy.OutputField(
+    desc=(
+        "このターンで一つに決まったこと。贈るもの、色、飲み物、ケーキなど何でもよい。"
+        "topicは、current_situationの【未解決・未確定】の項目が決まったならその項目名を"
+        "そのまま使い、それ以外は短い名詞(例: 飲み物)にする。壺以外にイーヨーに贈るものが"
+        "決まったら、topicは「イーヨーに何をあげるか」にする。空になった壺を贈るかどうかは"
+        "narrative_actionsで表し、ここには含めない。valueは決まった内容"
+        "(例: 青、風船)で、一つに決まっていなければ含めない。"
+        "誰の案かは問わない。候補を挙げただけ、質問しただけなら含めない。"
+        "current_situationの【決まったこと】にある内容を同じ値で繰り返さない。"
+        "該当しなければ空リスト。"
     )
 )
 EeyoreInterpretTurn = type(
@@ -130,8 +153,48 @@ EeyoreInterpretTurn = type(
         "bot_response": _signature_field(InterpretTurn, "bot_response"),
         "situation_update": _signature_field(InterpretTurn, "situation_update"),
         "narrative_actions": _EEYORE_NARRATIVE_ACTIONS_FIELD,
-        "settled_details": _signature_field(InterpretTurn, "settled_details"),
+        "settled_details": _EEYORE_SETTLED_DETAILS_FIELD,
         "question_kind": _signature_field(InterpretTurn, "question_kind"),
+    },
+)
+
+
+# GeneratePoohResponse, with eeyore_birthday's own rules about Pooh's gift and
+# the honey (kept out of the shared instructions, which other scenarios use).
+# Appended with type(), as footprints_events.FootprintsGenerateResponse is.
+_EEYORE_RESPONSE_EXTRA_INSTRUCTIONS = (
+    "プーが贈ると決めた贈り物は、参加者が別の案を出しても取り下げず、参加者の案と"
+    "一緒に贈る形で受け止める（例:「風船もいいね！ハチミツの壺と一緒に贈ろう」）。"
+    "「蜂蜜を食べない」という守れない約束もしない（例: 「だいじょうぶ、だいじょうぶ。"
+    "ちょっと味見するだけだもの。」）。守れない案や頼みは「イーヨー、よろこびそうだなあ」"
+    "のように楽しく受け止めてもよい。"
+)
+EeyoreGenerateResponse = type(
+    "EeyoreGenerateResponse",
+    (dspy.Signature,),
+    {
+        "__doc__": (
+            getattr(GeneratePoohResponse, "instructions", GeneratePoohResponse.__doc__ or "")
+            + "\n\n"
+            + _EEYORE_RESPONSE_EXTRA_INSTRUCTIONS
+        ),
+        "__annotations__": {
+            "current_situation": NarrativeSituation,
+            "history": str,
+            "user_action": str,
+            "world_event": str,
+            "previous_bot_response": str,
+            "pooh_preferences": str,
+            "interaction_mode": str,
+            "mishearing_candidates": list[MishearingCandidate],
+            "selected_mishearing": str,
+            "bot_response": str,
+        },
+        **{name: _signature_field(GeneratePoohResponse, name) for name in (
+            "current_situation", "history", "user_action", "world_event",
+            "previous_bot_response", "pooh_preferences", "interaction_mode",
+            "mishearing_candidates", "selected_mishearing", "bot_response",
+        )},
     },
 )
 
