@@ -133,7 +133,8 @@ python scripts/web_server.py --scenario footprints --crowdsourcing --passphrase 
 `--crowdsourcing` を付けたときだけ、次の流れに切り替わる。
 通常起動時の終了操作・自動終了・絵本表示には完了確認を加えない。
 
-1. ゴールまでは「終了して絵本を見る」を無効にする。ゴールは足跡の正体判明
+1. ゴールまでは「終了して絵本を見る」で終えられない（薄く表示し、押すと「まだお話の途中です。
+   お話がひと区切りつくと、『終了して絵本を見る』を押せるようになります。」と出す）。ゴールは足跡の正体判明
    （controller.state.resolved）、誕生日の振り返り到達（story_wrap_up発生）。
    LLMで新しいゴール判定を行うのではなく、既存の物語状態を使う。
 2. ゴールに達すると終了ボタンを目立つ色にし、UIに次の案内を出す。
@@ -148,6 +149,12 @@ python scripts/web_server.py --scenario footprints --crowdsourcing --passphrase 
    回ごとに起動時の引数で変える（起動時に「合言葉: …」と表示される）。
    付けなければ出さない。
 
+ゴールに届かなくても、「はじめる」を押してから10分たつと終了ボタンを押せるようにする
+（`--end-after-minutes` で分数を変えられる。0 以下で無効）。ゴール後と同じくボタンを目立つ色にし、
+「お話の途中でも、『終了して絵本を見る』から終えて、今回のお話を絵本で振り返れます。」と案内する。
+その後の読了確認・完了コードはゴール後と同じで、記録の `end_allowed_at` に時刻が入り、
+`ended_before_goal` で途中終了だったと分かる。
+
 ゴール前でも発話による終了（「さようなら」など）は受け付ける。
 その場合も絵本の読了確認をすれば完了コードを発行し、途中終了かどうかは記録で区別する。
 「はじめから」ボタンは重複提出・完了コードの取りこぼしを避けるため非表示にする
@@ -160,7 +167,7 @@ python scripts/web_server.py --scenario footprints --crowdsourcing --passphrase 
 進捗とコードは `logs/crowdsourcing/<session_id>.json` に保存する
 （`POOH_LOG_DIR` を変えた場合はその配下）。`session_id`、`scenario`、`log_name`で
 会話ログと対応づけ、開始・ゴール到達・終了・絵本表示・最終ページ到達の申告・読了確認の
-UTC時刻と、`ended_before_goal`、`completion_code`、表示した`passphrase`を保持する。
+UTC時刻と、時間で終了を許した時刻（`end_allowed_at`）、`ended_before_goal`、`completion_code`、表示した`passphrase`を保持する。
 再読み込みで復元したときは、サーバを別の合言葉で起動し直していても、そのとき出した合言葉を出す。
 
 完了コードはランダムな64ビット（16進16桁）なので、セッション同士でかぶることは実際上ない。

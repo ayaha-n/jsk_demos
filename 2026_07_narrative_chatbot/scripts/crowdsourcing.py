@@ -53,6 +53,9 @@ class Progress:
     log_name: str | None
     started_at: str
     goal_reached_at: str | None = None
+    # When ending was allowed by time (Web UI --end-after-minutes) before
+    # the goal; ended_before_goal still says whether the goal was reached.
+    end_allowed_at: str | None = None
     ended_at: str | None = None
     ended_before_goal: bool | None = None
     book_revision: str | None = None
@@ -66,6 +69,7 @@ class Progress:
 
     def public(self) -> dict[str, Any]:
         return {"enabled": True, "goal_reached": self.goal_reached_at is not None,
+                "end_allowed": self.end_allowed,
                 "ended_before_goal": self.ended_before_goal,
                 "book_revision": self.book_revision,
                 "book_opened_at": self.book_opened_at,
@@ -73,6 +77,11 @@ class Progress:
                 "read_confirmed_at": self.read_confirmed_at,
                 "completion_code": self.completion_code,
                 "passphrase": self.passphrase if self.completion_code else None}
+
+    @property
+    def end_allowed(self) -> bool:
+        """Whether the participant may end with the button (goal or time)."""
+        return self.goal_reached_at is not None or self.end_allowed_at is not None
 
     def report(self, event: str, revision: str, passphrase: str | None = None) -> None:
         if self.completion_code:

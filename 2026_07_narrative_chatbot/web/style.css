@@ -168,7 +168,7 @@ button.secondary {
   font-size: 0.85rem;
 }
 
-button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
+button:disabled, input:disabled, #end-button.study-locked { opacity: 0.5; cursor: not-allowed; }
 
 #start-button {
   display: block;

@@ -14,6 +14,8 @@
   const passphrasePanel = byId("study-passphrase-panel");
   const passphrase = byId("study-passphrase");
   const RECEIPT_KEY = "pooh-study-session-id";
+  const GOAL_NOTICE = byId("study-goal-notice").textContent;
+  const TIME_NOTICE = "お話の途中でも、「終了して絵本を見る」から終えて、今回のお話を絵本で振り返れます。";
   let session = null, progress = {}, revision = null, layout = null;
   let observer = null, sentinel = null, opening = false, reporting = false, confirming = false;
   let generation = 0;
@@ -84,6 +86,8 @@
   });
   const api = {
     get goalReached() { return Boolean(progress.goal_reached); },
+    // The goal, or (before it) enough time since the start.
+    get endAllowed() { return Boolean(progress.end_allowed ?? progress.goal_reached); },
     get savedSessionId() { return storage(); },
     setState(state, id) {
       if (session !== id) { api.reset(); session = id; }
@@ -91,7 +95,9 @@
       progress = state || {}; render();
     },
     updateControls({ ended }) {
-      byId("study-goal-notice").hidden = ended || !api.goalReached;
+      const notice = byId("study-goal-notice");
+      notice.hidden = ended || !api.endAllowed;
+      notice.textContent = api.goalReached ? GOAL_NOTICE : TIME_NOTICE;
     },
     reset() {
       generation++; disconnect();

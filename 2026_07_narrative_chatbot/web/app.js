@@ -5,6 +5,7 @@ const SESSION_KEY = "pooh-session-id";
 const TOKEN_KEY = "pooh-access-token";
 const MAX_RECONNECT_DELAY_MS = 10000;
 const crowd = window.PoohCrowdsourcing;
+const STUDY_LOCKED_NOTICE = "まだお話の途中です。お話がひと区切りつくと、「終了して絵本を見る」を押せるようになります。";
 
 const log = document.getElementById("log");
 const statusLine = document.getElementById("status");
@@ -94,10 +95,15 @@ function updateControls() {
   const canType = connected && !ended && !busy && !speaking;
   inputText.disabled = !canType;
   sendButton.disabled = !canType;
-  endButton.disabled = !connected || ended || busy || speaking || Boolean(crowd && !crowd.goalReached);
+  endButton.disabled = !connected || ended || busy || speaking;
+  // Before the goal (or the time limit) the button still answers a press,
+  // with a note why it cannot end yet, instead of silently doing nothing.
+  const studyLocked = Boolean(crowd && !crowd.endAllowed);
+  endButton.classList.toggle("study-locked", studyLocked);
+  endButton.setAttribute("aria-disabled", String(studyLocked || endButton.disabled));
   if (crowd) {
     endButton.textContent = "終了して絵本を見る";
-    endButton.classList.toggle("goal-ready", crowd.goalReached && !ended);
+    endButton.classList.toggle("goal-ready", crowd.endAllowed && !ended);
     crowd.updateControls({ ended });
   }
   if (ended) statusLine.textContent = "終了しました。「はじめから」で新しく開始できます。";
@@ -613,6 +619,10 @@ document.addEventListener("pooh-touch", (event) => {
 });
 
 endButton.addEventListener("click", () => {
+  if (endButton.classList.contains("study-locked")) {
+    if (!ended) appendNotice(STUDY_LOCKED_NOTICE, true);
+    return;
+  }
   if (!endButton.disabled && socket !== null && !ended && confirm("本当に終了しますか？")) {
     socket.send(JSON.stringify({ type: "close" }));
   }

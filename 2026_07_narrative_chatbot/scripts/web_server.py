@@ -84,6 +84,8 @@ class WebSession:
     busy: bool = False
     study: Progress | None = None
     pending_playback: dict[str, float] = field(default_factory=dict)
+    # Allows the end button after study_end_after_seconds (crowdsourcing).
+    end_timer_task: asyncio.Task | None = None
 
 
 class SessionRegistry:
@@ -99,9 +101,13 @@ class SessionRegistry:
         local_output_listeners: Sequence[Any] = (),
         study_store: ProgressStore | None = None,
         tts: TTSCache | None = None,
+        study_end_after_seconds: float | None = None,
     ) -> None:
         self.factory = factory
         self.study_store = study_store
+        # Under crowdsourcing, the end button is allowed this long after a
+        # session starts even if the story has not reached its goal.
+        self.study_end_after_seconds = study_end_after_seconds
         self.tts = tts
         # Given only to sessions started on this PC itself (e.g. the live
         # picture book on the tablet next to the robot).
@@ -145,7 +151,19 @@ class SessionRegistry:
         if opening is not None:
             entry.transcript.append({"type": "output", "output": await self._output_dict(opening, entry)})
         entry.timer_task = asyncio.create_task(self._run_timer(entry))
+        if entry.study is not None and self.study_end_after_seconds is not None:
+            entry.end_timer_task = asyncio.create_task(self._allow_end_later(entry))
         return entry
+
+    async def _allow_end_later(self, entry: WebSession) -> None:
+        await asyncio.sleep(self.study_end_after_seconds)
+        async with entry.lock:
+            if entry.session.ended or entry.study is None or entry.study.end_allowed:
+                return
+            progress = replace(entry.study, end_allowed_at=timestamp())
+            await asyncio.to_thread(self.study_store.save, progress)
+            entry.study = progress
+        await self._broadcast(entry, {"type": "study_status", "study": progress.public()})
 
     def get(self, session_id: str) -> WebSession | None:
         entry = self.sessions.get(session_id)
@@ -167,8 +185,11 @@ class SessionRegistry:
 
     def discard(self, session_id: str) -> None:
         entry = self.sessions.pop(session_id, None)
-        if entry is not None and entry.timer_task is not None:
-            entry.timer_task.cancel()
+        if entry is None:
+            return
+        for task in (entry.timer_task, entry.end_timer_task):
+            if task is not None:
+                task.cancel()
 
     async def abandon(self, session_id: str) -> bool:
         """End a session on explicit restart: ending once, then free the slot."""
@@ -869,8 +890,8 @@ async def session_socket(request: web.Request) -> web.WebSocketResponse:
                 if text:
                     await registry.submit(entry, text)
             elif kind == "close":
-                if entry.study is not None and entry.study.goal_reached_at is None:
-                    await socket.send_json({"type": "error", "message": "物語がひと区切りつくと、終了ボタンが使えるようになります。"})
+                if entry.study is not None and not entry.study.end_allowed:
+                    await socket.send_json({"type": "error", "message": "まだお話の途中です。お話がひと区切りつくと、「終了して絵本を見る」を押せるようになります。"})
                 else:
                     await registry.close(entry)
             elif kind == "touch":
@@ -906,6 +927,7 @@ def create_app(
     local_output_listeners: Sequence[Any] = (),
     crowdsourcing: bool = False,
     passphrase: str | None = None,
+    end_after_minutes: float | None = None,
     tts: TTSCache | None = None,
 ) -> web.Application:
     app = web.Application()
@@ -918,6 +940,8 @@ def create_app(
         study_store=(ProgressStore(effective_log_dir / "crowdsourcing", passphrase)
                      if crowdsourcing else None),
         tts=tts,
+        study_end_after_seconds=(end_after_minutes * 60
+                                 if crowdsourcing and end_after_minutes is not None else None),
     )
     app[REGISTRY_KEY] = registry
     app[TOKEN_KEY] = access_token
@@ -1061,6 +1085,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-sessions", type=int, default=DEFAULT_MAX_SESSIONS)
     parser.add_argument("--crowdsourcing", action="store_true",
                         help="ゴール後に終了ボタンを有効化し、絵本の読了確認後に提出用コードを発行する。")
+    parser.add_argument("--end-after-minutes", type=float, default=10.0, metavar="MIN",
+                        help="--crowdsourcing と使う。ゴール前でも、開始からこの分数たつと終了ボタンを"
+                             "押せるようにする（既定10分。0 以下で無効）。")
     parser.add_argument("--passphrase", default=None, metavar="TEXT",
                         help="--crowdsourcing と使う。完了コードの下に出す合言葉（全員同じ。"
                              "クラウドソーシングの回の数だけ変えられる）。例: アイコトバ")
@@ -1080,6 +1107,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.crowdsourcing and args.scenario not in SUPPORTED_SCENARIOS:
         parser.error("--crowdsourcing は footprints / eeyore_birthday で使えます。")
+    if args.end_after_minutes is not None and args.end_after_minutes <= 0:
+        args.end_after_minutes = None
     args.passphrase = (args.passphrase or "").strip() or None
     if args.passphrase and not args.crowdsourcing:
         parser.error("--passphrase は --crowdsourcing と一緒に使います。")
@@ -1119,6 +1148,7 @@ def main() -> int:
         local_output_listeners=listeners,
         crowdsourcing=args.crowdsourcing,
         passphrase=args.passphrase,
+        end_after_minutes=args.end_after_minutes,
         tts=tts,
     )
     if args.crowdsourcing:

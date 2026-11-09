@@ -120,6 +120,26 @@ class CrowdsourcingTests(AioHTTPTestCase):
             self.assertTrue(entry.session.ended)
             self.assertFalse(entry.study.ended_before_goal)
 
+    async def test_the_end_button_is_allowed_some_time_after_the_start(self):
+        self.registry.study_end_after_seconds = 0.05  # --end-after-minutes, shortened
+        entry = await self.start()
+        async with self.client.ws_connect(f"/ws/{entry.session.session_id}", headers=self.headers) as ws:
+            transcript = await ws.receive_json()
+            self.assertFalse(transcript["study"]["end_allowed"])
+            while True:
+                message = await asyncio.wait_for(ws.receive_json(), 2)
+                if message["type"] == "study_status":
+                    self.assertTrue(message["study"]["end_allowed"])
+                    self.assertFalse(message["study"]["goal_reached"])
+                    break
+            await ws.send_json({"type": "close"})
+            while (await asyncio.wait_for(ws.receive_json(), 2))["type"] != "ended":
+                pass
+        self.assertTrue(entry.session.ended)
+        # Ended by time, before the goal: both are recorded.
+        self.assertTrue(entry.study.ended_before_goal)
+        self.assertTrue(self.registry.study_store.load(entry.session.session_id).end_allowed_at)
+
     async def test_early_spoken_exit_can_still_get_code_after_reading(self):
         entry = await self.start()
         # Like a spoken goodbye: the narrative session itself can end before the goal.
