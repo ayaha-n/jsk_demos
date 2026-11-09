@@ -576,7 +576,7 @@ class FootprintsEventController(NarrativeEventController):
         line = (
             ASK_APPEARANCE_RESPONSE
             if state.name == "ウズウズ"
-            else f"ところで，{state.name}の見た目はどんな感じだと思う？"
+            else f"ところで、{state.name}の見た目はどんな感じだと思う？"
         )
         return WorldEvent(
             event_id="ask_appearance",

@@ -240,7 +240,7 @@ TRAINSET = [
         user_action="うーん、どうしようかな",
         history="プーがお茶会で何をするか、参加者の様子を見ている。",
         interaction_mode="ordinary",
-        bot_response="ぼくも何もしないをするのが好きだから，ゆっくりでいいよ",
+        bot_response="ぼくも何もしないをするのが好きだから、ゆっくりでいいよ",
     ),
     example(
         current_situation=INITIAL_SITUATION,

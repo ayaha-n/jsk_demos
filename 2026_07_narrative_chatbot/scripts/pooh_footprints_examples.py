@@ -65,7 +65,7 @@ FOOTPRINTS_SITUATION = NarrativeSituation(
 )
 
 _TURN1_DISCOVERY_RESPONSE = (
-    "まさにそれを自分にきいているんだ。ほら，あの茂みの周りを見て。足跡があるんだ。"
+    "まさにそれを自分にきいているんだ。ほら、あの茂みの周りを見て。足跡があるんだ。"
 )
 _TURN2_NAMING_RESPONSE = fixed_utterance("footprints.naming")
 
@@ -98,7 +98,7 @@ FOOTPRINTS_TRAINSET = [
         interaction_mode="narrative",
         current_scene="1",
         bot_response=(
-            "ねえ，聞いてよ。ぼくはいま，あの茂みのまわりの足あとの正体を考えているんだ。"
+            "ねえ、聞いてよ。ぼくはいま、あの茂みのまわりの足あとの正体を考えているんだ。"
         ),
     ),
     # 正体が何の生き物かという推測（呼び名の提案ではない）：まだ名付けの
@@ -303,7 +303,7 @@ FOOTPRINTS_TRAINSET = [
         situation_update=SituationUpdate(
             add_events=[START_FOLLOWING_EVENT],
         ),
-        bot_response="よし，追いかけてみよう。",
+        bot_response="よし、追いかけてみよう。",
     ),
     # 参加者が時限イベントより先に２匹分になったことに気づく：narrative_actions
     # で後続の時限second_animalが重複発火しないようにする。
@@ -319,7 +319,7 @@ FOOTPRINTS_TRAINSET = [
         history=(
             "Turn 5\n参加者の生入力: 追いかけてみようよ\n応答モード: narrative\n"
             "参考場面ID: 4\n物語アクション: ['started_following']\n"
-            "プーの応答: よし，追いかけてみよう。"
+            "プーの応答: よし、追いかけてみよう。"
         ),
         interaction_mode="narrative",
         current_scene="5",
@@ -390,7 +390,7 @@ FOOTPRINTS_TRAINSET = [
         history=(
             "Turn 7\n世界イベント: プーが参加者に、何か気づかないかと問いかけた。"
             "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 7a\n"
-            "物語アクション: []\nプーの応答: ねえ，きみ，なにか気づかない？"
+            "物語アクション: []\nプーの応答: ねえ、きみ、なにか気づかない？"
         ),
         interaction_mode="narrative",
         current_scene="7a",
@@ -423,7 +423,7 @@ FOOTPRINTS_TRAINSET = [
         history=(
             "Turn 7\n世界イベント: プーが参加者に、何か気づかないかと問いかけた。"
             "これは既に起きた出来事。\n応答モード: narrative\n参考場面ID: 7a\n"
-            "物語アクション: []\nプーの応答: ねえ，きみ，なにか気づかない？"
+            "物語アクション: []\nプーの応答: ねえ、きみ、なにか気づかない？"
         ),
         interaction_mode="narrative",
         current_scene="7a",
@@ -464,7 +464,7 @@ FOOTPRINTS_TRAINSET = [
             remove_unresolved=[IDENTITY_UNRESOLVED],
             add_events=["実はウズウズの足跡は自分たちの足跡だったとわかった"],
         ),
-        bot_response="ああ，わかった，ボクはバカだから，だまされたんだね。ほんとに頭の悪いクマだ。",
+        bot_response="ああ、わかった、ボクはバカだから、だまされたんだね。ほんとに頭の悪いクマだ。",
     ),
     # reveal_hint（固定セリフ、具体的な手がかりを出す）のあと、参加者が
     # それに納得して「自分たちの足あとかも」と応じる場合：はっきりと
@@ -520,12 +520,12 @@ FOOTPRINTS_TRAINSET = [
         history=(
             "Turn 8\n参加者の生入力: あれ、これって、もしかして僕たちの足跡じゃない？\n"
             "応答モード: narrative\n参考場面ID: 8\n物語アクション: []\n"
-            "プーの応答: ああ，わかった，ボクはバカだから，だまされたんだね。"
+            "プーの応答: ああ、わかった、ボクはバカだから、だまされたんだね。"
             "ほんとに頭の悪いクマだ。"
         ),
         interaction_mode="narrative",
         current_scene="8",
-        bot_response="そう？とにかく，もうおやつのじかんだね。これで解決だね。ほかにも、なにか話したいことある？",
+        bot_response="そう？とにかく、もうおやつのじかんだね。これで解決だね。ほかにも、なにか話したいことある？",
         question_kind="participant_own",
     ),
 ]
