@@ -1081,7 +1081,7 @@ def main() -> int:
         if cloudflared is None:
             web.run_app(app, host=args.host, port=args.port, print=None)
         else:
-            asyncio.run(serve_public(app, args.host, args.port, cloudflared, suffix))
+            asyncio.run(serve_public(app, args.host, args.port, cloudflared, suffix, args.scenario))
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -1095,7 +1095,8 @@ def main() -> int:
 
 
 async def serve_public(
-    app: web.Application, host: str, port: int, cloudflared: str, suffix: str
+    app: web.Application, host: str, port: int, cloudflared: str, suffix: str,
+    scenario: str = "",
 ) -> None:
     """Serve as usual, plus a public HTTPS address through a quick tunnel.
 
@@ -1110,6 +1111,7 @@ async def serve_public(
     runner = web.AppRunner(app)
     await runner.setup()
     tunnel = QuickTunnel(cloudflared)
+    link = None
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
@@ -1121,6 +1123,7 @@ async def serve_public(
         url = await tunnel.start(app[PUBLIC_PORT_KEY])
         # The key is printed here only: not logged or written anywhere.
         print(f"公開URL: {url}{suffix}")
+        link = await point_fixed_link(url, suffix, scenario)
         print("終了すると公開も止まります（Ctrl+C）。")
         stopped = asyncio.ensure_future(stop.wait())
         tunnel_ended = asyncio.ensure_future(tunnel.wait())
@@ -1134,8 +1137,48 @@ async def serve_public(
                 "公開URLは使えないので、サーバも止めます。"
             )
     finally:
+        if link is not None:
+            await withdraw_fixed_link(*link)
         await tunnel.stop()
         await runner.cleanup()
+
+
+async def point_fixed_link(url: str, suffix: str, scenario: str) -> tuple | None:
+    """Point this scenario's fixed link (scripts/public_link.py) at this
+    tunnel, if it is set up and CLOUDFLARE_API_TOKEN is given; returns what
+    withdrawing it needs. A failure only warns: the tunnel's own address
+    still works."""
+    import public_link
+
+    config = public_link.load_config()
+    if config is None or not scenario:
+        return None
+    token = os.getenv(public_link.TOKEN_ENV, "")
+    if not token:
+        print(f"固定リンクは使いません（{public_link.TOKEN_ENV} が未設定）。")
+        return None
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, public_link.publish, url, scenario, config, token)
+    except Exception as exc:
+        print(f"警告: 固定リンクを更新できませんでした: {exc}", file=sys.stderr)
+        return None
+    print(f"固定リンク: {public_link.scenario_link(config, scenario)}{suffix}"
+          "（切り替わるまで1分ほどかかることがあります）")
+    if not os.getenv("POOH_WEB_TOKEN"):
+        print("注意: POOH_WEB_TOKEN が未設定なので、キー（?token=）は起動ごとに変わります。"
+              "固定リンクを配るなら POOH_WEB_TOKEN を決めておいてください。")
+    return scenario, config, token
+
+
+async def withdraw_fixed_link(scenario: str, config: dict, token: str) -> None:
+    import public_link
+
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, public_link.withdraw, scenario, config, token)
+    except Exception as exc:
+        print(f"警告: 固定リンクの行き先を消せませんでした: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

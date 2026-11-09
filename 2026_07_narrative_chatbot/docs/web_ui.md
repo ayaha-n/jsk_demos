@@ -38,6 +38,30 @@ python scripts/web_server.py --scenario eeyore_birthday --storybook-eink --publi
   chmod +x .tools/cloudflared
   ```
 
+### 固定リンク（任意）
+
+quick tunnel のアドレスは起動ごとに変わる。固定のリンクを配りたいときは、Cloudflare Workers（無料）に転送役を置く（`scripts/public_link.py`）。リンクはシナリオごとに `https://<名前>.<サブドメイン>.workers.dev/<シナリオ>/?token=<キー>`（例: `…/footprints/?token=…`、`…/eeyore_birthday/?token=…`）で、名前もサブドメインも自分で決めるので、個人のアカウント名は出ない。開くと、そのシナリオで動いているサーバのトンネルへ、残りのパスと `?token=` を付けたまま転送する。
+
+- `web_server.py --public` は、トンネルが立ち上がると自分のシナリオの行き先を Workers KV に書き、`固定リンク: …` を表示する。止めるとその行き先を消し、そのリンクは「いまは公開していません」と出す。シナリオごとに別のサーバ（`--port` を分ける）を同時に動かしてよい。
+- Workers KV は値を1分ほどキャッシュするので、起動し直した直後は、少しのあいだ前のアドレスに転送されることがある。
+- キーも固定する（`POOH_WEB_TOKEN` を決めておく）。でないと、リンクの `?token=` が起動ごとに変わる。
+- 設定（アカウントID・KV の ID・リンク）は `.tools/public_link.json`（git 対象外）、API トークンは環境変数 `CLOUDFLARE_API_TOKEN` だけに置く。トークンを渡さずに起動すれば、固定リンクは使わず、これまでどおり。
+
+一度だけの準備:
+
+1. [Cloudflare](https://dash.cloudflare.com/sign-up) に無料アカウントを作る。
+2. 「Workers & Pages」を開き、`workers.dev` のサブドメインを決める（リンクに出るので、個人名でないものにする）。同じ画面の右側にアカウント ID が出る。
+3. 「My Profile」→「API Tokens」→「Create Token」→「Create Custom Token」で、権限を「Account / Workers Scripts / Edit」と「Account / Workers KV Storage / Edit」の2つにしたトークンを作る。
+4. このディレクトリで:
+
+   ```bash
+   export CLOUDFLARE_API_TOKEN=<トークン>
+   python scripts/public_link.py setup --account-id <アカウントID> --name pooh
+   # 固定リンク: https://pooh.<サブドメイン>.workers.dev/<シナリオ>/?token=<POOH_WEB_TOKEN>
+   ```
+
+以後は `CLOUDFLARE_API_TOKEN` と `POOH_WEB_TOKEN` を設定して `--public` で起動するだけ。`python scripts/public_link.py off <シナリオ>` で、サーバを止めずにそのシナリオの行き先だけ消せる。
+
 ### 公開するときの注意
 
 - URL とキーを知っている人は、この PC の OpenAI API キーで会話できる。キーは参加者にだけ渡し、OpenAI の管理画面で利用上限を決めておく。
