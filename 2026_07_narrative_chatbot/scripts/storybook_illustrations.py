@@ -57,6 +57,11 @@ class SceneSummary:
     # answered at all. Not answered, a bubble beat's picture keeps the
     # bundled one (an unknown "?") instead of inventing what is inside.
     answered: bool = True
+    # What was imagined, alone (no bear, reader or scene): what a bubble
+    # beat draws inside its bubble. The whole scene description once went
+    # in instead, and a second, realistic bear with glowing eyes appeared
+    # in the bubble (logs/session_20261109T133614...).
+    imagined: str = ""
 
 
 def previous_illustration(config, turns):
@@ -286,7 +291,7 @@ def scene_cache_key(config, beat_id, turns):
         "model": os.getenv("STORYBOOK_SCENE_MODEL", SCENE_MODEL),
         "fixed_beats": sorted(storybook.FIXED_ILLUSTRATION_BEATS),
         "closing_fallback_beats": sorted(storybook.CLOSING_FALLBACK_BEATS),
-        "summary_policy": 6,
+        "summary_policy": 7,
     }
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
@@ -373,6 +378,10 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                 "when elicits_description=true, whether that question was actually "
                 "answered anywhere in current_scene, by the participant or by the "
                 "bear's own guess; always true when elicits_description=false), "
+                "imagined (when elicits_description=true and answered: the answered "
+                "thing alone as it was described -- shape, size, colors, fur or "
+                "feathers, pattern -- in Japanese, without the bear, the reader, "
+                "footprints or any scene; otherwise an empty string), "
                 "and balloon_color. "
                 "balloon_color is null unless a balloon is actually present in the final "
                 "scene. Otherwise use its agreed color in Japanese, or 未指定 when no "
@@ -385,9 +394,10 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
                                  "description": {"type": "string"},
                                  "illustration_needed": {"type": "boolean"},
                                  "answered": {"type": "boolean"},
+                                 "imagined": {"type": "string"},
                                  "balloon_color": {"type": ["string", "null"]}},
                                  "required": ["description", "illustration_needed", "answered",
-                                              "balloon_color"],
+                                              "imagined", "balloon_color"],
                                  "additionalProperties": False}}},
             max_output_tokens=1000,
             store=False,
@@ -403,8 +413,10 @@ def summarize_scene(config: storybook.StoryConfig, beat_id: str,
     if balloon_color is not None and (not isinstance(balloon_color, str) or not balloon_color.strip()):
         raise ValueError("風船の色の要約を取得できませんでした")
     answered = result.get("answered")
+    imagined = result.get("imagined")
     return SceneSummary(reference_descriptions(description.strip()), needed, balloon_color,
-                        answered if isinstance(answered, bool) else True)
+                        answered if isinstance(answered, bool) else True,
+                        imagined.strip() if isinstance(imagined, str) else "")
 
 
 # Holding several props and a touching hand, the bear tends to grow an extra arm.
@@ -582,7 +594,8 @@ class SessionIllustrations:
                     and isinstance(cached.get("illustration_needed"), bool)
                     and isinstance(cached.get("description"), str) and cached["description"]):
                 summary = SceneSummary(cached["description"], cached["illustration_needed"],
-                                       cached.get("balloon_color"), cached.get("answered", True))
+                                       cached.get("balloon_color"), cached.get("answered", True),
+                                       cached.get("imagined", ""))
             else:
                 summary = self.summarize(config, beat_id, turns)
             if isinstance(summary, str):
@@ -614,6 +627,7 @@ class SessionIllustrations:
                 "balloon_color": summary.balloon_color,
                 "illustration_needed": summary.illustration_needed,
                 "answered": summary.answered,
+                "imagined": summary.imagined,
                 "image_prompt": prompt,
                 "reference_illustration": reference_name,
             }
@@ -626,7 +640,7 @@ class SessionIllustrations:
                           if beat_id in storybook.CLOSING_FALLBACK_BEATS else "挿絵を省略します")
                 print(f"[絵本] {beat_id}: 直前と同じ内容のため{action}", file=sys.stderr)
                 return
-            if config.beats[beat_id].bubble_bases and not summary.answered:
+            if config.beats[beat_id].bubble_bases and not (summary.answered and summary.imagined):
                 # Nobody said what it looks like: no made-up creature in the
                 # bubble; the bundled picture with its "?" says just that
                 # (storybook.StoryConfig.illustration_name reads use_bundled).
@@ -641,7 +655,9 @@ class SessionIllustrations:
                 return
             phase = "image_generation"
             if config.beats[beat_id].bubble_bases:
-                self._draw_bubble_scene(config, beat_id, description, storybook.ILLUSTRATION_ROOT / name, name)
+                # Only what was imagined goes in the bubble, never the scene.
+                self._draw_bubble_scene(config, beat_id, summary.imagined,
+                                        storybook.ILLUSTRATION_ROOT / name, name)
             elif reference_name and self._use_default_image_generator:
                 reference = storybook.find_illustration(reference_name)
                 if reference is None:

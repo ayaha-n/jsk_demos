@@ -145,6 +145,42 @@ class UnansweredBubbleTest(unittest.TestCase):
                            *config.beats["ask_appearance"].illustration_variants])
 
 
+    def run_bubble(self, summary):
+        import tempfile
+        from dataclasses import replace
+        from unittest import mock
+
+        config = replace(storybook.load_story_config("footprints"), session_id="imagined-test")
+        bubbles = []
+        illustrations = SessionIllustrations(summarize=lambda *args: summary,
+                                             generate_image=lambda *args, **kwargs: None)
+        name = storybook.generated_illustration_name(config.scenario, config.session_id, "ask_appearance")
+        turns = [StoryTurn("session_open", "やあ。"),
+                 StoryTurn("world_event", "見た目はどんな感じだと思う？", world_event_id="ask_appearance")]
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(storybook, "ILLUSTRATION_ROOT", Path(tmp)), \
+                mock.patch.object(illustrations, "_draw_bubble_scene",
+                                  lambda config, beat, text, *rest: bubbles.append(text)):
+            try:
+                illustrations._generate(config, "ask_appearance", turns, name, False)
+            finally:
+                illustrations.close()
+        return bubbles
+
+    def test_only_what_was_imagined_goes_in_the_bubble(self):
+        # logs/session_20261109T133614...: the whole scene went into the
+        # bubble, and a second, realistic bear with glowing eyes was drawn.
+        from storybook_illustrations import SceneSummary
+
+        scene = "まん丸いウズウズ。近くで参照画像のクマが驚いた表情で足跡を見つめている。"
+        drawn = self.run_bubble(SceneSummary(scene, True, None, True, "ふわふわの茶色い毛のまん丸い生き物"))
+        self.assertEqual(drawn, ["ふわふわの茶色い毛のまん丸い生き物"])
+        # Answered, but nothing to draw from: the bundled picture, not the scene.
+        self.assertEqual(self.run_bubble(SceneSummary(scene, True, None, True, "")), [])
+        prompt = storybook.load_story_config("footprints").beats["ask_appearance"].bubble_prompt
+        self.assertIn("no bear", prompt)
+
+
 class DetailBeatTest(unittest.TestCase):
     def test_the_conversation_settling_the_look_opens_its_scene(self):
         # logs/session_20261106T210612...: Pooh asked "どんな生き物だと思う？"
