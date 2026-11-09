@@ -109,7 +109,7 @@ A scenario's own content lives entirely in its own files; `scripts/pooh_narrativ
 | Participants | type in a browser: this PC, or anyone with the link when published | speak to the robot |
 | Menu switches | publish, crowdsourcing (passphrase, minutes until the end button), illustrations, TTS server, tablet | how a story starts (on the robot's cue every time, or once at launch), other scenarios to offer, keep going after the wrap-up, tablet, illustrations, where the bridge runs |
 
-For the robot, start the ROS-side bridge first, in a terminal without the `.venv`. pooh_body's `pooh_operator.launch use_narrative:=true` starts the bridge and the chatbot itself; do not start the robot from the menu as well then (the menu warns if a chatbot on the robot is already running).
+For the robot, start the ROS-side bridge first, in a terminal without the `.venv`. pooh_body's `pooh_operator.launch use_narrative:=true` starts the bridge and the chatbot itself; the menu then refuses to start the robot, as a chatbot on the robot is already running.
 
 ```bash
 source /opt/ros/noetic/setup.bash && source ~/catkin_ws/devel/setup.bash

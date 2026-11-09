@@ -19,7 +19,8 @@ python scripts/run.py
 - 合言葉は公開リポジトリに入れないよう、共有の既定ではなく `.tools/run.json`（コミットしない）に覚える。
 - ロボットの既定は pooh_body の `pooh_narrative.launch` と同じ（ナラティブモードに入るたびに始める、締めのあと黙っていても
   終えない、挿絵を生成する、タブレットには書かない）。`pooh_operator.launch use_narrative:=true` はブリッジとチャットボットを
-  自分で起動するので、そのときはここでロボットを起動しない（ロボットにつながるチャットボットがもう動いていれば注意を出す）。
+  自分で起動するので、そのときはここからロボットを起動できない（ロボットにつながるチャットボット
+  `pooh_narrative_dspy.py --ros-relay` がもう動いていれば、起動せずに理由を出して終わる）。
   ここでロボットを起動するのは、`use_narrative` なしで launch したとき（ブリッジ `narrative_motion_bridge.py` は自分で起動する）。
 - `--dry-run` で、既定の設定でのコマンドを表示するだけにできる（`--target robot` でロボット）。
 

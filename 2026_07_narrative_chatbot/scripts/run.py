@@ -48,7 +48,7 @@ InUse = Callable[[int, str], bool]
 # and the chatbot itself; starting the robot from here as well would put two
 # chatbots on one bridge.
 ROBOT_NOTE = ("pooh_operator.launch を use_narrative:=true で起動しているなら、チャットボットは"
-              "もう動いているので、ここでは起動しないでください（2つになります）。")
+              "もう動いています。ロボットにつながるチャットボットが動いていれば、ここからは起動しません。")
 
 
 def load_settings(defaults_path: Path = DEFAULTS_PATH, local_path: Path = LOCAL_PATH) -> Settings:
@@ -145,17 +145,21 @@ def running_robot_chatbots() -> list[int]:
     return found
 
 
+def robot_refusal(running: Callable[[], list[int]] = running_robot_chatbots) -> str | None:
+    """Why the robot must not be started from here now, if it must not."""
+    others = running()
+    if not others:
+        return None
+    return ("ロボットにつながるチャットボットがもう動いています（PID " + ", ".join(map(str, others))
+            + "）。pooh_operator.launch を use_narrative:=true で起動していませんか。"
+            "2つ動かすことはできないので、ここからは起動しません。")
+
+
 def warnings_for(settings: Settings, crowd_scenarios: frozenset[str],
-                 in_use: InUse = port_in_use,
-                 running: Callable[[], list[int]] = running_robot_chatbots) -> list[str]:
+                 in_use: InUse = port_in_use) -> list[str]:
     found = []
     if settings["target"] == "robot":
         robot = settings["robot"]
-        others = running()
-        if others:
-            found.append("ロボットにつながるチャットボットがもう動いています（PID "
-                         + ", ".join(map(str, others)) + "）。pooh_operator.launch の use_narrative:=true "
-                         "で起動していませんか。ここで起動すると2つになります。")
         if not in_use(int(robot["ros_relay_port"]), str(robot["ros_relay_host"])):
             found.append(f"ブリッジ narrative_motion_bridge.py（{robot['ros_relay_host']}:"
                          f"{robot['ros_relay_port']}）に接続できません。先に起動してください"
@@ -338,6 +342,11 @@ def main() -> int:
         if not curses.wrapper(run_menu, settings, options, crowd_scenarios, sorted(SCENARIOS)):
             print("起動しませんでした。")
             return 0
+    if settings["target"] == "robot" and not args.dry_run:
+        refusal = robot_refusal()
+        if refusal:
+            print("起動しません: " + refusal, file=sys.stderr)
+            return 1
     script, argv = build_command(settings, options, crowd_scenarios)
     print(f"python {script.relative_to(PROJECT_ROOT)} " + " ".join(shlex.quote(a) for a in argv))
     if settings["target"] == "robot":

@@ -95,13 +95,13 @@ class LaunchTest(unittest.TestCase):
         quiet = launch.warnings_for(self.settings(passphrase="x", tts=False), self.crowd,
                                     in_use=lambda port, host: False)
         self.assertEqual(quiet, [])
-        robot = launch.warnings_for(self.settings("robot"), self.crowd, in_use=lambda port, host: False,
-                                    running=lambda: [])
+        robot = launch.warnings_for(self.settings("robot"), self.crowd, in_use=lambda port, host: False)
         self.assertEqual(len(robot), 1)  # the bridge does not answer
-        twice = launch.warnings_for(self.settings("robot"), self.crowd, in_use=lambda port, host: True,
-                                    running=lambda: [1234])
-        self.assertEqual(len(twice), 1)
-        self.assertIn("1234", twice[0])  # a chatbot on the robot is already running
+
+    def test_the_robot_is_not_started_twice(self):
+        self.assertIsNone(launch.robot_refusal(running=lambda: []))
+        refusal = launch.robot_refusal(running=lambda: [1234])
+        self.assertIn("1234", refusal)  # e.g. pooh_operator.launch use_narrative:=true
 
 
 DEFAULTS_TEXT = launch.DEFAULTS_PATH.read_text(encoding="utf-8")
