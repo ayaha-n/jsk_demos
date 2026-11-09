@@ -170,6 +170,27 @@ button.secondary {
 
 button:disabled, input:disabled { opacity: 0.5; cursor: not-allowed; }
 
+#start-button {
+  display: block;
+  margin: 12px auto;
+  padding: 12px 36px;
+  max-width: min(90%, 360px);
+  font-size: 1.1rem;
+}
+#start-button[hidden] { display: none; }
+/* Only promises sound when a line can actually be heard. A block child
+   naturally wraps onto its own line below "はじめる", without needing a
+   separate wrapper around that text. */
+#start-button-sound-badge {
+  display: none;
+  margin-top: 4px;
+  font-size: 0.65em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  opacity: 0.9;
+}
+body[data-tts="true"] #start-button-sound-badge { display: block; }
+
 dialog {
   width: min(820px, calc(100% - 24px));
   max-height: calc(100% - 24px);
@@ -295,3 +316,58 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
   color: #bbb;
   font-size: 1.6cqw;
 }
+
+/* A compact shared presence above the conversation, including on phones. */
+#bear-stage {
+  flex: 0 0 auto;
+  position: relative;
+  background: radial-gradient(ellipse at 50% 75%, #f2dfb5, var(--bg) 72%);
+  border-bottom: 1px solid var(--border);
+}
+#bear-canvas {
+  display: block;
+  width: 100%;
+  height: clamp(160px, 30dvh, 300px);
+  cursor: grab;
+  touch-action: pan-y;
+}
+#bear-canvas:active { cursor: grabbing; }
+#bear-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+#log { min-height: 0; }
+@media (max-height: 600px) {
+  #bear-canvas { height: 120px; }
+}
+
+#bear-canvas { background: radial-gradient(ellipse 100px 12px at 50% 89%, #a47e4533, transparent); }
+
+#bear-stage[hidden] { display: none; }
+
+/* Study completion is opt-in; the regular conversation keeps its controls. */
+#study-goal-notice {
+  padding: 10px 16px;
+  background: var(--pooh);
+  border-bottom: 1px solid var(--pooh-border);
+}
+#end-button.goal-ready {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--pooh);
+  font-weight: 700;
+}
+#study-completion { padding-top: 12px; border-top: 1px solid var(--border); margin-top: 12px; }
+#study-completion p { margin: 4px 0 10px; }
+#study-code { display: block; width: 100%; margin: 6px 0 10px; font-family: monospace; }
+#study-completion-status { min-height: 1.6em; margin-top: 8px; color: var(--muted); font-size: .85rem; }
+.study-book-end { flex: none; height: 1px; width: 100%; }
+#study-goal-notice[hidden], #study-completion[hidden], #study-code-panel[hidden] { display: none; }
+body[data-crowdsourcing="true"] #storybook-viewer { max-height: 50dvh; }
+/* A restart would silently orphan the current completion code (a new
+   session gets its own), so crowdsourcing keeps participants on one run. */
+body[data-crowdsourcing="true"] #restart-button { display: none; }
+
+#bear-canvas[hidden] { display: none; }
+.bear-render-error { padding: 12px 16px; color: var(--muted); font-size: .9rem; }
+.bear-render-error details { margin-top: 8px; color: var(--text); }
+.bear-render-error summary { cursor: pointer; }
+.bear-render-error pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }

@@ -4,9 +4,11 @@
 const SESSION_KEY = "pooh-session-id";
 const TOKEN_KEY = "pooh-access-token";
 const MAX_RECONNECT_DELAY_MS = 10000;
+const crowd = window.PoohCrowdsourcing;
 
 const log = document.getElementById("log");
 const statusLine = document.getElementById("status");
+const startButton = document.getElementById("start-button");
 const form = document.getElementById("input-form");
 const inputText = document.getElementById("input-text");
 const sendButton = document.getElementById("send-button");
@@ -44,8 +46,15 @@ let endedSessionId = null;  // the session whose book 絵本を見る opens
 // participant has closed it.
 let storybookOfferedFor = null;
 let busy = false;
+let touchSupported = false;
 let reconnectDelay = 1000;
 let reconnectTimer = null;
+// A brand-new session's opening line arrives in the same "transcript" message
+// as a reconnect's replayed history, which must stay silent -- this tells
+// handleMessage's "transcript" case that, this one time, it is actually the
+// first live content this browser has ever shown for this session, so it
+// should autoplay like a freshly arriving "output" would.
+let justCreatedSession = false;
 
 function storageGet(key) {
   try { return sessionStorage.getItem(key); } catch { return null; }
@@ -68,12 +77,29 @@ function authenticatedHeaders() {
   return { "X-Pooh-Token": accessToken() };
 }
 
+function isSpeaking() {
+  // Mirrors the robot's own ~speaking: busy ends once a reply is ready, but
+  // like narrative_motion_bridge.py waiting out ~speaking before treating a
+  // turn as over, the UI should not feel free to race ahead of Pooh's own
+  // voice while it is still reading a line out. A line stuck on the
+  // autoplay policy is not actually making any sound, so it does not count.
+  return audioQueue.length > 0 && !audioBlocked;
+}
+
 function updateControls() {
   const connected = socket !== null && socket.readyState === WebSocket.OPEN;
-  const canType = connected && !ended && !busy;
+  const speaking = isSpeaking();
+  const bearStage = document.getElementById("bear-stage");
+  if (bearStage) bearStage.dataset.touchEnabled = String(connected && !ended);
+  const canType = connected && !ended && !busy && !speaking;
   inputText.disabled = !canType;
   sendButton.disabled = !canType;
-  endButton.disabled = !connected || ended || busy;
+  endButton.disabled = !connected || ended || busy || speaking || Boolean(crowd && !crowd.goalReached);
+  if (crowd) {
+    endButton.textContent = "終了して絵本を見る";
+    endButton.classList.toggle("goal-ready", crowd.goalReached && !ended);
+    crowd.updateControls({ ended });
+  }
   if (ended) statusLine.textContent = "終了しました。「はじめから」で新しく開始できます。";
   else if (!connected) statusLine.textContent = "接続しています…";
   else if (busy) statusLine.textContent = "プーが考えています…";
@@ -128,7 +154,91 @@ function detailsText(output) {
   return lines.join("\n");
 }
 
-function appendOutput(output) {
+// 50ms of silent 8-bit PCM, used only to unlock audio playback (see
+// unlockAudio below) -- a real decodable clip is needed for the browser to
+// count it as "played" for that purpose, an empty <audio> is not enough.
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA" +
+  "gICA";
+
+// A single reusable <audio> element, queued so lines play one at a time in
+// order, never overlapping (mirrors the robot's own synth/play queue).
+let audioElement = null;
+const audioQueue = [];
+// play() reaches the browser through a WebSocket push, outside the call
+// stack of whatever click/submit triggered it, so autoplay policies (most
+// strictly on Safari/iOS) can reject it even right after the participant
+// typed something. Rather than dropping that line, keep it queued and let
+// any later tap retry it -- see the document click listener below, which
+// calls play() synchronously inside that gesture so it is allowed.
+let audioBlocked = false;
+
+// Created once, by whichever of playNextAudio/unlockAudio runs first, so the
+// ended/error listener below (which advances the queue) is never skipped --
+// it used to live inline in playNextAudio's own "if (!audioElement)", which
+// silently went unregistered when unlockAudio had already created the
+// element first, leaving every line after the first one stuck unplayed.
+function ensureAudioElement() {
+  if (audioElement) return audioElement;
+  audioElement = new Audio();
+  const advance = () => {
+    audioQueue.shift();
+    audioBlocked = false;
+    playNextAudio();
+    updateControls();
+  };
+  audioElement.addEventListener("ended", advance);
+  audioElement.addEventListener("error", advance);
+  return audioElement;
+}
+
+function playNextAudio() {
+  const url = audioQueue[0];
+  if (!url) return;
+  const audio = ensureAudioElement();
+  audio.src = url;
+  audio.play().then(() => {
+    audioBlocked = false;
+    updateControls();
+  }).catch(() => {
+    audioBlocked = true;
+    updateControls();
+  });
+}
+
+function queueAudio(url) {
+  audioQueue.push(url);
+  if (audioQueue.length === 1) playNextAudio();
+  updateControls();
+}
+
+document.addEventListener("click", () => {
+  if (audioBlocked) playNextAudio();
+}, true);
+
+// Called synchronously from the "はじめる" button's own click handler: a
+// real play() of a decodable (if silent) clip there satisfies browsers that
+// require the gesture and the call to be the same event, so the opening
+// line's actual audio_url -- which only arrives after the session-creation
+// round trip, well outside that gesture -- is allowed to autoplay too.
+function unlockAudio() {
+  const audio = ensureAudioElement();
+  audio.src = SILENT_WAV;
+  audio.play().then(() => {
+    // A real line can start (and change .src) before this resolves, since
+    // it only needs to win the race against the session-creation round
+    // trip, not against this 50ms clip; pausing then would cut it off.
+    if (audio.src === SILENT_WAV) audio.pause();
+  }).catch(() => {});
+}
+
+function appendOutput(output, { autoplay = false } = {}) {
+  // Sensor-style observations belong to the book, not to the spoken chat.
+  if (output.source === "observed") return;
   const node = document.createElement("div");
   node.className = "message pooh";
   const speaker = document.createElement("span");
@@ -142,6 +252,9 @@ function appendOutput(output) {
   node.append(speaker, body, details);
   log.appendChild(node);
   scrollToBottom();
+  // Only a freshly arriving line is spoken; replaying a reconnect's past
+  // transcript must not suddenly play every past line's audio at once.
+  if (autoplay && output.audio_url) queueAudio(output.audio_url);
 }
 
 function formatLogTime(value) {
@@ -315,16 +428,24 @@ async function refreshLogList() {
   }
 }
 
-function renderMessage(message) {
-  if (message.type === "output") appendOutput(message.output);
+function renderMessage(message, options) {
+  if (message.type === "output") appendOutput(message.output, options);
   else if (message.type === "user_input") appendUser(message.text);
 }
 
 function handleMessage(message) {
   switch (message.type) {
-    case "transcript":
+    case "transcript": {
+      touchSupported = message.touch_supported === true;
+      crowd?.setState(message.study, sessionId);
       clearLog();
-      message.messages.forEach(renderMessage);
+      // A genuine reconnect's replayed history must stay silent, but a
+      // brand-new session's opening line also arrives this way (the very
+      // first "transcript", sent the moment this socket connects) and
+      // should autoplay just like any other freshly arriving line.
+      const autoplay = justCreatedSession;
+      justCreatedSession = false;
+      message.messages.forEach((entry) => renderMessage(entry, { autoplay }));
       ended = message.ended;
       busy = message.busy;
       if (ended) {
@@ -336,12 +457,19 @@ function handleMessage(message) {
         offerStorybook(sessionId);
       }
       break;
+    }
     case "output":
     case "user_input":
-      renderMessage(message);
+      renderMessage(message, { autoplay: true });
       break;
     case "status":
       busy = message.busy;
+      break;
+    case "study_status":
+      crowd?.setState(message.study, sessionId);
+      break;
+    case "touch_recorded":
+      document.dispatchEvent(new CustomEvent("pooh-touch-recorded", { detail: { part: message.part } }));
       break;
     case "ended":
       ended = true;
@@ -356,6 +484,7 @@ function handleMessage(message) {
       appendNotice(message.message, true);
       break;
     case "expired":
+      if (crowd && sessionId) crowd.restoreReceipt(sessionId);
       storageSet(SESSION_KEY, null);
       sessionId = null;
       ended = true;
@@ -366,6 +495,7 @@ function handleMessage(message) {
 }
 
 function connect() {
+  touchSupported = false;
   clearTimeout(reconnectTimer);
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const token = encodeURIComponent(accessToken());
@@ -388,6 +518,11 @@ function connect() {
 }
 
 async function startNewSession() {
+  crowd?.reset();
+  endedSessionId = null;
+  storybookOfferedFor = null;
+  ownStorybookSnapshot = "";
+  if (storybookDialog.open) storybookDialog.close();
   clearTimeout(reconnectTimer);
   if (socket !== null) {
     const old = socket;
@@ -397,6 +532,11 @@ async function startNewSession() {
   clearLog();
   ended = false;
   busy = false;
+  // A restart must not leave the new session waiting on the previous one's
+  // still-playing or still-queued line.
+  if (audioElement) audioElement.pause();
+  audioQueue.length = 0;
+  audioBlocked = false;
   storybookButton.hidden = true;
   sessionId = null;
   storageSet(SESSION_KEY, null);
@@ -420,6 +560,7 @@ async function startNewSession() {
   }
   sessionId = body.session_id;
   storageSet(SESSION_KEY, sessionId);
+  justCreatedSession = true;
   connect();
 }
 
@@ -431,8 +572,18 @@ form.addEventListener("submit", (event) => {
   inputText.value = "";
 });
 
+// Independent of text submission and busy: a touch never requests a reply.
+document.addEventListener("pooh-touch", (event) => {
+  if (!socket || socket.readyState !== WebSocket.OPEN || ended) return;
+  if (!touchSupported) {
+    appendNotice("タップの記録には、Webサーバを再起動してから画面を再読み込みしてください。", true);
+    return;
+  }
+  socket.send(JSON.stringify({ type: "touch", part: event.detail.part }));
+});
+
 endButton.addEventListener("click", () => {
-  if (socket !== null && !ended && confirm("本当に終了しますか？")) {
+  if (!endButton.disabled && socket !== null && !ended && confirm("本当に終了しますか？")) {
     socket.send(JSON.stringify({ type: "close" }));
   }
 });
@@ -477,9 +628,11 @@ async function loadOwnStorybook(quiet = false) {
   // The PDF in the orientation shown here.
   storybookPdf.href = `${base}.pdf?token=${token}&layout=${layout}`;
   if (!quiet) storybookStatus.textContent = "読み込んでいます…";
+  const requestedSessionId = endedSessionId;
   try {
     const response = await fetch(`${base}?layout=${layout}`, { headers: authenticatedHeaders() });
     const body = await response.json();
+    if (requestedSessionId !== endedSessionId) return;
     if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
     // A page with illustration set but no illustration_url yet is still
     // being drawn in the background (SessionIllustrations finishes after
@@ -497,6 +650,7 @@ async function loadOwnStorybook(quiet = false) {
       storybookProgress.max = illustrated.length;
       storybookProgress.value = ready;
       storybookProgress.hidden = false;
+      crowd?.pendingBook();
     } else {
       const snapshot = JSON.stringify(body);
       if (snapshot !== ownStorybookSnapshot || !quiet) {
@@ -506,6 +660,7 @@ async function loadOwnStorybook(quiet = false) {
       }
       storybookStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
       storybookProgress.hidden = true;
+      crowd?.bookReady(body, requestedSessionId);
     }
   } catch (error) {
     if (!quiet) storybookStatus.textContent = `絵本を読み込めませんでした: ${error.message}`;
@@ -542,6 +697,19 @@ logSelect.addEventListener("change", loadSelectedLog);
 logStorybookToggle.addEventListener("change", loadSelectedLog);
 logStorybookLayout.addEventListener("change", loadSelectedLog);
 
-sessionId = storageGet(SESSION_KEY);
-if (sessionId) connect();
-else startNewSession();
+startButton.addEventListener("click", () => {
+  startButton.hidden = true;
+  // Synchronous, inside this click: see unlockAudio's own comment.
+  unlockAudio();
+  startNewSession();
+});
+
+sessionId = storageGet(SESSION_KEY) || crowd?.savedSessionId || null;
+if (sessionId) {
+  connect();
+} else {
+  // Wait for a deliberate tap instead of auto-starting: the session (and so
+  // the opening line's audio) must not begin before unlockAudio() has run.
+  clearLog();
+  startButton.hidden = false;
+}

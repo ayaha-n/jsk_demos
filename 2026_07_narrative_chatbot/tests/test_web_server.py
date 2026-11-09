@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import requests
 from aiohttp import WSMsgType
 from aiohttp.test_utils import AioHTTPTestCase
 
@@ -46,6 +47,7 @@ class FakeSession:
     follow_up_pending: bool = False
     submit_delay: float = 0.0
     inputs: list[str] = field(default_factory=list)
+    observations: list[str] = field(default_factory=list)
     closed_reasons: list[str] = field(default_factory=list)
     active_calls: int = 0
     max_active_calls: int = 0
@@ -79,6 +81,14 @@ class FakeSession:
         if self.ended or self.due_at is None:
             return None
         return max(0.0, self.due_at - time.monotonic())
+
+    def observe(self, actions, with_speech=False):
+        self._enter()
+        try:
+            self.observations.extend(actions)
+            return FakeOutput("observed", "")
+        finally:
+            self._leave()
 
     def poll(self):
         self._enter()
@@ -141,6 +151,49 @@ class WebServerTests(AioHTTPTestCase):
             transcript = await self.receive_until(ws, "transcript")
         self.assertEqual(transcript["messages"][0]["output"]["motion"], {"arm": "right_hand_up"})
         self.assertFalse(transcript["ended"])
+        self.assertTrue(transcript["touch_supported"])
+
+    async def test_touch_records_observation_without_speech_or_busy_status(self):
+        session_id = await self.new_session()
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            await self.receive_until(ws, "transcript")
+            await ws.send_json({"type": "touch", "part": "おなか"})
+            message = await asyncio.wait_for(ws.receive_json(), timeout=2)
+            self.assertEqual(message["type"], "output")
+            self.assertEqual(message["output"]["source"], "observed")
+            self.assertEqual(message["output"]["bot_response"], "")
+            acknowledgement = await asyncio.wait_for(ws.receive_json(), timeout=2)
+            self.assertEqual(acknowledgement, {"type": "touch_recorded", "part": "おなか"})
+        session = self.sessions[session_id]
+        self.assertEqual(session.observations, ["参加者がプーのおなかに触れた"])
+        self.assertEqual(session.inputs, [])
+
+    async def test_touches_during_answer_are_recorded_in_order_without_another_reply(self):
+        session_id = await self.new_session()
+        session = self.sessions[session_id]
+        session.submit_delay = .1
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            await self.receive_until(ws, "transcript")
+            await ws.send_json({"type": "user_input", "text": "こんにちは"})
+            await self.receive_until(ws, "status")
+            await ws.send_json({"type": "touch", "part": "頭"})
+            await ws.send_json({"type": "touch", "part": "左足"})
+            answer = await self.receive_until(ws, "output")
+            self.assertEqual(answer["output"]["source"], "participant")
+            for _ in range(2):
+                observed = await self.receive_until(ws, "output")
+                self.assertEqual(observed["output"]["source"], "observed")
+        self.assertEqual(session.inputs, ["こんにちは"])
+        self.assertEqual(session.observations, ["参加者がプーの頭に触れた", "参加者がプーの左足に触れた"])
+        self.assertEqual(session.max_active_calls, 1)
+
+    async def test_invalid_and_after_end_touches_are_ignored(self):
+        session_id = await self.new_session()
+        entry = self.registry.get(session_id)
+        await self.registry.touch(entry, "存在しない部位")
+        entry.session.ended = True
+        await self.registry.touch(entry, "頭")
+        self.assertEqual(entry.session.observations, [])
 
     async def test_page_uses_scenario_title(self):
         response = await self.client.get("/")
@@ -155,6 +208,10 @@ class WebServerTests(AioHTTPTestCase):
             '<div class="scene-intro">テーブルの上には&lt;壺&gt;があります。</div>', body
         )
         self.assertNotIn("{{SCENE_INTRO}}", body)
+
+    async def test_response_details_toggle_is_host_pc_only(self):
+        body = await (await self.client.get("/")).text()
+        self.assertIn('class="toggle local-only-feature"', body)
 
     async def test_sessions_are_isolated(self):
         first = await self.new_session()
@@ -314,6 +371,83 @@ class WebServerTests(AioHTTPTestCase):
         self.assertEqual(response.status, 503)
 
 
+@dataclass
+class FakeTTS:
+    """Stands in for web_tts.TTSCache: no real HTTP calls."""
+
+    fail_next: bool = False
+    calls: list[str] = field(default_factory=list)
+    _wavs: dict[str, bytes] = field(default_factory=dict)
+
+    def get(self, key: str) -> bytes | None:
+        return self._wavs.get(key)
+
+    def synthesize(self, text: str):
+        self.calls.append(text)
+        if self.fail_next:
+            self.fail_next = False
+            raise requests.ConnectionError("tts server unreachable")
+        key = f"key-{len(self._wavs)}"
+        wav = f"wav:{text}".encode()
+        self._wavs[key] = wav
+        return key, wav
+
+
+class TTSTests(AioHTTPTestCase):
+    async def get_application(self):
+        self.tts = FakeTTS()
+
+        def factory(session_id: str) -> FakeSession:
+            return FakeSession(session_id)
+
+        return web_server.create_app(factory, max_sessions=3, tts=self.tts)
+
+    async def new_session(self) -> str:
+        response = await self.client.post("/api/sessions")
+        return (await response.json())["session_id"]
+
+    async def receive_until(self, ws, message_type: str, timeout: float = 2.0) -> dict:
+        while True:
+            message = await asyncio.wait_for(ws.receive_json(), timeout=timeout)
+            if message["type"] == message_type:
+                return message
+
+    async def test_output_carries_a_fetchable_audio_url(self):
+        session_id = await self.new_session()
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            transcript = await self.receive_until(ws, "transcript")
+            audio_url = transcript["messages"][0]["output"]["audio_url"]
+            self.assertIsNotNone(audio_url)
+            response = await self.client.get(audio_url)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(await response.read(), "wav:やあ".encode())
+
+    async def test_failed_synthesis_leaves_audio_url_empty_but_keeps_the_turn(self):
+        self.tts.fail_next = True
+        session_id = await self.new_session()
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            transcript = await self.receive_until(ws, "transcript")
+            self.assertIsNone(transcript["messages"][0]["output"]["audio_url"])
+
+    async def test_unknown_audio_key_is_not_found(self):
+        response = await self.client.get("/audio/does-not-exist.wav")
+        self.assertEqual(response.status, 404)
+
+
+class NoTTSTests(AioHTTPTestCase):
+    async def get_application(self):
+        return web_server.create_app(FakeSession, max_sessions=3)
+
+    async def test_output_has_no_audio_and_route_is_absent(self):
+        response = await self.client.post("/api/sessions")
+        session_id = (await response.json())["session_id"]
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            transcript = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+            self.assertIsNone(transcript["messages"][0]["output"]["audio_url"])
+        response = await self.client.get("/audio/anything.wav")
+        self.assertEqual(response.status, 404)
+
+
 class BindSecurityTests(unittest.TestCase):
     def test_loopback_without_token_is_allowed(self):
         for host in ("127.0.0.1", "localhost", "::1"):
@@ -339,11 +473,11 @@ class LogLocalAccessTests(unittest.IsolatedAsyncioTestCase):
     def test_accepts_only_loopback_peer_addresses(self):
         for address in ("127.0.0.1", "127.10.20.30", "::1", "::ffff:127.0.0.1"):
             self.assertTrue(web_server._is_loopback_address(address), address)
-            self.assertEqual(web_server._local_log_style(address), "")
+            self.assertEqual(web_server._local_only_style(address), "")
 
         for address in (None, "localhost", "0.0.0.0", "192.168.1.20", "::"):
             self.assertFalse(web_server._is_loopback_address(address), address)
-            self.assertIn("display: none", web_server._local_log_style(address))
+            self.assertIn("display: none", web_server._local_only_style(address))
 
     async def test_remote_peer_cannot_list_logs(self):
         request = SimpleNamespace(remote="192.168.1.20")
@@ -450,11 +584,13 @@ class StaticCachingTests(AioHTTPTestCase):
         body = await (await self.client.get("/")).text()
         version = web_server._asset_version()
         self.assertIn(f'src="/static/app.js?v={version}"', body)
+        self.assertIn(f'src="/static/bear.js?v={version}"', body)
         self.assertIn(f'href="/static/style.css?v={version}"', body)
         self.assertEqual((await self.client.get(f"/static/app.js?v={version}")).status, 200)
+        self.assertEqual((await self.client.get(f"/static/bear.js?v={version}")).status, 200)
 
     async def test_page_and_assets_are_always_revalidated(self):
-        for path in ("/", "/static/app.js", "/static/style.css"):
+        for path in ("/", "/static/app.js", "/static/style.css", "/static/bear.js"):
             response = await self.client.get(path)
             self.assertEqual(response.headers.get("Cache-Control"), "no-cache", path)
 

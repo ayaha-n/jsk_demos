@@ -106,6 +106,7 @@ from eeyore_birthday_events import (
     HoneyGiftEventController,
 )
 from footprints_events import (
+    ASK_WHAT_NOTICED_RESPONSE,
     REVEAL_HINT_RESPONSE,
     START_FOLLOWING_RESPONSE,
     TWIST_LEAK_REPLACEMENT,
@@ -2735,6 +2736,24 @@ class FootprintsTwistGuardTests(unittest.TestCase):
         self.assertFalse(controller.response_may_be_replaced("", ""))
         # The flag is turn-scoped.
         self.assertFalse(controller._participant_suggested_own_footprints)
+
+    def test_bare_noticed_is_asked_about_not_answered(self):
+        # logs/session_20261106T210454...: 「きづいた！」 was taken as having
+        # said the tracks were their own, and Pooh gave the answer away.
+        controller = self.controller()
+        controller.state.completed_event_ids.update(
+            {"second_animal", "fourth_animal", "reveal_prompt"})
+        said = SimpleNamespace(vague_noticing=True, participant_suggested_own_footprints=True,
+                               gave_up_on_noticing=False, proposed_name="")
+        self.assertEqual(controller.fixed_line_for(said), ASK_WHAT_NOTICED_RESPONSE)
+        self.assertFalse(controller._participant_suggested_own_footprints)
+        controller.observe_actions(["realized_own_footprints"])
+        self.assertFalse(controller.state.resolved)
+        # Again 「わかった！」 with nothing more: the hint, not another question.
+        self.assertEqual(controller.fixed_line_for(said), REVEAL_HINT_RESPONSE)
+        # Before Pooh has asked "何か気づかない？", it means nothing special.
+        early = self.controller()
+        self.assertIsNone(early.fixed_line_for(said))
 
     def test_after_reveal_direct_pooh_may_say_it(self):
         controller = self.controller()

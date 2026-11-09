@@ -175,9 +175,9 @@ class ServePublicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_page_through_the_tunnel_hides_the_past_log_viewer(self):
         _, body = await self.get(self.public_port, "/")
-        self.assertIn(b".local-log-feature { display: none", body)
+        self.assertIn(b".local-only-feature { display: none", body)
         _, body = await self.get(self.port, "/")
-        self.assertNotIn(b".local-log-feature { display: none", body)
+        self.assertNotIn(b".local-only-feature { display: none", body)
 
     async def test_tunnelled_session_has_its_own_book_but_not_the_tablet(self):
         async with self.http.post(f"http://127.0.0.1:{self.public_port}/api/sessions") as response:
