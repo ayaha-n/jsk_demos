@@ -18,6 +18,8 @@ See [`CODEX_INSTRUCTIONS_POOH_DSPY.md`](CODEX_INSTRUCTIONS_POOH_DSPY.md) for the
 | [`docs/timed_narrative_events.md`](docs/timed_narrative_events.md) | Timed world events: delays and when they fire |
 | [`docs/usage_details.md`](docs/usage_details.md) | Every command-line option, the robot protocol (in English) |
 | [`docs/web_ui.md`](docs/web_ui.md) | What the Web UI exposes to whom, and publishing it with `--public` |
+| [`docs/postcard.md`](docs/postcard.md) | Postcards made from a session's picture book |
+| [`docs/printing.md`](docs/printing.md) | Printing the postcards on the SELPHY: printer, paper, setting up another PC |
 | [`docs/storybook.md`](docs/storybook.md) | The picture book: layout, the tablet app, reading back, illustrations |
 | [`docs/known_issues.md`](docs/known_issues.md) | Unverified concerns and open questions |
 
@@ -116,6 +118,8 @@ source /opt/ros/noetic/setup.bash && source ~/catkin_ws/devel/setup.bash
 python3 ~/catkin_ws/src/modular_robot_model_zoo/pooh_body/scripts/narrative_motion_bridge.py
 ```
 
+To print a session's postcards on the SELPHY (newest first, with a preview): `python scripts/print_postcards.py`; see [`docs/printing.md`](docs/printing.md).
+
 To chat in the terminal instead: `python scripts/pooh_narrative_dspy.py --mode chat --scenario eeyore_birthday` (`exit` or Ctrl+C ends it).
 
 Each option by hand, what participants can reach, the robot protocol and the picture book: [`docs/usage_details.md`](docs/usage_details.md), [`docs/web_ui.md`](docs/web_ui.md) (publishing, crowdsourcing, TTS) and [`docs/storybook.md`](docs/storybook.md).
@@ -156,6 +160,8 @@ Model-output quality, state retention across generated turns, and the LLM evalua
 │   ├── storybook_live.py            # Live book on the tablet / PNG preview
 │   ├── storybook_render.py          # Log -> PDF (and page PNGs)
 │   ├── storybook_illustrations.py   # Illustration generation per scene
+│   ├── postcard.py                  # Book -> printable postcards (PDF)
+│   ├── print_postcards.py           # Postcards -> the SELPHY printer, borderless
 │   └── ...
 ├── config/                          # Fixed lines and motions, picture-book settings
 ├── assets/storybook/                # Picture-book illustrations per scenario

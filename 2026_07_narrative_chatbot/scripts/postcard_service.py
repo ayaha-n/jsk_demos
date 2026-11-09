@@ -55,7 +55,7 @@ def usable_cards(plan: list, scenes: list, style: Any) -> list:
     return [card for card in plan if card.text.strip() and postcard.dialogue_fits(card, style, scenes)]
 
 
-def make_postcards(log_path: Path, pdf: Path) -> str:
+def make_postcards(log_path: Path, pdf: Path, paper: str = "hagaki") -> str:
     """The postcards of a finished log, as scripts/postcard.py makes them by
     default; returns how the plan was made ("lm" or "extractive")."""
     import postcard
@@ -81,7 +81,7 @@ def make_postcards(log_path: Path, pdf: Path) -> str:
                 raise ValueError("カードを作れません: " + " / ".join(errors))
             print(f"[ポストカード] {log_path.name}: 条件を満たさないカードを除き、{len(plan)}枚で作ります: "
                   + " / ".join(errors), file=sys.stderr)
-    postcard.write_pdf(plan, scenes, builder.config.title, pdf, style)
+    postcard.write_pdf(plan, scenes, builder.config.title, pdf, style, paper)
     pdf.with_suffix(".json").write_text(postcard.plan_to_json(plan, style, source, errors),
                                         encoding="utf-8")
     return source

@@ -90,9 +90,19 @@ def _flags(section: Settings, options: set[str], keys: tuple[str, ...]) -> list[
     return ["--" + key.replace("_", "-") for key in keys if section.get(key) and key in options]
 
 
+PAPER_LABELS = {"hagaki": "はがき", "l": "L判"}
+
+
+def _postcard_size(section: Settings, options: set[str]) -> list[str]:
+    if section.get("postcards") and "postcards" in options and "postcard_size" in options:
+        return ["--postcard-size", section.get("postcard_size", "l")]
+    return []
+
+
 def build_web_argv(web: Settings, options: set[str], crowd_scenarios: frozenset[str]) -> list[str]:
     argv = ["--scenario", web["scenario"], "--port", str(web["port"])]
     argv += _flags(web, options, ("public", "storybook_generate", "postcards", "storybook_eink", "ros_relay"))
+    argv += _postcard_size(web, options)
     if web.get("crowdsourcing") and web["scenario"] in crowd_scenarios:
         argv.append("--crowdsourcing")
         if web.get("passphrase", "").strip() and "passphrase" in options:
@@ -110,6 +120,7 @@ def build_robot_argv(robot: Settings, options: set[str]) -> list[str]:
             "--ros-relay-port", str(robot["ros_relay_port"])]
     argv += _flags(robot, options, ("start_on_mode", "no_idle_close", "storybook_eink",
                                     "storybook_generate", "postcards"))
+    argv += _postcard_size(robot, options)
     if robot.get("start_on_mode"):
         for extra in robot.get("extra_scenarios", []):
             if extra != robot["scenario"]:
@@ -217,6 +228,7 @@ def menu_items(settings: Settings, options: dict[str, set[str]], crowd_scenarios
                            ("postcards", "ポストカード")):
             if key in robot_options:
                 items.append(_item(key, label, on(key), "flag"))
+                items += _paper_item(section, robot_options, key)
         host = str(section["ros_relay_host"])
         items.append(_item("ros_relay_host", "ブリッジ（narrative_motion_bridge.py）が動くPC",
                            host + ("（このPC）" if host in ("127.0.0.1", "localhost", "::1") else ""), "text"))
@@ -241,8 +253,17 @@ def menu_items(settings: Settings, options: dict[str, set[str]], crowd_scenarios
                            ("ros_relay", "ロボットにも話させる（ROS中継へ送る）")):
             if key in web_options:
                 items.append(_item(key, label, on(key), "flag"))
+                items += _paper_item(section, web_options, key)
     items.append(_item("start", "▶ この設定で起動する（s）", "", "start"))
     return items
+
+
+def _paper_item(section: Settings, options: set[str], key: str) -> list[dict]:
+    """The paper for the postcards, under their line while they are on."""
+    if key != "postcards" or not section.get("postcards") or "postcard_size" not in options:
+        return []
+    return [_item("postcard_size", "  紙のサイズ",
+                  PAPER_LABELS.get(section.get("postcard_size", "l"), "L判"), "paper")]
 
 
 def _ask(stdscr: Any, prompt: str, default: str) -> str:
@@ -266,6 +287,10 @@ def change(settings: Settings, item: dict, scenarios: list[str],
         settings["target"] = "robot" if settings["target"] == "web" else "web"
     elif kind == "flag":
         section[key] = not section.get(key)
+    elif kind == "paper":
+        sizes = list(PAPER_LABELS)
+        current = sizes.index(section.get(key, "l")) if section.get(key) in sizes else -1
+        section[key] = sizes[(current + 1) % len(sizes)]
     elif kind == "extra":
         extras = section.setdefault("extra_scenarios", [])
         name = key.split(":", 1)[1]

@@ -8,8 +8,11 @@ python scripts/postcard.py <log>.jsonl --out /tmp/cards.pdf --png /tmp/cards   #
 python scripts/postcard.py <log>.jsonl --style poem                  # ほかのスタイル（下の表）
 python scripts/postcard.py <log>.jsonl --plan /tmp/cards.json        # 手で直したプランから描き直す（LMなし）
 python scripts/postcard.py <log>.jsonl --no-llm                      # LMを使わずに作る（API不要）
+python scripts/postcard.py <log>.jsonl --paper l                     # L判に（hagaki／l）
 python scripts/postcard_items.py --list                              # 小物の一覧（下記）
 ```
+
+紙のサイズは `--paper` で選ぶ: `hagaki`（はがき 100×148 mm、既定）、`l`（L判 89×119 mm。Canon SELPHY の L サイズで、写真店の L判 89×127 mm とは違う）。カードははがきの大きさで組んでから、紙に合わせて縦横同じ比率で縮小して真ん中に置く。中身と組み方はどのサイズでも同じで、縦横比の違う分だけ白い余白ができる。L判は、ふちなし印刷で紙の外まで少しはみ出して刷られても枠が切れないよう、四辺に 4 mm 以上あける（約0.75倍。2.5 mm では SELPHY CP1500 で左上のリボン結びの輪が切れた）。印刷は `scripts/print_postcards.py` で（[printing.md](printing.md)）。
 
 ## 自動で作る（--postcards）
 
@@ -23,7 +26,7 @@ python scripts/pooh_narrative_dspy.py --ros-relay ... --storybook-eink --storybo
 - 対象は、`--postcards` で起動したときの全部のセッション（Web UI では、この PC から始めたものに限らない）。
 - いつ作るか: お話のゴールに届いたとき（足あとは正体が分かったとき、誕生日会は贈り物が決まったとき）。ロボットではバイバイまで会話が続くことがあるので、終わりを待たない。ゴールに届かずに会話が終わったときは、終わったときに作る。1セッションに1回だけで、ゴールのあとの会話は入らない。
 - 挿絵を待つ: この会話から生成した絵を使えるよう、挿絵を描き終わる（または諦める）のを待ってから作る（最大10分。`--storybook-generate` がなければすぐ）。ゴールの時点でまだ開いている場面の挿絵は、場面の終わりを待たず、その時点までの会話からすぐ描かせる（`SessionIllustrations.flush`。足あとで「４つに増えた」場面の途中に正体に気づいたときなど。ほかの場面は固定の絵か、もともと始まった時点で描く）。
-- 作り方は `scripts/postcard.py` の既定と同じ（`dialogue`、3枚）。LM が使えない・条件を満たさないときは LM なしで作る。それでも条件を満たさなければ、文字が入って収まるカードだけで作る（2枚など。1枚も残らなければ「作れませんでした」）。1セッションに20〜40秒ほど。一度に1セッションずつ作る。
+- 作り方は `scripts/postcard.py` の既定と同じ（`dialogue`、3枚）。紙のサイズは `--postcard-size`（`l`／`hagaki`、既定 `l`＝SELPHY の L判。起動メニュー `scripts/run.py` では「ポストカード」の下の「紙のサイズ」）。LM が使えない・条件を満たさないときは LM なしで作る。それでも条件を満たさなければ、文字が入って収まるカードだけで作る（2枚など。1枚も残らなければ「作れませんでした」）。1セッションに20〜40秒ほど。一度に1セッションずつ作る。
 - 保存先は、絵本の PDF（`storybooks/`）と並べて、ログディレクトリの `postcards/<ログ名>.pdf` と `.json`。
 - 終了するとき（Ctrl+C など）は、作りかけ・待っているポストカードを作り終えてから止まる（挿絵を描き終えた後、もう待たずに作る）。「起動してすぐ1回だけ」のロボットは、セッションが終わるとすぐ止まるので、ここで作る。
 - 見られるのは **この PC からだけ**（公開 URL や同じネットワークの別マシンからは、ボタンも出さず、サーバも断る）。

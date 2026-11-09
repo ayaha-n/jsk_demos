@@ -10,6 +10,7 @@
     "tts": true,
     "tts_server_url": "http://127.0.0.1:8000",
     "postcards": false,
+    "postcard_size": "l",
     "storybook_eink": false,
     "ros_relay": false
   },
@@ -22,6 +23,7 @@
     "no_idle_close": true,
     "storybook_eink": false,
     "storybook_generate": true,
-    "postcards": false
+    "postcards": false,
+    "postcard_size": "l"
   }
 }

@@ -1820,8 +1820,12 @@ def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--postcards", action="store_true",
-        help="会話が終わったら、そのセッションのポストカード（印刷用PDF）を裏で作る"
+        help="お話のゴールに届いたら（届かなければ会話が終わったら）、そのセッションのポストカード（印刷用PDF）を裏で作る"
              "（ログディレクトリの postcards/。Web UI ではこの PC の画面からだけ開ける。docs/postcard.md）",
+    )
+    parser.add_argument(
+        "--postcard-size", choices=("hagaki", "l"), default="l",
+        help="--postcards の紙: l（L判 89×119mm、SELPHY の L、既定）／hagaki（はがき）",
     )
 
 
@@ -1845,7 +1849,13 @@ def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]
         # that on closing the pictures are finished before the cards.
         from postcard_service import PostcardMaker
 
-        listeners.append(PostcardMaker(illustrations=illustrations))
+        from functools import partial
+
+        from postcard_service import make_postcards
+
+        listeners.append(PostcardMaker(
+            illustrations=illustrations,
+            make=partial(make_postcards, paper=getattr(args, "postcard_size", "l"))))
     return listeners
 
 

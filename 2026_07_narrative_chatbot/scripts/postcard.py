@@ -48,6 +48,21 @@ from storybook import StoryEntry, find_illustration
 
 MM = 72 / 25.4  # PDF points per millimetre
 CARD_W_MM, CARD_H_MM = 100.0, 148.0
+# Paper to print on: (short side, long side) in mm, as the printer's page
+# (Canon SELPHY: PageSize=Postcard / 89x119mm). Cards are laid out at
+# postcard size and drawn scaled uniformly to fit other paper, centered (the
+# same card, a little smaller; white margins where the proportions differ).
+PAPER_SIZES = {
+    "hagaki": (100.0, 148.0),  # はがき
+    "l": (89.0, 119.0),        # L判（SELPHY の L サイズ）
+}
+PAPER_LABELS = {"hagaki": "はがき", "l": "L判"}
+# Kept clear at every edge when a card is scaled to the paper: borderless
+# printing runs a little past the paper's edges, which would cut the frame.
+# 4 mm on L: at 2.5 mm a SELPHY CP1500 cut the loops of the frame's bow
+# (2026-11-09), so it trims a little more than that.
+PAPER_SAFE_MARGIN_MM = {"hagaki": 0.0, "l": 4.0}
+DEFAULT_PAPER = "hagaki"
 DEFAULT_CARDS = 3
 CLOSING = "おしまい"
 LM_ATTEMPTS = 3
@@ -1902,20 +1917,35 @@ def draw_card(pdf: Any, card: CardPlan, scenes: list[Scene], index: int, cards: 
     pdf.setStrokeColorRGB(0, 0, 0)
 
 
+def paper_page(style: Style, paper: str = DEFAULT_PAPER) -> tuple[float, float]:
+    """The sheet (width, height in mm), turned the way the style's cards are."""
+    short, long = PAPER_SIZES[paper]
+    return (long, short) if style.page[0] > style.page[1] else (short, long)
+
+
 def write_pdf(plan: list[CardPlan], scenes: list[Scene], title: str, path: Path,
-              style: Style = POEM) -> Path:
+              style: Style = POEM, paper: str = DEFAULT_PAPER) -> Path:
     from reportlab.pdfgen import canvas
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    pdf = canvas.Canvas(str(path), pagesize=(style.page[0] * MM, style.page[1] * MM))
+    sheet = paper_page(style, paper)
+    margin = PAPER_SAFE_MARGIN_MM.get(paper, 0.0)
+    scale = min((sheet[0] - 2 * margin) / style.page[0], (sheet[1] - 2 * margin) / style.page[1])
+    pdf = canvas.Canvas(str(path), pagesize=(sheet[0] * MM, sheet[1] * MM))
     pdf.setTitle(f"{title}（ポストカード）" if title else "ポストカード")
     for index, card in enumerate(plan):
+        pdf.saveState()
+        # The card as laid out (postcard size), scaled to the sheet, centered.
+        pdf.translate((sheet[0] - style.page[0] * scale) / 2 * MM,
+                      (sheet[1] - style.page[1] * scale) / 2 * MM)
+        pdf.scale(scale, scale)
         if style.dialogue and style.page[0] > style.page[1]:
             draw_landscape_card(pdf, card, scenes, index, len(plan), title, style.page)
         elif style.dialogue:
             draw_dialogue_card(pdf, card, scenes, index, len(plan), title)
         else:
             draw_card(pdf, card, scenes, index, len(plan), title, style)
+        pdf.restoreState()
         pdf.showPage()
     pdf.save()
     return path
@@ -1966,6 +1996,9 @@ def main() -> int:
                              f"dialogue_portrait: その縦向き／poem: 短い詩／"
                              f"prose: 短い文章でまとめる"
                              f"（既定 {DEFAULT_STYLE}。--plan ではプランの値）")
+    parser.add_argument("--paper", choices=sorted(PAPER_SIZES), default=DEFAULT_PAPER,
+                        help="印刷する紙: hagaki（はがき 100×148mm、既定）／l（L判 89×119mm、SELPHY の L）。"
+                             "同じカードを紙に合わせて縮小する")
     parser.add_argument("--out", type=Path, default=None,
                         help="PDFの出力先（既定: <ログディレクトリ>/postcards/<ログ名>.pdf）")
     parser.add_argument("--plan", type=Path, default=None,
@@ -2000,11 +2033,11 @@ def main() -> int:
             errors = _check(plan, scenes, args.cards, style)
     for error in errors:
         print(f"[ポストカード] 注意: {error}", file=sys.stderr)
-    write_pdf(plan, scenes, title, out, style)
+    write_pdf(plan, scenes, title, out, style, args.paper)
     if args.plan is None:
         out.with_suffix(".json").write_text(plan_to_json(plan, style, source, errors),
                                             encoding="utf-8")
-    print(f"{len(plan)} 枚のポストカード（{style.name}・{source}）を書き出しました: {out}")
+    print(f"{len(plan)} 枚のポストカード（{style.name}・{PAPER_LABELS[args.paper]}・{source}）を書き出しました: {out}")
     if args.png is not None:
         import subprocess
 

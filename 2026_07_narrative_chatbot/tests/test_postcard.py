@@ -313,6 +313,10 @@ class PostcardTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 path = postcard.write_pdf(plan, talk, "t", Path(tmp) / "c.pdf", style)
                 self.assert_postcard_pages(path.read_bytes(), style.page)
+                # The same cards on SELPHY's L paper (89 x 119 mm), turned the same way.
+                path = postcard.write_pdf(plan, talk, "t", Path(tmp) / "l.pdf", style, "l")
+                landscape = style.page[0] > style.page[1]
+                self.assert_postcard_pages(path.read_bytes(), (119.0, 89.0) if landscape else (89.0, 119.0))
 
     def test_item_comes_from_the_picture_beat(self):
         # footprints: a trail of paw prints cut from the reference picture.

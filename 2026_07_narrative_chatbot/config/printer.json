@@ -1,0 +1,21 @@
+{
+  "_comment": "The postcard printer for scripts/print_postcards.py (docs/printing.md). The printer's own address is not kept here: it is found on the local network by ippfind (a service whose name contains find_name) and remembered in .tools/printer.json, or given with --printer. papers: what it can be loaded with; the PDF's page size picks one (postcard.py --paper).",
+  "name": "Canon SELPHY CP1500",
+  "find_name": "CP1500",
+  "papers": {
+    "l": {
+      "label": "L判（89×119 mm）",
+      "width_mm": 89.0,
+      "height_mm": 119.0,
+      "media_ready": "om_dsc-photo_89x119mm",
+      "pwg_size_name": "89x119mm"
+    },
+    "hagaki": {
+      "label": "はがき（100×148 mm）",
+      "width_mm": 100.0,
+      "height_mm": 148.0,
+      "media_ready": "jpn_hagaki_100x148mm",
+      "pwg_size_name": "Postcard"
+    }
+  }
+}

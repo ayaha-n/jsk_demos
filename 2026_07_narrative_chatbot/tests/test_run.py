@@ -73,6 +73,19 @@ class LaunchTest(unittest.TestCase):
         launch.change(settings, extra, scenarios)
         self.assertIn("tea_party", settings["robot"]["extra_scenarios"])
 
+    def test_the_postcards_paper_is_chosen_in_the_menu(self):
+        scenarios = ["eeyore_birthday", "footprints", "tea_party"]
+        for target, parse in (("web", web_server.parse_args), ("robot", pooh_narrative_dspy.parse_args)):
+            settings = self.settings(target, postcards=True)
+            paper = next(item for item in launch.menu_items(settings, self.options, self.crowd, scenarios)
+                         if item["key"] == "postcard_size")
+            self.assertEqual(paper["value"], "L判")  # SELPHY's L by default
+            self.assertEqual(parse(self.command(settings)[1]).postcard_size, "l")
+            launch.change(settings, paper, scenarios)
+            self.assertEqual(parse(self.command(settings)[1]).postcard_size, "hagaki")
+            settings[target]["postcards"] = False  # no paper without postcards
+            self.assertNotIn("--postcard-size", self.command(settings)[1])
+
     def test_the_passphrase_is_kept_locally_not_in_the_shared_defaults(self):
         self.assertNotIn("passphrase", DEFAULTS_TEXT)
         launch.save_local(self.settings(passphrase="アイコトバ"), self.local)
