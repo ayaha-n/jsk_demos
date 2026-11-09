@@ -11,6 +11,25 @@ python scripts/postcard.py <log>.jsonl --no-llm                      # LMを使�
 python scripts/postcard_items.py --list                              # 小物の一覧（下記）
 ```
 
+## 会話のあとに自動で作る（--postcards）
+
+Web UI（`web_server.py`）でもロボット（`pooh_narrative_dspy.py`）でも、`--postcards` を付けて起動すると、会話が終わったセッションのポストカードを裏で作る（`scripts/postcard_service.py`）。付けなければ作らない。
+
+```bash
+python scripts/web_server.py --scenario footprints --storybook-generate --postcards
+python scripts/pooh_narrative_dspy.py --ros-relay ... --storybook-eink --storybook-generate --postcards
+```
+
+- 対象は、`--postcards` で起動したときの全部のセッション（Web UI では、この PC から始めたものに限らない）。
+- 会話が終わると、そのセッションの挿絵がすべて描き終わる（または諦める）のを待ってから作る（最大10分。`--storybook-generate` がなければすぐ）。この会話から生成した絵を使えるようにするため。
+- 作り方は `scripts/postcard.py` の既定と同じ（`dialogue`、3枚）。LM が使えない・条件を満たさないときは LM なしで作る。1セッションに20〜40秒ほど。一度に1セッションずつ作る。
+- 保存先は、絵本の PDF（`storybooks/`）と並べて、ログディレクトリの `postcards/<ログ名>.pdf` と `.json`。
+- 終了するとき（Ctrl+C など）は、終わった会話のポストカードを作り終えてから止まる（挿絵を描き終えた後、もう待たずに作る）。ロボットはセッションが終わるとすぐ止まるので、ここで作る。
+- 見られるのは **この PC からだけ**（公開 URL や同じネットワークの別マシンからは、ボタンも出さず、サーバも断る）。
+  - 終わった会話の「絵本」の画面に「ポストカード」ボタンが出て、押すと PDF が新しいタブで開く。作っている間は「ポストカードを準備中…」と出る。印刷は PDF のタブから。
+  - 「過去ログ」→「絵本で見る」でも、ポストカードがあるセッションには「ポストカード」ボタンが出る。ロボットの会話も同じログディレクトリに入るので、ここから見る（この PC で Web UI を起動して開く）。
+  - 「はじめから」で次の会話を始めると、前の会話のポストカードの表示は消える（取り違えて印刷しないように）。
+
 ## 何を再利用しているか
 
 - 場面・文章・挿絵は `storybook.build_book()` の結果（絵本PDFと同じもの）。ページを場面ごとにまとめ直し、ページをまたいだ長いセリフの重複は除く。
@@ -109,7 +128,7 @@ python scripts/postcard_items.py --scenario footprints     # combine / prompt �
 
 ## 未対応
 
-- SELPHY への送信、ふちなし用の塗り足し（いまは白地なので不要）。
+- SELPHY への送信、ふちなし用の塗り足し（いまは白地なので不要）。印刷はいまは PDF をブラウザから。
 - 枚数を1〜2枚にする場合のレイアウト調整（`--cards` で枚数は変えられる）。
 - eeyore_birthday の小物イラスト。
 - 参加者の発言の選び方はLMの判断に任せている。誤認識だらけの発言しかない場合は、その発言が入ることがある。

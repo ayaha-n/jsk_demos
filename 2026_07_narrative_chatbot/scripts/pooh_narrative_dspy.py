@@ -1807,6 +1807,11 @@ def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="DIR",
         help="ライブの絵本のページをPNGとしてDIRに書き出す（タブレットなしの確認用）。",
     )
+    parser.add_argument(
+        "--postcards", action="store_true",
+        help="会話が終わったら、そのセッションのポストカード（印刷用PDF）を裏で作る"
+             "（ログディレクトリの postcards/。Web UI ではこの PC の画面からだけ開ける。docs/postcard.md）",
+    )
 
 
 def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]:
@@ -1817,14 +1822,19 @@ def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]
 
         illustrations = SessionIllustrations()
         listeners.append(illustrations)
-    if not (args.storybook_eink or args.storybook_preview):
-        return listeners
-    from storybook_live import create_live_storybook
+    if args.storybook_eink or args.storybook_preview:
+        from storybook_live import create_live_storybook
 
-    live = create_live_storybook(eink=args.storybook_eink, preview_dir=args.storybook_preview,
-                                illustrations=illustrations)
-    if live is not None:
-        listeners.append(live)
+        live = create_live_storybook(eink=args.storybook_eink, preview_dir=args.storybook_preview,
+                                     illustrations=illustrations)
+        if live is not None:
+            listeners.append(live)
+    if getattr(args, "postcards", False):
+        # Every session's postcards, once its pictures are drawn. Last, so
+        # that on closing the pictures are finished before the cards.
+        from postcard_service import PostcardMaker
+
+        listeners.append(PostcardMaker(illustrations=illustrations))
     return listeners
 
 
