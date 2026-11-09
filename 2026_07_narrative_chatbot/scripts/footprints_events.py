@@ -153,7 +153,7 @@ APPEARANCE_UNRESOLVED = "正体の見た目はどんな様子か"
 _FOOTPRINTS_NARRATIVE_ACTIONS_FIELD = dspy.OutputField(
     desc=(
         "Pythonが検証する機械可読な報告。必要なものだけを返す。利用可能: "
-        "started_following(プーと参加者が足跡を追いかけ始めた場合)、"
+        "started_following(名前と見た目の相談を済ませ、プーと参加者が実際に追跡を始めた場合。導入の説明や、探しに行こうという誘いだけは含めない)、"
         "noticed_second_animal(足跡が２匹分に見えることに気づいた場合)、"
         "noticed_fourth_animal(足跡がさらに増えて４匹分になったことに気づいた場合。"
         "２匹分の段階を経ていなくてもよい)、"
@@ -390,7 +390,9 @@ class FootprintsEventController(NarrativeEventController):
                 event_id="ask_name",
                 delay_seconds=ask_name_delay_seconds,
                 waits_for_quiet=True,
-                prerequisite=lambda state: not state.named,
+                prerequisite=lambda state: (
+                    not state.named and not state.resolved
+                ),
                 fire=FootprintsEventController._fire_ask_name,
             ),
             # Deciding for himself if nobody answers ask_name in time; free to
@@ -399,7 +401,10 @@ class FootprintsEventController(NarrativeEventController):
                 event_id="name_creature",
                 delay_seconds=naming_delay_seconds,
                 waits_for_quiet=True,
-                prerequisite=lambda state: not state.named and not state.resolved,
+                prerequisite=lambda state: (
+                    not state.named and not state.resolved
+                    and "ask_name" in state.completed_event_ids
+                ),
                 fire=FootprintsEventController._fire_name_creature,
             ),
             RequiredNarrativeEvent(
@@ -410,19 +415,22 @@ class FootprintsEventController(NarrativeEventController):
                 # Pooh, prompted by that) before this ever fires has already
                 # covered what this line would ask; re-asking afterward was
                 # confirmed live as a redundant repeat.
-                prerequisite=lambda state: state.named and not state.appearance_settled,
+                prerequisite=lambda state: (
+                    state.named and not state.appearance_settled
+                    and not state.following_started and not state.resolved
+                ),
                 fire=FootprintsEventController._fire_ask_appearance,
             ),
-            # Naming comes first: start_following only arms once it is done,
-            # so this can never race ahead of it (see NarrativeEventController
-            # ._arm_required_events — a deadline is set once, the first time
-            # its prerequisite holds).
+            # Give appearance its own response window. Naming alone must not
+            # arm this timer in parallel with ask_appearance. An organic
+            # appearance discussion can replace that fixed question.
             RequiredNarrativeEvent(
                 event_id="start_following",
                 delay_seconds=start_following_delay_seconds,
                 waits_for_quiet=True,
                 prerequisite=lambda state: (
                     state.named and not state.following_started and not state.resolved
+                    and ("ask_appearance" in state.completed_event_ids or state.appearance_settled)
                 ),
                 fire=FootprintsEventController._fire_start_following,
             ),
@@ -497,21 +505,22 @@ class FootprintsEventController(NarrativeEventController):
             if action not in KNOWN_FOOTPRINTS_ACTIONS:
                 continue
             if action == "started_following":
-                if not self.state.named and "name_creature" not in self.state.completed_event_ids:
-                    # The conversation moved on without ever naming it. The
-                    # start_following fallback's own prerequisite requires
-                    # state.named, so this invariant must hold regardless —
-                    # but naming must still be SPOKEN, not silently assumed
-                    # (a participant who never heard a name chosen was
-                    # confused when a later line referred to one anyway).
-                    # Collapsing name_creature's deadline to now makes it
-                    # fire for real on the very next beat (normally via
-                    # follow_up right after this turn's own line).
-                    self._deadlines["name_creature"] = self.clock()
+                if not self.state.named:
+                    # An invitation in the introduction is not the tracking
+                    # beat. Ask for a name first instead of forcing a name.
+                    self._deadlines["ask_name"] = self.clock()
+                    continue
+                if not (self.state.appearance_settled or "ask_appearance" in self.state.completed_event_ids):
+                    self._deadlines["ask_appearance"] = self.clock()
+                    continue
                 self.state.following_started = True
             elif action == "noticed_second_animal":
+                if not self.state.following_started:
+                    continue
                 self.state.completed_event_ids.add("second_animal")
             elif action == "noticed_fourth_animal":
+                if not self.state.following_started:
+                    continue
                 self.state.completed_event_ids.add("second_animal")
                 self.state.completed_event_ids.add("fourth_animal")
             elif action == "realized_own_footprints":

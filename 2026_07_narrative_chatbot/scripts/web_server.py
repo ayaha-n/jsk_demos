@@ -83,6 +83,7 @@ class WebSession:
     timer_task: asyncio.Task | None = None
     busy: bool = False
     study: Progress | None = None
+    pending_playback: dict[str, float] = field(default_factory=dict)
 
 
 class SessionRegistry:
@@ -142,7 +143,7 @@ class SessionRegistry:
         async with entry.lock:
             opening = await asyncio.to_thread(entry.session.start)
         if opening is not None:
-            entry.transcript.append({"type": "output", "output": await self._output_dict(opening)})
+            entry.transcript.append({"type": "output", "output": await self._output_dict(opening, entry)})
         entry.timer_task = asyncio.create_task(self._run_timer(entry))
         return entry
 
@@ -204,14 +205,37 @@ class SessionRegistry:
         await self._sync_study(entry)
         if output is None:
             return
-        await self._record(entry, {"type": "output", "output": await self._output_dict(output)})
+        await self._record(entry, {"type": "output", "output": await self._output_dict(output, entry)})
         if entry.session.ended:
             await self._broadcast(entry, {"type": "ended"})
 
-    async def _output_dict(self, output: SessionOutputLike) -> dict[str, Any]:
+    async def _output_dict(self, output: SessionOutputLike, entry: WebSession) -> dict[str, Any]:
         output_dict = output.to_dict()
         output_dict["audio_url"] = await self._synthesize_audio(output.bot_response)
+        controller = getattr(entry.session, "controller", None)
+        if (output_dict["audio_url"] and (entry.sockets or not entry.transcript)
+                and callable(getattr(controller, "confirm_speech_finished", None))):
+            playback_id = uuid4().hex
+            output_dict["playback_id"] = playback_id
+            # A stalled player must not suspend timed events indefinitely.
+            estimate = controller.speech_seconds(output.bot_response)
+            entry.pending_playback[playback_id] = self.clock() + max(120.0, estimate * 3)
         return output_dict
+
+    async def playback_finished(self, entry: WebSession, playback_id: str) -> None:
+        finished_queue = False
+        async with entry.lock:
+            if playback_id not in entry.pending_playback:
+                return
+            del entry.pending_playback[playback_id]
+            if not entry.pending_playback and not entry.session.ended:
+                entry.session.controller.confirm_speech_finished()
+                finished_queue = True
+        if finished_queue:
+            # Preserve overdue follow-ups; only future waits are based on the
+            # real audio finish. A due beat may intentionally follow at once.
+            await self.run_call(entry, entry.session.follow_up, wait_for_playback=True)
+        entry.wake.set()
 
     async def _synthesize_audio(self, text: str) -> str | None:
         """A URL to the line's audio, or None if TTS is off or failed.
@@ -246,10 +270,11 @@ class SessionRegistry:
         self,
         entry: WebSession,
         call: Callable[[], SessionOutputLike | None],
+        wait_for_playback: bool = False,
     ) -> None:
         """Run one blocking session call with the per-session lock held."""
         async with entry.lock:
-            if entry.session.ended:
+            if entry.session.ended or (wait_for_playback and entry.pending_playback):
                 return
             await self._set_busy(entry, True)
             try:
@@ -276,7 +301,7 @@ class SessionRegistry:
         await self._record(entry, {"type": "user_input", "text": text})
         await self.run_call(entry, lambda: entry.session.submit(text))
         # An overdue story event follows Pooh's answer instead of interrupting.
-        await self.run_call(entry, entry.session.follow_up)
+        await self.run_call(entry, entry.session.follow_up, wait_for_playback=True)
 
     async def close(self, entry: WebSession) -> None:
         await self.run_call(entry, lambda: entry.session.close("web_close"))
@@ -305,7 +330,13 @@ class SessionRegistry:
         while not entry.session.ended:
             entry.wake.clear()
             async with entry.lock:
-                delay = entry.session.seconds_until_due()
+                expired = [key for key, limit in entry.pending_playback.items() if limit <= self.clock()]
+                for key in expired:
+                    del entry.pending_playback[key]
+                if expired and not entry.pending_playback:
+                    entry.session.controller.confirm_speech_finished()
+                delay = (min(entry.pending_playback.values()) - self.clock()
+                         if entry.pending_playback else entry.session.seconds_until_due())
             if delay is not None:
                 delay = max(delay, MIN_TIMER_WAIT_SECONDS)
             try:
@@ -313,7 +344,7 @@ class SessionRegistry:
                 continue
             except asyncio.TimeoutError:
                 pass
-            await self.run_call(entry, entry.session.poll)
+            await self.run_call(entry, entry.session.poll, wait_for_playback=True)
 
 
 # ---------------------------------------------------------------------------
@@ -819,6 +850,7 @@ async def session_socket(request: web.Request) -> web.WebSocketResponse:
         "ended": entry.session.ended,
         "busy": entry.busy,
         "touch_supported": True,
+        "pending_playback": list(entry.pending_playback),
         "study": entry.study.public() if entry.study else {"enabled": False},
     })
     try:
@@ -843,9 +875,14 @@ async def session_socket(request: web.Request) -> web.WebSocketResponse:
                     await registry.close(entry)
             elif kind == "touch":
                 await registry.touch(entry, payload.get("part") if isinstance(payload.get("part"), str) else "")
+            elif kind == "playback_finished" and isinstance(payload.get("playback_id"), str):
+                await registry.playback_finished(entry, payload["playback_id"])
     finally:
         # Disconnection is not an ending; the tab may reconnect until the TTL.
         entry.sockets.discard(socket)
+        if not entry.sockets:
+            for playback_id in list(entry.pending_playback):
+                await registry.playback_finished(entry, playback_id)
         entry.last_active = registry.clock()
     return socket
 

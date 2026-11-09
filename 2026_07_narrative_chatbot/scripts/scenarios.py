@@ -21,9 +21,9 @@ from narrative_state import NarrativeSituation
 # オープニングを話し終えてから、プーが蜂蜜壺を贈ると決めるまでの秒数。
 EEYORE_GIFT_DECISION_DELAY_SECONDS = 30.0
 # 贈ると決めてから、蜂蜜壺を持ち出すまでの秒数。
-EEYORE_HONEY_TASTING_DELAY_SECONDS = 30.0
+EEYORE_HONEY_TASTING_DELAY_SECONDS = 45.0
 # 蜂蜜壺を持ち出してから、蜂蜜を食べてしまうまでの秒数。
-EEYORE_HONEY_EATING_DELAY_SECONDS = 10.0
+EEYORE_HONEY_EATING_DELAY_SECONDS = 2.0
 # 場面の始まりになるイベント（贈る決定・持ち出し）は、期限を過ぎても最後の
 # やり取りからこの秒数の沈黙を待つ。会話が続く場合は、次の返事に続けて発火する。
 EEYORE_EVENT_QUIET_SECONDS = 12.0
@@ -33,26 +33,24 @@ EEYORE_AWAITING_REPLY_QUIET_SECONDS = 30.0
 # 参加者が話し続けている間は終えない。
 EEYORE_IDLE_CLOSE_AFTER_WRAP_UP_SECONDS = 30.0
 
-# footprintsのテンポはeeyore_birthdayと揃えている。
-# 名前を尋ねる固定セリフ（場面1→2）までの秒数。会話の最初の返答のすぐ後に
-# follow_upで発火することを想定した短い値。
-FOOTPRINTS_ASK_NAME_DELAY_SECONDS = 2.0
-# 名前を尋ねてから、プーが自分で正体に名前をつける（場面2）までの秒数。
-# 参加者またはプー自身が自発的に先に名付けた場合は発火しない。
-FOOTPRINTS_NAMING_DELAY_SECONDS = 20.0
-# 名付けが終わった直後に見た目を尋ねる固定セリフまでの秒数。
-FOOTPRINTS_ASK_APPEARANCE_DELAY_SECONDS = 2.0
-# 見た目を尋ねてから、足跡を追いかけ始める（場面4）までの秒数。
-FOOTPRINTS_START_FOLLOWING_DELAY_SECONDS = 30.0
-# 追いかけ始めてから、足跡が２匹分に見えることに気づくまでの秒数。
+# footprintsは参加者が考えて入力する時間を確保する。各待ち時間は、
+# 直前の段階を終えた推定発話終了から数える（自然な会話で済んだ段階は省略）。
+# オープニングを話し終えてから、名前を尋ねる固定セリフまでの秒数。
+FOOTPRINTS_ASK_NAME_DELAY_SECONDS = 60.0
+# 名前を尋ねてから、回答がなければプーが自分で名付けるまでの秒数。
+FOOTPRINTS_NAMING_DELAY_SECONDS = 60.0
+# 名付けが終わってから、見た目を尋ねる固定セリフまでの秒数。
+FOOTPRINTS_ASK_APPEARANCE_DELAY_SECONDS = 20.0
+# 見た目を尋ねるか、その相談が自然に済んでから、追跡を始めるまでの秒数。
+FOOTPRINTS_START_FOLLOWING_DELAY_SECONDS = 60.0
+# 追跡開始から、足跡が２匹分に見えることに気づくまでの秒数。
 FOOTPRINTS_SECOND_ANIMAL_DELAY_SECONDS = 30.0
 # ２匹に気づいてから、４匹に増えたことに気づくまでの秒数。
 FOOTPRINTS_FOURTH_ANIMAL_DELAY_SECONDS = 30.0
-# ４匹に気づいたあと、気づきの誘導（開いた問いかけ→ヒント→直接的な推測）を
-# 畳みかける各段階の秒数。
-FOOTPRINTS_REVEAL_STEP_DELAY_SECONDS = 10.0
+# 気づきの誘導を次の段階へ進めるまでの秒数。
+FOOTPRINTS_REVEAL_STEP_DELAY_SECONDS = 45.0
 FOOTPRINTS_EVENT_QUIET_SECONDS = 12.0
-FOOTPRINTS_AWAITING_REPLY_QUIET_SECONDS = 30.0
+FOOTPRINTS_AWAITING_REPLY_QUIET_SECONDS = 60.0
 FOOTPRINTS_IDLE_CLOSE_AFTER_REVEAL_SECONDS = 30.0
 
 

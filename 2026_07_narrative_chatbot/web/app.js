@@ -186,7 +186,8 @@ function ensureAudioElement() {
   if (audioElement) return audioElement;
   audioElement = new Audio();
   const advance = () => {
-    audioQueue.shift();
+    const finished = audioQueue.shift();
+    reportPlaybackFinished(finished?.playbackId);
     audioBlocked = false;
     playNextAudio();
     updateControls();
@@ -197,10 +198,10 @@ function ensureAudioElement() {
 }
 
 function playNextAudio() {
-  const url = audioQueue[0];
-  if (!url) return;
+  const item = audioQueue[0];
+  if (!item) return;
   const audio = ensureAudioElement();
-  audio.src = url;
+  audio.src = item.url;
   audio.play().then(() => {
     audioBlocked = false;
     updateControls();
@@ -210,8 +211,14 @@ function playNextAudio() {
   });
 }
 
-function queueAudio(url) {
-  audioQueue.push(url);
+function reportPlaybackFinished(playbackId) {
+  if (playbackId && socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: "playback_finished", playback_id: playbackId }));
+  }
+}
+
+function queueAudio(url, playbackId) {
+  audioQueue.push({ url, playbackId });
   if (audioQueue.length === 1) playNextAudio();
   updateControls();
 }
@@ -254,7 +261,7 @@ function appendOutput(output, { autoplay = false } = {}) {
   scrollToBottom();
   // Only a freshly arriving line is spoken; replaying a reconnect's past
   // transcript must not suddenly play every past line's audio at once.
-  if (autoplay && output.audio_url) queueAudio(output.audio_url);
+  if (autoplay && output.audio_url) queueAudio(output.audio_url, output.playback_id);
 }
 
 function formatLogTime(value) {
@@ -446,6 +453,14 @@ function handleMessage(message) {
       const autoplay = justCreatedSession;
       justCreatedSession = false;
       message.messages.forEach((entry) => renderMessage(entry, { autoplay }));
+      if (!autoplay) {
+        // History stays silent on reconnect. Release audio no longer in this
+        // tab's queue so the server does not wait for an impossible ended event.
+        const queued = new Set(audioQueue.map(item => item.playbackId));
+        for (const id of message.pending_playback || []) {
+          if (!queued.has(id)) reportPlaybackFinished(id);
+        }
+      }
       ended = message.ended;
       busy = message.busy;
       if (ended) {

@@ -434,6 +434,50 @@ class TTSTests(AioHTTPTestCase):
         self.assertEqual(response.status, 404)
 
 
+class FootprintsPlaybackTests(AioHTTPTestCase):
+    scenario_key = "footprints"
+
+    async def get_application(self):
+        def factory(session_id):
+            session = FakeSession(session_id)
+            session.scenario = SimpleNamespace(key=self.scenario_key)
+            session.controller = SimpleNamespace(
+                speech_seconds=lambda text: 1.0,
+                confirm_speech_finished=unittest.mock.Mock(),
+            )
+            return session
+        return web_server.create_app(factory, tts=FakeTTS())
+
+    async def test_events_wait_for_audio_and_overdue_follow_up_is_preserved(self):
+        registry = self.app[web_server.REGISTRY_KEY]
+        response = await self.client.post("/api/sessions")
+        session_id = (await response.json())["session_id"]
+        entry = registry.get(session_id)
+        async with self.client.ws_connect(f"/ws/{session_id}") as ws:
+            transcript = await ws.receive_json()
+            playback_id = transcript["messages"][0]["output"]["playback_id"]
+            self.assertIn(playback_id, transcript["pending_playback"])
+            entry.session.follow_up_pending = True
+            await registry.run_call(entry, entry.session.follow_up, wait_for_playback=True)
+            self.assertTrue(entry.session.follow_up_pending)
+            await ws.send_json({"type": "playback_finished", "playback_id": "invalid"})
+            await ws.send_json({"type": "playback_finished", "playback_id": playback_id})
+            while True:
+                message = await asyncio.wait_for(ws.receive_json(), 2)
+                if message["type"] == "output":
+                    break
+            self.assertEqual(message["output"]["source"], "world_event")
+            entry.session.controller.confirm_speech_finished.assert_called_once()
+            self.assertNotIn(playback_id, entry.pending_playback)
+            self.assertIn(message["output"]["playback_id"], entry.pending_playback)
+            await ws.send_json({"type": "playback_finished", "playback_id": playback_id})
+            self.assertFalse(entry.session.follow_up_pending)
+
+
+class EeyorePlaybackTests(FootprintsPlaybackTests):
+    scenario_key = "eeyore_birthday"
+
+
 class NoTTSTests(AioHTTPTestCase):
     async def get_application(self):
         return web_server.create_app(FakeSession, max_sessions=3)

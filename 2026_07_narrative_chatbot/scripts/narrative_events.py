@@ -197,6 +197,7 @@ class NarrativeEventController:
         self._awaiting_reply = False
         self.clock = clock
         self._deadlines: dict[str, float] = {}
+        self._playback_deadlines: dict[str, tuple[float, float]] = {}
         self.speech_seconds = speech_seconds
         self._last_activity = clock()
         # When Pooh's latest line is expected to finish playing.  Delays and
@@ -213,6 +214,7 @@ class NarrativeEventController:
             )
             if active and event.event_id not in self._deadlines:
                 self._deadlines[event.event_id] = start + event.delay_seconds
+                self._playback_deadlines[event.event_id] = (self._deadlines[event.event_id], start)
             elif not active:
                 # Another event's firing (or settled state) can invalidate this
                 # one's prerequisite before it ever fires itself (e.g. the
@@ -221,6 +223,21 @@ class NarrativeEventController:
                 # report "ready" forever while pop_due_event() keeps refusing
                 # it (its own prerequisite check), busy-looping the caller.
                 self._deadlines.pop(event.event_id, None)
+                self._playback_deadlines.pop(event.event_id, None)
+
+    def confirm_speech_finished(self) -> None:
+        """Web audio ended: replace the estimate with the actual finish time.
+
+        Newly armed beats get their full configured delay after playback.
+        Older deadlines are unchanged, preserving overdue follow-ups.
+        This is opt-in from the Web server; ROS keeps its estimated clock.
+        """
+        now = self.clock()
+        for event_id, (deadline, speech_end) in self._playback_deadlines.items():
+            if self._deadlines.get(event_id) == deadline:
+                self._deadlines[event_id] = now + max(0.0, deadline - speech_end)
+        self._playback_deadlines.clear()
+        self._speech_end = self._last_activity = now
 
     def observe_activity(self, speech_seconds: float = 0.0, awaiting_reply: bool = False) -> None:
         """Record participant input, or Pooh's line with its playback length.
@@ -245,6 +262,7 @@ class NarrativeEventController:
     def begin(self, opening_speech_seconds: float) -> None:
         """Start the story clock once the scripted opening has been spoken."""
         self._deadlines.clear()
+        self._playback_deadlines.clear()
         self.observe_activity(opening_speech_seconds)
         self._arm_required_events()
 
@@ -306,6 +324,7 @@ class NarrativeEventController:
         if due is None:
             return None
         self._deadlines.pop(due.event_id, None)
+        self._playback_deadlines.pop(due.event_id, None)
         result = due.fire(self.state)
         if result.fixed_response:
             line = result.fallback_response
