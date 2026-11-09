@@ -1356,9 +1356,10 @@ class NarrativeSession:
             ),
             follow_up=follow_up,
         )
-        actions = list(getattr(result, "narrative_actions", []))
+        proposed = list(getattr(result, "narrative_actions", []))
         details = settled_details_of(result)
-        self.controller.observe_actions(actions)
+        # Only what the story accepted is recorded (see observe_actions).
+        actions = self.controller.observe_actions(proposed)
         self.controller.observe_settled_details(details)
         result.updated_situation = self.controller.synchronize_situation(
             result.updated_situation
@@ -1391,6 +1392,7 @@ class NarrativeSession:
                 "event_follow_up": follow_up,
                 "generation_fallback": used_fallback,
                 "latency_ms": round(latency_ms, 1),
+                **({"proposed_narrative_actions": proposed} if proposed != actions else {}),
             },
         )
         output = SessionOutput(
@@ -1511,8 +1513,10 @@ class NarrativeSession:
                 if extra not in actions:
                     actions.append(extra)
         details = settled_details_of(result)
+        proposed = list(actions)
         if self.controller is not None:
-            self.controller.observe_actions(actions)
+            # Only what the story accepted is recorded (see observe_actions).
+            actions = self.controller.observe_actions(proposed)
             self.controller.observe_settled_details(details)
             result.updated_situation = self.controller.synchronize_situation(
                 result.updated_situation
@@ -1551,6 +1555,7 @@ class NarrativeSession:
                 "latency_ms": round(latency_ms, 1),
                 "response_replaced": response_replaced,
                 "question_kind": str(getattr(result, "question_kind", "none")),
+                **({"proposed_narrative_actions": proposed} if proposed != actions else {}),
             },
         )
         if is_exit:

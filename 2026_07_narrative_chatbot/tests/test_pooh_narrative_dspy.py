@@ -1953,10 +1953,17 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn(POOH_GIFT_TOPIC, controller.state.settled_details)
         self.assertIsNone(controller.pop_due_event(follow_up=True))
 
+    def test_only_accepted_actions_are_returned_for_the_record(self):
+        now = [0.0]
+        controller = HoneyGiftEventController(30.0, 30.0, 10.0, clock=lambda: now[0])
+        # The jar question does not exist while the honey is there.
+        self.assertEqual(controller.observe_actions(["not_give_empty_jar", "propose_honey_jar_gift"]),
+                         ["propose_honey_jar_gift"])
+
     def test_contradictory_jar_actions_in_one_turn_are_both_ignored(self):
         now = [0.0]
         controller = self._controller_after_honey_eaten(now)
-        controller.observe_actions(["give_empty_jar", "not_give_empty_jar"])
+        self.assertEqual(controller.observe_actions(["give_empty_jar", "not_give_empty_jar"]), [])
 
         self.assertIsNone(controller.state.jar_decision)
         self.assertIsNone(controller.pop_due_event(follow_up=True))

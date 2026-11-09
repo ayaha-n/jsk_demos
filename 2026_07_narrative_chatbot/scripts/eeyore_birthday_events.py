@@ -428,14 +428,16 @@ class HoneyGiftEventController(NarrativeEventController):
             ),
         )
 
-    def observe_actions(self, actions: list[str]) -> None:
-        """Validate and apply LM-proposed actions without resetting equal decisions."""
+    def observe_actions(self, actions: list[str]) -> list[str]:
+        """Validate and apply LM-proposed actions without resetting equal
+        decisions; returns the ones the story accepted (see the base)."""
         if "give_empty_jar" in actions and "not_give_empty_jar" in actions:
             # Contradictory in one turn: neither is trusted.
             actions = [
                 action for action in actions
                 if action not in ("give_empty_jar", "not_give_empty_jar")
             ]
+        accepted = []
         for action in actions:
             if action not in KNOWN_NARRATIVE_ACTIONS:
                 continue
@@ -443,14 +445,19 @@ class HoneyGiftEventController(NarrativeEventController):
                 # Pooh decides his own gift; proposing it is deciding it, so no
                 # separate decision line has to follow.  A participant who
                 # declines gets Pooh adding it alongside their idea instead.
+                if self.state.honey_status != "full":
+                    continue
                 self._commit_gift()
             elif action in ("give_empty_jar", "not_give_empty_jar"):
                 # The jar question only exists once the honey is gone.
-                if self.state.honey_status == "empty":
-                    self.state.jar_decision = (
-                        GIVE_EMPTY_JAR if action == "give_empty_jar" else NOT_GIVE_EMPTY_JAR
-                    )
+                if self.state.honey_status != "empty":
+                    continue
+                self.state.jar_decision = (
+                    GIVE_EMPTY_JAR if action == "give_empty_jar" else NOT_GIVE_EMPTY_JAR
+                )
+            accepted.append(action)
         self._arm_required_events()
+        return accepted
 
     def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
         """Record what each gift detail settled on; a later value replaces it.

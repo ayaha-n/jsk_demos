@@ -496,11 +496,15 @@ class FootprintsEventController(NarrativeEventController):
             ),
         )
 
-    def observe_actions(self, actions: list[str]) -> None:
+    def observe_actions(self, actions: list[str]) -> list[str]:
         """Apply LM-reported narrative actions, the same closed-vocabulary
         channel eeyore_birthday_events.HoneyGiftEventController uses: an
         organic equivalent of a Python-fired beat pre-empts its later timed
-        fire instead of duplicating it once the model does get around to it."""
+        fire instead of duplicating it once the model does get around to it.
+        Returns the ones the story accepted; one held back (following before
+        the name and look are settled) is not recorded, so the picture book
+        does not start its scene then and again when it really happens."""
+        accepted = []
         for action in actions:
             if action not in KNOWN_FOOTPRINTS_ACTIONS:
                 continue
@@ -527,12 +531,15 @@ class FootprintsEventController(NarrativeEventController):
                 # Only the participant's own words count (see
                 # FootprintsAnalyzeInteraction.participant_suggested_own_footprints);
                 # a world-event turn has no participant words at all.
-                if self._participant_suggested_own_footprints:
-                    self.state.resolved = True
+                if not self._participant_suggested_own_footprints:
+                    continue
+                self.state.resolved = True
             elif action == "gave_hint_directly":
                 self.state.completed_event_ids.add("reveal_hint")
+            accepted.append(action)
         self._participant_suggested_own_footprints = False
         self._arm_required_events()
+        return accepted
 
     def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
         """Record the chosen name, whoever picked it; arms start_following.

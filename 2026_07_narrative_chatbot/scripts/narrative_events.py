@@ -281,12 +281,16 @@ class NarrativeEventController:
             return max(deadline, self._last_activity + quiet)
         return deadline
 
-    def observe_actions(self, actions: list[str]) -> None:
-        """Hook: interpret LM-proposed narrative actions against ``state``.
+    def observe_actions(self, actions: list[str]) -> list[str]:
+        """Hook: interpret LM-proposed narrative actions against ``state``,
+        and return the ones the story accepted (what is recorded for the
+        turn, so the log, the picture book and the history agree with the
+        story, not with what was merely proposed).
 
-        The base implementation does nothing but re-arm events; a scenario
-        with its own action vocabulary overrides this."""
+        The base implementation keeps them all and re-arms events; a
+        scenario with its own action vocabulary overrides this."""
         self._arm_required_events()
+        return list(actions)
 
     def observe_settled_details(self, details: list[SettledDetail | dict]) -> None:
         """Hook: record what each turn settled against ``state``.

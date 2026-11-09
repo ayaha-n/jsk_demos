@@ -55,7 +55,9 @@ class FootprintsTimingTests(unittest.TestCase):
     def test_intro_invitation_does_not_skip_the_name_question(self):
         controller = self.controller()
         controller.begin(0)
-        controller.observe_actions(["started_following", "noticed_second_animal"])
+        # Held back, so not recorded either: the picture book must not start
+        # the following scene here and again when it really happens.
+        self.assertEqual(controller.observe_actions(["started_following", "noticed_second_animal"]), [])
         self.assertFalse(controller.state.following_started)
         self.assertNotIn("second_animal", controller.state.completed_event_ids)
         self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "ask_name")
@@ -77,7 +79,7 @@ class FootprintsTimingTests(unittest.TestCase):
         controller = self.controller()
         controller.begin(0)
         controller.observe_settled_details([SettledDetail(topic=NAMING_TOPIC, value="ぽんぽん")])
-        controller.observe_actions(["started_following", "noticed_fourth_animal"])
+        self.assertEqual(controller.observe_actions(["started_following", "noticed_fourth_animal"]), [])
         self.assertFalse(controller.state.following_started)
         self.assertNotIn("fourth_animal", controller.state.completed_event_ids)
         self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "ask_appearance")
