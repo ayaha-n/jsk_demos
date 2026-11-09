@@ -597,7 +597,11 @@ def narrate(
         beat_id = "opening"
         if config.title:
             entries.append(StoryEntry("title", config.title))
-    elif turn.source == "world_event" and turn.world_event_id in config.beats:
+    elif (turn.source == "world_event" and turn.world_event_id in config.beats
+          and turn.world_event_id not in covered_beats):
+        # A scene already given its page (the conversation reached it first)
+        # is not started again, with its narration and picture, when its
+        # scripted event fires after all: the same picture never appears twice.
         beat_id = turn.world_event_id
     elif turn.ends_story and "session_close" in config.beats:
         # ends_story, not source == "session_close": a participant who says

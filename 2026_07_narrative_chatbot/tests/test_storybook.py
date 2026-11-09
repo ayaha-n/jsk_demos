@@ -104,6 +104,18 @@ class NarrationTest(unittest.TestCase):
              ("speech", "pooh", "「うん。」")],
         )
 
+    def test_a_scene_is_not_started_twice(self):
+        # The conversation reached it first; its scripted event fires later.
+        footprints = storybook.load_story_config("footprints")
+        organic = StoryTurn("participant", "よし、追いかけよう。", user_text="うん",
+                            narrative_actions=("started_following",))
+        self.assertEqual(narrate(organic, footprints)[0], "start_following")
+        scripted = StoryTurn("world_event", "この足あとをたどっていこう。", world_event_id="start_following")
+        self.assertEqual(narrate(scripted, footprints)[0], "start_following")
+        beat, entries = narrate(scripted, footprints, frozenset({"start_following"}))
+        self.assertIsNone(beat)
+        self.assertEqual([e.style for e in entries], ["speech"])  # only Pooh's line, no narration
+
     def test_observed_actions_are_retold_without_speech(self):
         beat, entries = narrate(StoryTurn(
             "observed", "", observed_actions=("参加者がプーの左手をなでた",
