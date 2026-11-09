@@ -722,7 +722,7 @@ async def session_completion(request: web.Request) -> web.Response:
             return web.json_response({"error": "絵本を準備中です。表示が更新されてから確認してください。"}, status=409)
         progress = replace(entry.study)
         try:
-            progress.report(payload["event"], payload["revision"])
+            progress.report(payload["event"], payload["revision"], registry.study_store.passphrase)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=409)
         await asyncio.to_thread(registry.study_store.save, progress)
@@ -868,6 +868,7 @@ def create_app(
     log_dir: Path | None = None,
     local_output_listeners: Sequence[Any] = (),
     crowdsourcing: bool = False,
+    passphrase: str | None = None,
     tts: TTSCache | None = None,
 ) -> web.Application:
     app = web.Application()
@@ -877,7 +878,8 @@ def create_app(
         ttl_seconds=ttl_seconds,
         max_sessions=max_sessions,
         local_output_listeners=local_output_listeners,
-        study_store=ProgressStore(effective_log_dir / "crowdsourcing") if crowdsourcing else None,
+        study_store=(ProgressStore(effective_log_dir / "crowdsourcing", passphrase)
+                     if crowdsourcing else None),
         tts=tts,
     )
     app[REGISTRY_KEY] = registry
@@ -1022,6 +1024,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-sessions", type=int, default=DEFAULT_MAX_SESSIONS)
     parser.add_argument("--crowdsourcing", action="store_true",
                         help="ゴール後に終了ボタンを有効化し、絵本の読了確認後に提出用コードを発行する。")
+    parser.add_argument("--passphrase", default=None, metavar="TEXT",
+                        help="--crowdsourcing と使う。完了コードの下に出す合言葉（全員同じ。"
+                             "クラウドソーシングの回の数だけ変えられる）。例: アイコトバ")
     parser.add_argument("--tts-server-url", default=os.getenv("POOH_TTS_SERVER_URL", ""),
                         help="Style-Bert-VITS2のeditorサーバーURL（例: http://127.0.0.1:8000）。"
                              "指定時のみプーの発話を音声合成する。失敗時は音声なしで継続する。")
@@ -1038,6 +1043,9 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.crowdsourcing and args.scenario not in SUPPORTED_SCENARIOS:
         parser.error("--crowdsourcing は footprints / eeyore_birthday で使えます。")
+    args.passphrase = (args.passphrase or "").strip() or None
+    if args.passphrase and not args.crowdsourcing:
+        parser.error("--passphrase は --crowdsourcing と一緒に使います。")
     return args
 
 
@@ -1073,8 +1081,12 @@ def main() -> int:
         scene_intro=scene_intro,
         local_output_listeners=listeners,
         crowdsourcing=args.crowdsourcing,
+        passphrase=args.passphrase,
         tts=tts,
     )
+    if args.crowdsourcing:
+        print(f"合言葉: {args.passphrase}" if args.passphrase
+              else "合言葉: なし（--passphrase で、完了コードの下に出せます）")
     suffix = f"/?token={access_token}" if access_token else "/"
     print(f"Web UI: http://{args.host}:{args.port}{suffix}")
     try:

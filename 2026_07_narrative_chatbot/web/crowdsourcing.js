@@ -11,6 +11,8 @@
   const codeInput = byId("study-code");
   const status = byId("study-completion-status");
   const hint = byId("study-reading-hint");
+  const passphrasePanel = byId("study-passphrase-panel");
+  const passphrase = byId("study-passphrase");
   const RECEIPT_KEY = "pooh-study-session-id";
   let session = null, progress = {}, revision = null, layout = null;
   let observer = null, sentinel = null, opening = false, reporting = false, confirming = false;
@@ -31,6 +33,8 @@
   function render() {
     codePanel.hidden = !progress.completion_code;
     codeInput.value = progress.completion_code || "";
+    passphrasePanel.hidden = !(progress.completion_code && progress.passphrase);
+    passphrase.value = progress.passphrase || "";
     readButton.hidden = Boolean(progress.completion_code);
     hint.hidden = Boolean(progress.completion_code);
     readButton.disabled = confirming || !revision || progress.book_revision !== revision || !progress.last_page_reported_at;
@@ -141,16 +145,18 @@
     catch (error) { status.textContent = error.message; }
     finally { confirming = false; render(); }
   });
-  byId("study-copy-button").addEventListener("click", async () => {
-    if (!progress.completion_code) return;
+  async function copy(text, input, name) {
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(progress.completion_code);
-      status.textContent = "コピーしました。クラウドソーシングの回答欄に貼り付けてください。";
+      await navigator.clipboard.writeText(text);
+      status.textContent = `${name}をコピーしました。クラウドソーシングの回答欄に貼り付けてください。`;
     } catch {
-      codeInput.focus(); codeInput.select();
-      status.textContent = "コードを選択しました。手動でコピーしてください。";
+      input.focus(); input.select();
+      status.textContent = `${name}を選択しました。手動でコピーしてください。`;
     }
-  });
+  }
+  byId("study-copy-button").addEventListener("click", () => copy(progress.completion_code, codeInput, "完了コード"));
+  byId("study-passphrase-copy-button").addEventListener("click", () => copy(progress.passphrase, passphrase, "合言葉"));
   viewer.addEventListener("scroll", checkLastPage, { passive: true });
   dialog.addEventListener("scroll", checkLastPage, { passive: true });
   document.addEventListener("visibilitychange", checkLastPage);

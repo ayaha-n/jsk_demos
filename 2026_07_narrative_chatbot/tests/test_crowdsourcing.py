@@ -45,6 +45,15 @@ class GoalTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ProgressStore(Path(directory)).load("../secret")
 
+    def test_receipts_written_before_passphrases_still_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProgressStore(Path(directory))
+            path = store.path("b" * 32)
+            path.write_text(json.dumps({"session_id": "b" * 32, "scenario": "footprints",
+                                        "log_name": None, "started_at": "start",
+                                        "completion_code": "AAAA-BBBB-CCCC-DDDD"}))
+            self.assertIsNone(store.load("b" * 32).public()["passphrase"])
+
 
 class CrowdsourcingTests(AioHTTPTestCase):
     async def get_application(self):
@@ -64,7 +73,8 @@ class CrowdsourcingTests(AioHTTPTestCase):
             )
             return session
 
-        return web_server.create_app(factory, crowdsourcing=True, log_dir=self.directory, access_token="secret")
+        return web_server.create_app(factory, crowdsourcing=True, log_dir=self.directory,
+                                     access_token="secret", passphrase="アイコトバ")
 
     @property
     def registry(self):
@@ -124,11 +134,16 @@ class CrowdsourcingTests(AioHTTPTestCase):
             response = await self.post_event(entry, "read_confirmed", book)
             self.assertEqual(response.status, 409)
             self.assertIsNone((await response.json()).get("completion_code"))
-            self.assertEqual((await self.post_event(entry, "last_page", book)).status, 200)
+            response = await self.post_event(entry, "last_page", book)
+            self.assertEqual(response.status, 200)
+            # The passphrase is shown only with the code.
+            self.assertIsNone((await response.json())["passphrase"])
             response = await self.post_event(entry, "read_confirmed", book)
             self.assertEqual(response.status, 200)
-            code = (await response.json())["completion_code"]
+            body = await response.json()
+            code = body["completion_code"]
             self.assertTrue(code)
+            self.assertEqual(body["passphrase"], "アイコトバ")
             repeated = await self.post_event(entry, "read_confirmed", book)
             self.assertEqual((await repeated.json())["completion_code"], code)
         session_id = entry.session.session_id
@@ -139,8 +154,12 @@ class CrowdsourcingTests(AioHTTPTestCase):
         self.assertEqual(saved.log_name, entry.session.log_path.name)
         self.registry.discard(session_id)
         # The durable receipt can still be read after the live session expires.
+        # A later run with another passphrase still shows the one given then.
+        self.registry.study_store.passphrase = "ツギノアイコトバ"
         response = await self.client.get(f"/api/sessions/{session_id}/completion", headers=self.headers)
-        self.assertEqual((await response.json())["completion_code"], code)
+        body = await response.json()
+        self.assertEqual((body["completion_code"], body["passphrase"]), (code, "アイコトバ"))
+        self.assertEqual(saved.passphrase, "アイコトバ")
         self.assertEqual((await self.client.get(f"/api/sessions/{session_id}/completion")).status, 401)
 
     async def test_reading_requires_ended_session_ready_images_and_current_revision(self):

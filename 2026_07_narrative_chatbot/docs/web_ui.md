@@ -126,7 +126,7 @@ ROS relayは不要。実機センサーのイベントを直接発火するも�
 ## クラウドソーシング用の完了確認（--crowdsourcing）
 
 ```bash
-python scripts/web_server.py --scenario footprints --crowdsourcing --public
+python scripts/web_server.py --scenario footprints --crowdsourcing --passphrase アイコトバ --public
 # または --scenario eeyore_birthday
 ```
 
@@ -143,6 +143,10 @@ python scripts/web_server.py --scenario footprints --crowdsourcing --public
    絵本の末尾が画面に表示されると「絵本を読み終えた」が有効になる。
 4. 読了ボタンを押すと、セッションIDとは別のランダムな完了コードを発行する。
    コピーボタンで取得して、クラウドソーシングの回答欄に提出してもらう。
+5. `--passphrase` を付けたときは、完了コードの下に合言葉も出す。合言葉は全員同じで、
+   回答欄に入力してもらい、クラウドソーシング側の正解チェックに使う。
+   回ごとに起動時の引数で変える（起動時に「合言葉: …」と表示される）。
+   付けなければ出さない。
 
 ゴール前でも発話による終了（「さようなら」など）は受け付ける。
 その場合も絵本の読了確認をすれば完了コードを発行し、途中終了かどうかは記録で区別する。
@@ -156,7 +160,13 @@ python scripts/web_server.py --scenario footprints --crowdsourcing --public
 進捗とコードは `logs/crowdsourcing/<session_id>.json` に保存する
 （`POOH_LOG_DIR` を変えた場合はその配下）。`session_id`、`scenario`、`log_name`で
 会話ログと対応づけ、開始・ゴール到達・終了・絵本表示・最終ページ到達の申告・読了確認の
-UTC時刻と、`ended_before_goal`、`completion_code`を保持する。
+UTC時刻と、`ended_before_goal`、`completion_code`、表示した`passphrase`を保持する。
+再読み込みで復元したときは、サーバを別の合言葉で起動し直していても、そのとき出した合言葉を出す。
+
+完了コードはランダムな64ビット（16進16桁）なので、セッション同士でかぶることは実際上ない。
+提出された完了コードは、`logs/crowdsourcing/` の中で同じ `completion_code` を持つファイルを探せば
+セッションと会話ログ（`log_name`）に対応づけられる
+（例: `grep -l ABCD-1234-… logs/crowdsourcing/*.json`）。
 最終ページへの到達はブラウザからの申告であり、文章を読んだことの証明ではない。
 サーバでも終了済み・絵本の準備完了・同じ版の絵本を開いたこと・最終ページ申告を確認してから
 コードを発行する。提出されたコードだけで絵本や会話へアクセスすることはできない。

@@ -2,6 +2,9 @@
 
 Reading events are browser reports, not proof that a participant read the text.
 Submission codes are independent of the capability used to access a session.
+Each is 64 random bits, so no two sessions get the same one in practice; its
+receipt (``<session_id>.json``) ties it to the session's log. A passphrase,
+the same for everyone in one study run, can be shown beside it.
 """
 from __future__ import annotations
 
@@ -57,6 +60,9 @@ class Progress:
     last_page_reported_at: str | None = None
     read_confirmed_at: str | None = None
     completion_code: str | None = None
+    # The passphrase shown with the code (kept, so a reload shows the same
+    # one even if the server was restarted with another).
+    passphrase: str | None = None
 
     def public(self) -> dict[str, Any]:
         return {"enabled": True, "goal_reached": self.goal_reached_at is not None,
@@ -65,9 +71,10 @@ class Progress:
                 "book_opened_at": self.book_opened_at,
                 "last_page_reported_at": self.last_page_reported_at,
                 "read_confirmed_at": self.read_confirmed_at,
-                "completion_code": self.completion_code}
+                "completion_code": self.completion_code,
+                "passphrase": self.passphrase if self.completion_code else None}
 
-    def report(self, event: str, revision: str) -> None:
+    def report(self, event: str, revision: str, passphrase: str | None = None) -> None:
         if self.completion_code:
             return
         if event == "book_opened":
@@ -86,13 +93,16 @@ class Progress:
             self.read_confirmed_at = timestamp()
             code = secrets.token_hex(8).upper()
             self.completion_code = "-".join(code[i:i + 4] for i in range(0, len(code), 4))
+            self.passphrase = passphrase or None
         else:
             raise ValueError("unknown reading event")
 
 
 class ProgressStore:
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, passphrase: str | None = None):
         self.directory = directory
+        # Shown with each completion code issued from now on.
+        self.passphrase = passphrase
 
     def path(self, session_id: str) -> Path:
         if not re.fullmatch(r"[0-9a-f]{32}", session_id):
