@@ -64,8 +64,11 @@ Single-scenario CLI uses, including compilation, still use `--scenario`.
 Robot launches and the robot menu enable postcards by default; the Web
 default stays off. The operator dashboard's print button follows the
 latest robot session's receipt (`.tools/robot_postcards.json`), showing
-preparation, failure or readiness. It opens a preview with one checkbox per
-card for multiple selection and confirmation, then passes that session's
+preparation, failure or readiness. The button always opens a window where
+completed past sessions can also be selected, even while current cards are
+still being made. The current PDF is offered only once ready, separately
+labeled from past sessions. A preview has one checkbox per card for
+multiple selection and confirmation, then passes the selected session's
 explicit PDF and selected card numbers to `print_postcards.py`, never the
 newest PDF from a directory. See [printing.md](printing.md).
 
