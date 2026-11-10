@@ -23,7 +23,7 @@
     "no_idle_close": true,
     "storybook_eink": false,
     "storybook_generate": true,
-    "postcards": false,
+    "postcards": true,
     "postcard_size": "l"
   }
 }

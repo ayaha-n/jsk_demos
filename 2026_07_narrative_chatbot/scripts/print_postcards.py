@@ -242,6 +242,24 @@ def preview(pdf: Path, pages: int, out: Path) -> Path:
     return out
 
 
+def preview_cards(pdf: Path, pages: int, out: Path) -> Path:
+    """Individual numbered previews for the robot's Qt selection dialog.
+
+    No printer discovery or print submission is involved in this mode.
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    images = []
+    for card in range(1, pages + 1):
+        stem = out / f"card-{card}"
+        subprocess.run(["pdftoppm", "-r", "85", "-f", str(card), "-l", str(card),
+                        "-png", "-singlefile", str(pdf), str(stem)], check=True)
+        images.append({"number": card, "image": str(stem.with_suffix(".png").resolve())})
+    manifest = out / "manifest.json"
+    manifest.write_text(json.dumps({"pdf": str(pdf.resolve()), "cards": images}, ensure_ascii=False),
+                        encoding="utf-8")
+    return manifest
+
+
 def newest_postcards() -> Path | None:
     log_dir = Path(os.getenv("POOH_LOG_DIR", str(PROJECT_ROOT / "logs")))
     found = sorted((log_dir / "postcards").glob("*.pdf"), key=lambda p: p.stat().st_mtime)
@@ -331,11 +349,14 @@ def main() -> int:
     parser.add_argument("--cards", help="印刷するカード（1 / 1,3 / 1-3 / all）。省略すると、見本を見てから聞く")
     parser.add_argument("--printer", help="プリンターのURI（既定: .tools/printer.json、なければネットワークで探す）")
     parser.add_argument("--preview-only", action="store_true", help="見本を出すだけで印刷しない")
+    parser.add_argument("--preview-dir", type=Path, help="GUI用に各カードの画像とmanifest.jsonを保存し、印刷せず終了")
+    parser.add_argument("--no-preview", action="store_true", help="GUIですでに見本を表示した場合に、外部の見本を開かない")
     parser.add_argument("--yes", action="store_true", help="確認せずに印刷する")
     args = parser.parse_args()
 
     printer = load_printer()
-    for tool in ("pdftoppm", "pdfinfo", "ipptool"):
+    tools = ("pdftoppm", "pdfinfo") if args.preview_dir is not None else ("pdftoppm", "pdfinfo", "ipptool")
+    for tool in tools:
         if shutil.which(tool) is None:
             print(f"{tool} が見つかりません（docs/printing.md の準備を見てください）。", file=sys.stderr)
             return 1
@@ -344,6 +365,9 @@ def main() -> int:
         print("ポストカードのPDFが見つかりません。", file=sys.stderr)
         return 1
     pages, page_mm = pdf_pages_mm(pdf)
+    if args.preview_dir is not None:
+        print(preview_cards(pdf, pages, args.preview_dir))
+        return 0
     name = paper_for(page_mm, printer["papers"])
     if name is None:
         print(f"このPDF（{page_mm[0]:.0f}×{page_mm[1]:.0f} mm）はプリンターの用紙に合いません。"
@@ -352,10 +376,11 @@ def main() -> int:
     paper = printer["papers"][name]
     print(f"ポストカード: {pdf}（{pages}枚、{paper['label']}）")
 
-    shot = preview(pdf, pages, Path(tempfile.gettempdir()) / f"{pdf.stem}_preview.png")
-    print(f"見本: {shot}")
-    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-        subprocess.Popen(["xdg-open", str(shot)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not args.no_preview:
+        shot = preview(pdf, pages, Path(tempfile.gettempdir()) / f"{pdf.stem}_preview.png")
+        print(f"見本: {shot}")
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            subprocess.Popen(["xdg-open", str(shot)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if args.preview_only:
         return 0
 

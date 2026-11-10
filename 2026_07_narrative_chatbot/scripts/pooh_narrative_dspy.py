@@ -78,7 +78,7 @@ from pooh_examples import (
     TRAINSET,
 )
 from narrative_relay import NarrativeRelayPublisher
-from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario
+from scenarios import DEFAULT_SCENARIO, SCENARIOS, Scenario, get_scenario, selected_scenario_keys
 
 
 PROGRAM_VERSION = "pooh-structured-state-v46"
@@ -1751,11 +1751,16 @@ def build_parser() -> argparse.ArgumentParser:
     only the ones this version has)."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("chat", "compile", "compare"), default="chat")
-    parser.add_argument(
+    scenario_options = parser.add_mutually_exclusive_group()
+    scenario_options.add_argument(
         "--scenario",
         choices=sorted(SCENARIOS),
         default=DEFAULT_SCENARIO,
         help="使用する物語シナリオ。",
+    )
+    scenario_options.add_argument(
+        "--scenarios", nargs="+", choices=[*sorted(SCENARIOS), "all"],
+        help="ROSのモード切替で選べるシナリオ。空白区切り、先頭が初期選択。allで全部。",
     )
     parser.add_argument(
         "--ros-relay",
@@ -1777,9 +1782,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--extra-scenario",
         action="append",
         default=[],
-        choices=sorted(SCENARIOS),
+        choices=[*sorted(SCENARIOS), "all"],
         help="--start-on-mode と使う。ROS側が選べるシナリオを追加する（複数可）。"
-             "それぞれコンパイル済みであること。",
+             "all で全シナリオ。それぞれコンパイル済みであること。",
     )
     parser.add_argument(
         "--no-idle-close",
@@ -1798,7 +1803,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.scenarios is not None:
+        if args.extra_scenario:
+            parser.error("--scenarios と --extra-scenario は併用できません。")
+        if args.mode != "chat" or not (args.start_on_mode and args.ros_relay):
+            parser.error("--scenarios は --mode chat --ros-relay --start-on-mode と使います。")
+    return args
 
 
 def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
@@ -1863,7 +1875,8 @@ def main() -> int:
     args = parse_args()
     try:
         validate_environment()
-        scenarios = [get_scenario(key) for key in [args.scenario, *args.extra_scenario]]
+        requested = args.scenarios or [args.scenario, *args.extra_scenario]
+        scenarios = [get_scenario(key) for key in selected_scenario_keys(requested[0], requested[1:])]
         if getattr(args, "no_idle_close", False):
             # Timings are not part of the compiled program, so no recompiling.
             scenarios = [
@@ -1887,6 +1900,15 @@ def main() -> int:
                 else None
             )
             listeners = create_storybook_listeners(args)
+            if ros_publisher is not None:
+                from postcard_service import PostcardMaker, RobotPostcardStatus
+
+                receipt = RobotPostcardStatus(PROJECT_ROOT / ".tools" / "robot_postcards.json",
+                                              enabled=args.postcards)
+                for listener in listeners:
+                    if isinstance(listener, PostcardMaker):
+                        listener.on_status = receipt.update
+                listeners.insert(0, receipt)
             try:
                 if args.start_on_mode and ros_publisher is not None:
                     run_chat_on_mode(

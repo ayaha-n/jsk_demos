@@ -18,7 +18,10 @@ viewer beside each book, robot sessions' too).
 
 from __future__ import annotations
 
+import json
+import os
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +47,49 @@ class PostcardJob:
 def postcard_path(log_path: Path) -> Path:
     """Where a session's postcards are kept: beside its book (storybooks/)."""
     return log_path.parent / "postcards" / f"{log_path.stem}.pdf"
+
+
+class RobotPostcardStatus:
+    """Local dashboard receipt for the latest robot session, never a PDF glob.
+
+    The GUI runs on the operator PC alongside the chatbot. Atomic writes
+    let it poll without ROS dependencies in the chatbot's Python environment.
+    An older session's background job cannot overwrite a newer session.
+    """
+
+    def __init__(self, path: Path, enabled: bool) -> None:
+        self.path = path
+        self.enabled = enabled
+        self.session_id: str | None = None
+        self._lock = threading.Lock()
+        self._write("idle" if enabled else "off")
+
+    def _write(self, status: str, pdf: Path | None = None) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        data = {"session_id": self.session_id, "status": status,
+                "pdf": str(pdf.resolve()) if pdf is not None else None}
+        with tempfile.NamedTemporaryFile("w", dir=self.path.parent, delete=False,
+                                         encoding="utf-8") as handle:
+            name = handle.name
+            json.dump(data, handle, ensure_ascii=False)
+        try:
+            os.replace(name, self.path)
+        finally:
+            Path(name).unlink(missing_ok=True)
+
+    def __call__(self, session: Any, output: Any) -> None:
+        if getattr(output, "source", "") == "session_open":
+            with self._lock:
+                self.session_id = session.session_id
+                self._write("pending" if self.enabled else "off")
+
+    def update(self, session_id: str, status: str, pdf: Path) -> None:
+        with self._lock:
+            if session_id == self.session_id:
+                self._write(status, pdf)
+
+    def close(self) -> None:
+        pass  # Keep the last receipt available after the chatbot exits.
 
 
 def usable_cards(plan: list, scenes: list, style: Any) -> list:
@@ -92,11 +138,13 @@ class PostcardMaker:
 
     def __init__(self, illustrations: Any = None,
                  make: Callable[[Path, Path], Any] = make_postcards,
-                 wait_sec: float = ILLUSTRATION_WAIT_SEC, poll_sec: float = POLL_SEC) -> None:
+                 wait_sec: float = ILLUSTRATION_WAIT_SEC, poll_sec: float = POLL_SEC,
+                 on_status: Callable[[str, str, Path], None] | None = None) -> None:
         self.illustrations = illustrations
         self.make = make
         self.wait_sec = wait_sec
         self.poll_sec = poll_sec
+        self.on_status = on_status
         self.jobs: dict[str, PostcardJob] = {}
         self._lock = threading.Lock()
         self._closing = threading.Event()
@@ -120,6 +168,7 @@ class PostcardMaker:
             if session_id in self.jobs:
                 return
             self.jobs[session_id] = PostcardJob("waiting", postcard_path(Path(log_path)))
+        self._notify(session_id)
         if goal and hasattr(self.illustrations, "flush"):
             self.illustrations.flush(session_id)
         self._pool.submit(self._run, session_id, Path(log_path), goal)
@@ -132,6 +181,18 @@ class PostcardMaker:
         with self._lock:
             job = self.jobs[session_id]
             job.status, job.error = status, error
+        self._notify(session_id)
+
+    def _notify(self, session_id: str) -> None:
+        if self.on_status is None:
+            return
+        with self._lock:
+            job = self.jobs[session_id]
+            status, pdf = job.status, job.pdf
+        try:
+            self.on_status(session_id, status, pdf)
+        except Exception as exc:
+            print(f"[ポストカード] GUIの状態を更新できません: {type(exc).__name__}", file=sys.stderr)
 
     def _pictures_ready(self, session_id: str, goal: bool) -> bool:
         # At the goal the session goes on, so its scenes stay open: what was

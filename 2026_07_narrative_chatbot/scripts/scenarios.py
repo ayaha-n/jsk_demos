@@ -293,6 +293,17 @@ SCENARIOS: dict[str, Scenario] = {
 DEFAULT_SCENARIO = "tea_party"
 
 
+def selected_scenario_keys(primary: str, extras: list[str]) -> list[str]:
+    """Keep the default first; expand all from the registry and deduplicate."""
+    all_keys = sorted(SCENARIOS, key=lambda key: (key != "eeyore_birthday", key))
+    keys = list(all_keys) if primary == "all" else [primary]
+    for key in extras:
+        keys.extend(all_keys if key == "all" else [key])
+    for key in keys:
+        get_scenario(key)  # Validate explicit names, including the primary.
+    return list(dict.fromkeys(keys))
+
+
 def get_scenario(key: str) -> Scenario:
     try:
         return SCENARIOS[key]

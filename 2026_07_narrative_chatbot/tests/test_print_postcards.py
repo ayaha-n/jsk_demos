@@ -4,8 +4,10 @@ cards and paper. Nothing is sent to a printer."""
 import random
 import struct
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -46,6 +48,28 @@ class PwgRasterTest(unittest.TestCase):
 
 
 class ChoosingTest(unittest.TestCase):
+    def test_gui_previews_are_numbered_and_do_not_query_or_print(self):
+        import json
+        from reportlab.pdfgen import canvas
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pdf = root / "cards.pdf"
+            document = canvas.Canvas(str(pdf))
+            for number in range(1, 4):
+                document.drawString(30, 50, f"Card {number}")
+                document.showPage()
+            document.save()
+            with patch.object(sys, "argv", ["print_postcards.py", str(pdf), "--preview-dir", str(root / "previews")]), \
+                    patch.object(pp, "printer_uri") as discover, patch.object(pp, "send") as send:
+                self.assertEqual(pp.main(), 0)
+            discover.assert_not_called()
+            send.assert_not_called()
+            manifest = json.loads((root / "previews/manifest.json").read_text())
+            self.assertEqual(manifest["pdf"], str(pdf))
+            self.assertEqual([item["number"] for item in manifest["cards"]], [1, 2, 3])
+            self.assertTrue(all(Path(item["image"]).is_file() for item in manifest["cards"]))
+
     def test_paper_comes_from_the_pdf_page(self):
         self.assertEqual(pp.paper_for((119.0, 89.0), PRINTER["papers"]), "l")
         self.assertEqual(pp.paper_for((89.0, 119.0), PRINTER["papers"]), "l")

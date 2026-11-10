@@ -47,4 +47,35 @@ A generated line is sent sentence by sentence while it is written (`narrative_re
 
 The ROS side may also report what the robot saw the participant do (e.g. `参加者がはちみつの壺をプーの左手に手渡した`, from pooh_body's `handover_vision_relay.py`), with an utterance or on its own as `observed_actions`. These are added to the story's events without a reply of their own, logged with source `observed`, and retold in the picture book (with what was said, if they came with an utterance).
 
-With `--start-on-mode`, the chatbot follows the robot's interaction mode: entering the narrative mode starts a story with the opening line, leaving it ends the story with the ending line, and entering it again starts a running story over. The chatbot sends each scenario's start cues (`start_cues` in `scripts/scenarios.py`, e.g. 「イーヨ」 and 「相談」 for 「プー、今日はイーヨーについて相談したいことがあるんだよね」) to the bridge, which turns to the narrative mode when it hears one, and back to free talk when a story ends with its ending line. `--extra-scenario` adds scenarios the robot side can choose. The chatbot keeps running between stories, waits for the bridge if it is not up yet, and is ended with Ctrl+C. Without `--start-on-mode`, one story starts at once and the program ends with it. `--no-idle-close` keeps a story going after the silence that follows its wrap-up.
+With `--start-on-mode`, the chatbot follows the robot's interaction mode: entering the narrative mode starts a story with the opening line, leaving it ends the story with the ending line, and entering it again starts a running story over. The chatbot sends each scenario's start cues (`start_cues` in `scripts/scenarios.py`, e.g. 「イーヨ」 and 「相談」 for 「プー、今日はイーヨーについて相談したいことがあるんだよね」) to the bridge, which turns to the narrative mode when it hears one, and back to free talk when a story ends with its ending line. `--scenarios` selects the scenarios the robot side can choose (space-separated, or `all`). The chatbot keeps running between stories, waits for the bridge if it is not up yet, and is ended with Ctrl+C. Without `--start-on-mode`, one story starts at once and the program ends with it. `--no-idle-close` keeps a story going after the silence that follows its wrap-up.
+
+The operator dashboard uses `narrative_scenarios` from `pooh_operator.launch`.
+Its default is `all` (all registered scenarios, birthday story initially selected).
+Specify one name or a space-separated list to load only those scenarios; the
+first is initially selected. Each needs its compiled program on that PC.
+The equivalent chatbot option is `--scenarios`, used with
+`--ros-relay --start-on-mode`. Repeated names are loaded only once.
+The bridge publishes the loaded list on the latched
+`/pooh_narrative_scenarios` topic, so a dashboard opened later also shows
+the same choices. The old operator launch arguments `narrative_scenario`
+and `narrative_extra_scenarios` are replaced by `narrative_scenarios`.
+Single-scenario CLI uses, including compilation, still use `--scenario`.
+
+Robot launches and the robot menu enable postcards by default; the Web
+default stays off. The operator dashboard's print button follows the
+latest robot session's receipt (`.tools/robot_postcards.json`), showing
+preparation, failure or readiness. It opens a preview with one checkbox per
+card for multiple selection and confirmation, then passes that session's
+explicit PDF and selected card numbers to `print_postcards.py`, never the
+newest PDF from a directory. See [printing.md](printing.md).
+
+```bash
+# All scenarios (the default):
+roslaunch pooh_body pooh_operator.launch use_narrative:=true
+# Select only these two; initially select the birthday story:
+roslaunch pooh_body pooh_operator.launch use_narrative:=true \
+  narrative_scenarios:="eeyore_birthday footprints"
+# Footprints only:
+roslaunch pooh_body pooh_operator.launch use_narrative:=true \
+  narrative_scenarios:=footprints
+```

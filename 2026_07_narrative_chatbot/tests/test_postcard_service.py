@@ -32,6 +32,34 @@ class Pictures:
         return self.done.is_set()
 
 
+class RobotPostcardStatusTest(unittest.TestCase):
+    def test_new_session_hides_previous_pdf_and_ignores_older_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "robot_postcards.json"
+            receipt = postcard_service.RobotPostcardStatus(path, enabled=True)
+            self.assertEqual(json.loads(path.read_text())["status"], "idle")
+            opening = SimpleNamespace(source="session_open")
+            receipt(SimpleNamespace(session_id="old"), opening)
+            receipt.update("old", "ready", Path(directory) / "old.pdf")
+            self.assertEqual(json.loads(path.read_text())["status"], "ready")
+            receipt(SimpleNamespace(session_id="new"), opening)
+            receipt.update("old", "ready", Path(directory) / "old.pdf")
+            self.assertEqual(json.loads(path.read_text()),
+                             {"session_id": "new", "status": "pending", "pdf": None})
+            receipt.update("new", "failed", Path(directory) / "new.pdf")
+            self.assertEqual(json.loads(path.read_text())["status"], "failed")
+            receipt.close()
+            self.assertTrue(path.is_file())
+
+    def test_disabled_robot_does_not_offer_previous_cards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "robot_postcards.json"
+            receipt = postcard_service.RobotPostcardStatus(path, enabled=False)
+            receipt(SimpleNamespace(session_id="new"), SimpleNamespace(source="session_open"))
+            self.assertEqual(json.loads(path.read_text()),
+                             {"session_id": "new", "status": "off", "pdf": None})
+
+
 def ended(source="session_close", mode="narrative"):
     return SimpleNamespace(source=source, interaction_mode=mode)
 
@@ -77,12 +105,17 @@ class PostcardMakerTest(unittest.TestCase):
         self.assertEqual(postcard_path(self.log), self.log.parent / "postcards" / "session_x.pdf")
 
     def test_without_pictures_being_drawn_cards_are_made_right_away(self):
-        maker = PostcardMaker(None, make=self.make)
+        updates = []
+        maker = PostcardMaker(None, make=self.make,
+                             on_status=lambda sid, status, pdf: updates.append((sid, status, pdf)))
         try:
             maker(self.session, ended(mode="exit"))
             self.assertTrue(wait_for(lambda: maker.status("s1").status == "ready"))
         finally:
             maker.close()
+        self.assertEqual([status for _, status, _ in updates], ["waiting", "making", "ready"])
+        self.assertTrue(all(sid == "s1" and pdf == postcard_path(self.log)
+                            for sid, _, pdf in updates))
 
     def test_a_session_closed_before_anything_was_said_has_none(self):
         maker = PostcardMaker(None, make=self.make)

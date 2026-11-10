@@ -15,6 +15,35 @@ import web_server
 
 
 class LaunchTest(unittest.TestCase):
+    def test_all_scenarios_keep_default_first_and_load_each_only_once(self):
+        from scenarios import SCENARIOS, selected_scenario_keys
+
+        args = pooh_narrative_dspy.parse_args([
+            "--scenarios", "all", "footprints", "--ros-relay", "--start-on-mode",
+        ])
+        keys = selected_scenario_keys(args.scenarios[0], args.scenarios[1:])
+        self.assertEqual(keys[0], "eeyore_birthday")
+        self.assertEqual(set(keys), set(SCENARIOS))
+        self.assertEqual(len(keys), len(SCENARIOS))
+        self.assertEqual(selected_scenario_keys("eeyore_birthday", []), ["eeyore_birthday"])
+        self.assertEqual(selected_scenario_keys("footprints", ["tea_party", "footprints"]),
+                         ["footprints", "tea_party"])
+        with self.assertRaises(ValueError):
+            selected_scenario_keys("footprints", ["unknown"])
+
+    def test_unified_scenarios_preserve_order_and_single_scenario_support(self):
+        from scenarios import selected_scenario_keys
+
+        args = pooh_narrative_dspy.parse_args([
+            "--scenarios", "footprints", "eeyore_birthday", "footprints",
+            "--ros-relay", "--start-on-mode",
+        ])
+        self.assertEqual(selected_scenario_keys(args.scenarios[0], args.scenarios[1:]),
+                         ["footprints", "eeyore_birthday"])
+        args = pooh_narrative_dspy.parse_args(["--mode", "compile", "--scenario", "footprints"])
+        self.assertEqual(args.scenario, "footprints")
+        self.assertIsNone(args.scenarios)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -50,6 +79,7 @@ class LaunchTest(unittest.TestCase):
         # As pooh_body's pooh_narrative.launch starts it by default.
         self.assertTrue(args.start_on_mode and args.no_idle_close and args.storybook_generate)
         self.assertFalse(args.storybook_eink)
+        self.assertTrue(args.postcards)
         self.assertNotIn("--crowdsourcing", argv)
 
     def test_extra_scenarios_only_with_start_on_mode_and_never_the_main_one(self):
