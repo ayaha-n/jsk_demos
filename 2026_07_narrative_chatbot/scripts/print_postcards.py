@@ -12,7 +12,8 @@ and a JPEG through the queue is refused by the printer. Here each card is
 drawn at the printer's resolution to exactly the loaded paper, turned to
 the paper's direction, written as PWG raster (what the printer lists:
 300 dpi, rgb_8), and sent with ``ipptool`` naming the borderless paper.
-Works from any PC on the same network with ``pdftoppm`` (poppler-utils)
+Works from any PC on the same network, or over a USB cable (IPP over USB,
+which ippusbxd serves on localhost), with ``pdftoppm`` (poppler-utils)
 and ``ipptool`` (cups-ipp-utils); see docs/printing.md.
 """
 
@@ -22,6 +23,7 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -50,11 +52,35 @@ def find_printer(name: str) -> str | None:
     return next((uri for uri in found.split() if name.lower() in uri.lower()), None)
 
 
+# ippusbxd (started by udev when an IPP-over-USB printer is plugged in)
+# serves each one on localhost from port 60000 up.
+USB_PORTS = range(60000, 60010)
+
+
+def find_usb_printer(name: str, ports=USB_PORTS) -> str | None:
+    """The printer's IPP address over a USB cable (ippusbxd), by name."""
+    for port in ports:
+        try:
+            socket.create_connection(("localhost", port), timeout=0.5).close()
+        except OSError:
+            continue
+        uri = f"ipp://localhost:{port}/ipp/print"
+        model = printer_attribute(uri, "printer-make-and-model")
+        if model and name.lower() in model.lower():
+            return uri
+    return None
+
+
 def printer_uri(printer: dict, given: str | None = None, local: Path = LOCAL_PATH,
-                find=find_printer) -> str | None:
-    """--printer, else the address this PC remembered, else found and remembered."""
+                find=find_printer, find_usb=find_usb_printer) -> str | None:
+    """--printer, else a USB cable, else the address this PC remembered,
+    else found on the network and remembered. The USB address is not
+    remembered: its port depends on the order printers were plugged in."""
     if given:
         return given
+    usb = find_usb(printer["find_name"])
+    if usb:
+        return usb
     try:
         remembered = json.loads(local.read_text(encoding="utf-8")).get("uri")
     except (OSError, ValueError, AttributeError):
@@ -299,11 +325,16 @@ PRINT_TEST = """{{
 
 def loaded_paper(uri: str) -> str | None:
     """The printer's media-ready keyword (which paper is in it), if it answers."""
+    return printer_attribute(uri, "media-ready")
+
+
+def printer_attribute(uri: str, name: str) -> str | None:
+    """One of the printer's attributes, as ipptool prints it, if it answers."""
     with tempfile.NamedTemporaryFile("w", suffix=".test", delete=False) as test:
         test.write('{ OPERATION Get-Printer-Attributes\n GROUP operation-attributes-tag\n'
                    ' ATTR charset attributes-charset utf-8\n'
                    ' ATTR naturalLanguage attributes-natural-language en\n'
-                   ' ATTR uri printer-uri $uri\n ATTR keyword requested-attributes media-ready\n'
+                   f' ATTR uri printer-uri $uri\n ATTR keyword requested-attributes {name}\n'
                    ' STATUS successful-ok }\n')
     try:
         result = subprocess.run(["ipptool", "-tv", uri, test.name], capture_output=True,
@@ -313,7 +344,7 @@ def loaded_paper(uri: str) -> str | None:
     finally:
         os.unlink(test.name)
     for line in result.stdout.splitlines():
-        if line.strip().startswith("media-ready (") and "=" in line:
+        if line.strip().startswith(f"{name} (") and "=" in line:
             return line.split("=", 1)[1].strip()
     return None
 
@@ -386,12 +417,12 @@ def main() -> int:
 
     uri = printer_uri(printer, args.printer)
     if uri is None:
-        print(f"{printer['name']} がネットワークに見つかりません。電源とネットワークを確かめるか、"
-              "--printer ipp://<アドレス>:631/ipp/print で指定してください。", file=sys.stderr)
+        print(f"{printer['name']} がUSBにもネットワークにも見つかりません。電源とケーブル・ネットワークを"
+              "確かめるか、--printer ipp://<アドレス>:631/ipp/print で指定してください。", file=sys.stderr)
         return 1
     loaded = loaded_paper(uri)
     if loaded is None:
-        print(f"注意: プリンター（{uri}）が答えません。電源・ネットワークを確かめてください。")
+        print(f"注意: プリンター（{uri}）が答えません。電源・ケーブル・ネットワークを確かめてください。")
     elif loaded != paper["media_ready"]:
         print(f"注意: プリンターに入っている用紙は {loaded} です（このPDFは {paper['label']}）。")
     try:

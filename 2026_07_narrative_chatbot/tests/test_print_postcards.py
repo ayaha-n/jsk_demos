@@ -85,16 +85,22 @@ class ChoosingTest(unittest.TestCase):
             local = Path(tmp) / "printer.json"
             asked = []
             find = lambda name: asked.append(name) or "ipp://CP1500abc.local:631/ipp/print"
-            self.assertEqual(pp.printer_uri(PRINTER, "ipp://given", local, find), "ipp://given")
+            no_usb = lambda name: None
+            self.assertEqual(pp.printer_uri(PRINTER, "ipp://given", local, find, no_usb), "ipp://given")
             self.assertEqual(asked, [])
             # Found once on the network, then remembered on this PC.
-            self.assertEqual(pp.printer_uri(PRINTER, None, local, find), "ipp://CP1500abc.local:631/ipp/print")
+            self.assertEqual(pp.printer_uri(PRINTER, None, local, find, no_usb),
+                             "ipp://CP1500abc.local:631/ipp/print")
             self.assertEqual(asked, ["CP1500"])
             self.assertEqual(json.loads(local.read_text())["uri"], "ipp://CP1500abc.local:631/ipp/print")
-            self.assertEqual(pp.printer_uri(PRINTER, None, local, lambda name: None),
+            self.assertEqual(pp.printer_uri(PRINTER, None, local, lambda name: None, no_usb),
                              "ipp://CP1500abc.local:631/ipp/print")
+            # A USB cable wins over the remembered address, and is not remembered.
+            usb = lambda name: "ipp://localhost:60000/ipp/print"
+            self.assertEqual(pp.printer_uri(PRINTER, None, local, find, usb), "ipp://localhost:60000/ipp/print")
+            self.assertEqual(json.loads(local.read_text())["uri"], "ipp://CP1500abc.local:631/ipp/print")
             local.unlink()
-            self.assertIsNone(pp.printer_uri(PRINTER, None, local, lambda name: None))
+            self.assertIsNone(pp.printer_uri(PRINTER, None, local, lambda name: None, no_usb))
 
     def test_cards_to_print(self):
         self.assertEqual(pp.parse_cards("", 3), [1, 2, 3])

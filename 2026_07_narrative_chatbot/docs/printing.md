@@ -12,7 +12,7 @@ GUIはチャットボットが書く `.tools/robot_postcards.json` を読み、
 チャットボットの配置先を変えたら、`pooh_operator.launch` の
 `narrative_chatbot_dir` でGUIとチャットボットの両方に同じ場所を指定する。
 
-ポストカードの PDF（[postcard.md](postcard.md)）を、研究室の SELPHY にふちなしで印刷する。同じネットワークにあるPCなら、どのPCからでも使える。
+ポストカードの PDF（[postcard.md](postcard.md)）を、SELPHY にふちなしで印刷する。同じネットワークにあるPCか、USBケーブルでつないだPCから使える。
 
 ```bash
 python scripts/print_postcards.py                      # いちばん新しいポストカード: 見本を出して、どのカードを刷るか聞く
@@ -31,7 +31,7 @@ python scripts/print_postcards.py --preview-only       # 見本だけ（印刷�
 | 項目 | 値 |
 |---|---|
 | プリンター | Canon SELPHY CP1500 |
-| 宛先 | プリンター自身（`ipp://<プリンターの名前>.local:631/ipp/print`）。初めて使うときに、同じネットワークから名前に「CP1500」を含むプリンターを探し（`ippfind`）、そのPCの `.tools/printer.json`（コミットしない）に覚える。`--printer` で指定もできる |
+| 宛先 | プリンター自身。USBでつないでいればそれを使う（`ipp://localhost:60000/ipp/print`、下の「USBでつなぐ」）。なければ `ipp://<プリンターの名前>.local:631/ipp/print`: 初めて使うときに、同じネットワークから名前に「CP1500」を含むプリンターを探し（`ippfind`）、そのPCの `.tools/printer.json`（コミットしない）に覚える。`--printer` で指定もできる |
 | L判 | 89 × 119 mm（SELPHY の L。写真店の L判 89×127 mm とは違う）。ふちなし |
 | はがき | 100 × 148 mm。ふちなし |
 
@@ -42,7 +42,16 @@ python scripts/print_postcards.py --preview-only       # 見本だけ（印刷�
 - このリポジトリと `.venv`（Pillow を使う）。
 - `pdftoppm`・`pdfinfo`（`sudo apt install poppler-utils`）と `ipptool`（`sudo apt install cups-ipp-utils`）。
 - `.local` の名前が引けること（Ubuntu なら avahi が既定で入っている）。見つからない・引けなければ `--printer ipp://<プリンターのIPアドレス>:631/ipp/print`。プリンターのアドレスは `ippfind` か、プリンターの画面で確かめる。覚えたアドレスを変えるときは `.tools/printer.json` を消すか書き換える。
+- USBでつなぐなら `ippusbxd`（Ubuntu 20.04。`sudo apt install ippusbxd`）か `ipp-usb`（22.04 以降）。
 - CUPS にプリンターを登録する必要はない。
+
+## USBでつなぐ
+
+ネットワークで見つからないとき（mDNS が届かない Wi-Fi など）は、USB-C ケーブルでPCにつなぐ。2026-11-10 に確かめたこと。
+
+- SELPHY CP1500 は USB で IPP over USB（インターフェースクラス 7/1/4）に対応している。Ubuntu では、つなぐと udev が `ippusbxd` を起動し、プリンターを `ipp://localhost:60000/ipp/print` で受け付ける（2台目以降は 60001, …）。ネットワークのときと同じく PWG ラスターを受け付け、入っている用紙も答える。
+- `print_postcards.py` は、まず localhost の 60000〜60009 番に名前に「CP1500」を含むプリンターがいないか確かめ、いればそれに送る。USB の宛先は差した順で番号が変わるので `.tools/printer.json` には覚えない（覚えてあるネットワークの宛先より USB を先に使う）。
+- `ippusbxd` がない環境（Ubuntu 22.04 以降は `ipp-usb`）でも、localhost の同じ範囲で受け付けていれば同じように見つかる。
 
 ## なぜ CUPS のキュー（lp）を通さないか
 
