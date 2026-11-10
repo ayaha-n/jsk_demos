@@ -75,6 +75,23 @@ class FootprintsTimingTests(unittest.TestCase):
         self.now = 180
         self.assertEqual(controller.pop_due_event().event_id, "second_animal")
 
+    def test_agreed_following_sets_off_without_inviting_again(self):
+        controller = self.controller()
+        controller.begin(0)
+        self.assertEqual(controller.observe_actions(["started_following"]), [])
+        self.assertEqual(controller.pop_due_event(follow_up=True).event_id, "ask_name")
+        controller.observe_settled_details([SettledDetail(topic=NAMING_TOPIC, value="足跡さん")])
+        self.now = 30
+        controller.observe_activity(8)
+        controller.observe_settled_details([SettledDetail(topic=APPEARANCE_UNRESOLVED, value="ふわふわ")])
+        # Right behind the answer, not after another pause.
+        event = controller.pop_due_event(follow_up=True)
+        self.assertEqual(event.event_id, "start_following")
+        self.assertNotIn("きみも一緒に来てくれない", event.fallback_response)
+        self.assertIn("足跡さん", event.fallback_response)
+        self.assertIn("足跡さん", event.situation_update.add_events[0])
+        self.assertNotIn("ウズウズ", event.description)
+
     def test_tracking_request_after_naming_still_asks_appearance_first(self):
         controller = self.controller()
         controller.begin(0)

@@ -296,6 +296,11 @@ class FootprintsState:
     name: str | None = None
     named: bool = False
     following_started: bool = False
+    # The pair already agreed to follow the tracks before the name and look
+    # were settled (started_following held back in observe_actions). Pooh
+    # had already said "追いかけてみよう" then, so start_following must not
+    # invite the participant again (confirmed live as a repeated invitation).
+    following_agreed: bool = False
     # Settled by the participant's own description, or by Pooh's own guess,
     # either before or after ask_appearance fires; see observe_settled_details.
     appearance_settled: bool = False
@@ -512,9 +517,11 @@ class FootprintsEventController(NarrativeEventController):
                 if not self.state.named:
                     # An invitation in the introduction is not the tracking
                     # beat. Ask for a name first instead of forcing a name.
+                    self.state.following_agreed = True
                     self._deadlines["ask_name"] = self.clock()
                     continue
                 if not (self.state.appearance_settled or "ask_appearance" in self.state.completed_event_ids):
+                    self.state.following_agreed = True
                     self._deadlines["ask_appearance"] = self.clock()
                     continue
                 self.state.following_started = True
@@ -554,6 +561,14 @@ class FootprintsEventController(NarrativeEventController):
             elif detail.topic == APPEARANCE_UNRESOLVED:
                 self.state.appearance_settled = True
         self._arm_required_events()
+        if (
+            self.state.following_agreed and self.state.appearance_settled
+            and "start_following" in self._deadlines
+        ):
+            # Already agreed to follow; with the name and look now settled,
+            # set off right after this answer instead of leaving a pause in
+            # which the participant has to ask "このまま追いかけるの？" again.
+            self._deadlines["start_following"] = self.clock()
 
     @staticmethod
     def _fire_ask_name(state: FootprintsState) -> WorldEvent:
@@ -619,23 +634,32 @@ class FootprintsEventController(NarrativeEventController):
         # Same hybrid as _fire_ask_appearance: the registered line (with its
         # recorded wav/motion) says "ウズウズ" for Python's own default name;
         # a participant-chosen name falls back to a dynamically built line.
-        line = (
-            START_FOLLOWING_RESPONSE
-            if state.name == "ウズウズ"
-            else (
+        # Already agreed to follow earlier: set off together without inviting
+        # the participant again.
+        if state.following_agreed:
+            line = f"それじゃあ、このまま足あとをたどって、{state.name}をさがしにいこう。"
+        elif state.name == "ウズウズ":
+            line = START_FOLLOWING_RESPONSE
+        else:
+            line = (
                 f"この足あとをたどっていけば、{state.name}に会えるかもしれないね。"
                 "よし、追いかけてみよう。きみも一緒に来てくれない？"
             )
+        # START_FOLLOWING_EVENT (also in the trainset) names ウズウズ; any
+        # other name gets the same event with the actual name.
+        added_event = (
+            START_FOLLOWING_EVENT if state.name == "ウズウズ"
+            else START_FOLLOWING_EVENT.replace("ウズウズ", str(state.name))
         )
         return WorldEvent(
             event_id="start_following",
             description=(
-                "プーが参加者を誘って、ウズウズの足跡を追いかけ始めた。"
+                f"プーが参加者と、{state.name}の足跡を追いかけ始めた。"
                 "これは既に起きた出来事。"
             ),
             scene_id="4",
             fallback_response=line,
-            situation_update=SituationUpdate(add_events=[START_FOLLOWING_EVENT]),
+            situation_update=SituationUpdate(add_events=[added_event]),
             fixed_response=True,
         )
 
