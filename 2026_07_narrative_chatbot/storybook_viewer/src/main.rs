@@ -13,17 +13,19 @@
 //! of a book being written.
 //!
 //! The book is done at the story's goal while the conversation may go on:
-//! what is said after it (the epilogue) comes as whole pages
-//! (`stored_page`: its place in the epilogue, 0, 1, …, and the PNG in the
-//! event's own directory), kept without being drawn or ending reading. They
-//! go after the story's last page, before the cover (the last page at
-//! `book_end`); one sent again replaces the page in its place.
+//! what is said after it (the epilogue) comes page by page (`stored_page`:
+//! its place in the epilogue, 0, 1, …, and the page's text in `stored_text`,
+//! laid out like text stages; its own `stages` are empty, so nothing is drawn),
+//! written by the same pen as a live page but into a page of its own, kept
+//! without being drawn or ending reading. They go after the story's last
+//! page, before the cover (the last page at `book_end`); one sent again
+//! replaces the page in its place.
 
+use ab_glyph::FontRef;
+use plush_memory_viewer::ink;
 use plush_memory_viewer::qtfb::{InputEvent, INPUT_TOUCH_PRESS, INPUT_TOUCH_RELEASE};
 use plush_memory_viewer::viewer::{self, Hooks, Screen};
 use serde_json::Value;
-use std::fs::File;
-use std::io::BufReader;
 use std::time::{Duration, Instant};
 
 const NAME: &str = "storybook_viewer";
@@ -141,15 +143,8 @@ impl Storybook {
             eprintln!("{NAME}: epilogue page {} was {layout}, panel is {}; not kept", slot + 1, screen.layout());
             return;
         }
-        let path = manifest.get("stored_png").and_then(Value::as_str).unwrap_or("");
         let (w, h) = screen.size();
-        let canvas = match read_page(path, w, h) {
-            Ok(canvas) => canvas,
-            Err(e) => {
-                eprintln!("{NAME}: epilogue page {} unreadable: {e}", slot + 1);
-                return;
-            }
-        };
+        let canvas = write_page(manifest, w, h);
         let page = Page { number: None, layout: screen.layout(), canvas };
         if slot < self.epilogue_len {
             self.pages[at + slot] = page;
@@ -186,29 +181,29 @@ impl Storybook {
     }
 }
 
-/// A whole-panel PNG (RGB or RGBA, 8 bit) as an RGB565 canvas `w` x `h`.
-fn read_page(path: &str, w: usize, h: usize) -> Result<Vec<u8>, String> {
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut decoder = png::Decoder::new(BufReader::new(file));
-    decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-    let mut buf = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
-    if (info.width as usize, info.height as usize) != (w, h) {
-        return Err(format!("{}x{}, panel is {w}x{h}", info.width, info.height));
+/// A page `w` x `h` (RGB565) with the manifest's `stored_text` (text stages,
+/// each with its own `y`) written on it by the viewer's own pen, as a live
+/// page's text is, but all at once and off the panel.
+fn write_page(manifest: &Value, w: usize, h: usize) -> Vec<u8> {
+    let bg = manifest.get("bg").and_then(Value::as_array);
+    let channel = |i: usize| bg.and_then(|c| c.get(i)).and_then(Value::as_u64).unwrap_or(255) as u16;
+    let px565: u16 = ((channel(0) >> 3) << 11) | ((channel(1) >> 2) << 5) | (channel(2) >> 3);
+    let mut canvas = px565.to_le_bytes().repeat(w * h);
+    let font = FontRef::try_from_slice(ink::FONT_TTF).expect("bundled font");
+    let stages = manifest.get("stored_text").and_then(Value::as_array).cloned().unwrap_or_default();
+    for stage in &stages {
+        let int = |key: &str| stage.get(key).and_then(Value::as_i64).unwrap_or(0) as i32;
+        let text = stage.get("text").and_then(Value::as_str).unwrap_or("");
+        let px = stage.get("px").and_then(Value::as_f64).unwrap_or(56.0) as f32;
+        let center = stage.get("align").and_then(Value::as_str) == Some("center");
+        let pen_r = stage.get("pen_r").and_then(Value::as_i64).map_or(ink::PEN_R, |r| r as i32);
+        let (strokes, _) = ink::plan(&font, text, int("x"), int("y"), int("w"), px, center);
+        let mut writer = ink::Writer::new(strokes, usize::MAX, pen_r);
+        while !writer.done() {
+            writer.step(&mut canvas, w, h);
+        }
     }
-    let channels = match info.color_type {
-        png::ColorType::Rgb => 3,
-        png::ColorType::Rgba => 4,
-        other => return Err(format!("{other:?}")),
-    };
-    let mut canvas = Vec::with_capacity(w * h * 2);
-    for px in buf[..info.buffer_size()].chunks_exact(channels) {
-        let (r, g, b) = (px[0] as u16, px[1] as u16, px[2] as u16);
-        let px565: u16 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-        canvas.extend_from_slice(&px565.to_le_bytes());
-    }
-    Ok(canvas)
+    canvas
 }
 
 fn main() {
@@ -222,27 +217,22 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::read_page;
-    use std::fs::File;
+    use super::write_page;
+    use serde_json::json;
 
     #[test]
-    fn a_whole_panel_png_becomes_its_canvas() {
-        let path = std::env::temp_dir().join("storybook_viewer_page_test.png");
-        let (w, h) = (4usize, 2usize);
-        let mut rgb = vec![255u8; w * h * 3];
-        rgb[..3].copy_from_slice(&[255, 0, 0]);
-        {
-            let file = File::create(&path).unwrap();
-            let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
-            encoder.set_color(png::ColorType::Rgb);
-            encoder.set_depth(png::BitDepth::Eight);
-            encoder.write_header().unwrap().write_image_data(&rgb).unwrap();
-        }
-        let canvas = read_page(path.to_str().unwrap(), w, h).unwrap();
-        assert_eq!(canvas.len(), w * h * 2);
-        assert_eq!(&canvas[..2], &0xf800u16.to_le_bytes());
-        assert_eq!(&canvas[2..4], &0xffffu16.to_le_bytes());
-        assert!(read_page(path.to_str().unwrap(), h, w).is_err());
-        let _ = std::fs::remove_file(path);
+    fn a_stored_page_is_written_with_the_pen_off_the_panel() {
+        let (w, h) = (400usize, 300usize);
+        let blank = write_page(&json!({"stored_text": [], "bg": [255, 255, 255]}), w, h);
+        assert_eq!(blank.len(), w * h * 2);
+        assert!(blank.iter().all(|&b| b == 0xff));
+        let page = write_page(&json!({"bg": [255, 255, 255], "stages": [], "stored_text": [
+            {"x": 20, "y": 20, "w": 360, "px": 56.0, "text": "そのあと"},
+            {"x": 20, "y": 120, "w": 360, "px": 56.0, "text": "またね。", "pen_r": 4},
+        ]}), w, h);
+        let inked = page.chunks_exact(2).filter(|px| px != &[0xff, 0xff]).count();
+        assert!(inked > 100, "{inked}");
+        // Nothing above the first line.
+        assert!(page[..w * 10 * 2].iter().all(|&b| b == 0xff));
     }
 }

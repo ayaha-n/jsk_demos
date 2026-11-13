@@ -9,8 +9,8 @@ description = "AppLoad viewer for the narrative chatbot's picture book: plush_me
 # The viewer engine (event protocol, handwriting, rotation), shared with plush_memory.
 plush_memory_viewer = { path = "../../../plush_memory/eink-viewer" }
 serde_json = "1"
-# Reading an epilogue page sent whole (the same png as the viewer engine).
-png = "0.17"
+# The bundled handwriting font, to write an epilogue page off the panel.
+ab_glyph = "0.2"
 
 [profile.release]
 strip = true

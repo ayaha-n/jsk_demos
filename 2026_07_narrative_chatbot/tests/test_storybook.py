@@ -862,6 +862,32 @@ class LiveStorybookTest(unittest.TestCase):
         self.assertIn(("page", "opening"), self.backend.calls)
 
 
+class EinkEpilogueTest(unittest.TestCase):
+    def test_epilogue_page_goes_as_text_for_the_viewer_s_own_pen(self):
+        sent = []
+        push = SimpleNamespace(
+            BG=(255, 255, 255), EINK_HOST="tablet",
+            _send_event=lambda event_id, manifest, tmp, files, host, app_dir:
+                sent.append((manifest, files)))
+        backend = storybook_live.EinkBackend(push=push, app_dir="/app")
+        backend.layout = LAYOUTS["landscape"]
+        builder = StoryBuilder(EEYORE, LAYOUTS["landscape"], full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.add(StoryTurn("story_goal", ""))
+        builder.add(StoryTurn("participant", "うん。", user_text="たのしかった"))
+        page = builder.epilogue_pages[0]
+        backend.store_page(page, 0)
+        (manifest, files), = sent
+        self.assertEqual(files, [])
+        self.assertEqual(manifest["stages"], [])  # nothing drawn on the panel
+        self.assertEqual((manifest["stored_page"], manifest["stored_layout"]), (0, "landscape"))
+        title, said = manifest["stored_text"][:2]
+        self.assertEqual((title["text"], title["align"], title["y"]),
+                         (storybook.EPILOGUE_TITLE, "center", page.placed[0].y))
+        self.assertIn("たのしかった", said["text"])
+        self.assertEqual(said["x"], page.placed[1].x - storybook_live.WRAP_SLACK_PX // 2)
+
+
 class FakeIllustrations:
     """SessionIllustrations' wait, recorded; never done unless told."""
 

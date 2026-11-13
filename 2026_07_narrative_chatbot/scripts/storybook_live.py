@@ -15,8 +15,8 @@ Backends:
   done, the viewer lets the reader turn back through its pages by tapping.
   The book is done at the story's goal (a ``story_goal`` turn), while the
   session may go on: what is said after it is the epilogue, sent page by
-  page as whole pictures for the viewer to keep after the story's last
-  page, never drawn over the page being read.
+  page for the viewer to write off the panel, with the same pen, and keep
+  after the story's last page, never drawn over the page being read.
 - ``PreviewBackend`` re-renders the current page as a PNG after each event,
   for working without the tablet.
 """
@@ -248,20 +248,25 @@ class EinkBackend:
         self._end_page(book_end=True)
 
     def store_page(self, page: storybook.StoryPage, slot: int) -> None:
-        """Send an epilogue page as one picture of the whole panel, for the
-        viewer to keep, not to draw: the reader may be on any page of the
-        finished book (see storybook_viewer's stored_page)."""
-        from storybook_render import render_page
-
-        event_id = self._next_id()
-        remote = f"{self.app_dir}/events/{event_id}/page.png"
+        """Send an epilogue page for the viewer to keep, not to draw: the
+        reader may be on any page of the finished book. Its text goes as
+        text stages (``stored_text``, each placed as ``write`` places it),
+        which the viewer writes with the same pen as a live page, off the
+        panel (see storybook_viewer's stored_page)."""
+        stages = []
+        for item in page.placed:
+            stage = {"x": item.x - WRAP_SLACK_PX // 2, "y": item.y, "w": item.w + WRAP_SLACK_PX,
+                     "px": item.px, "text": "\n".join(item.lines)}
+            if item.align:
+                stage["align"] = item.align
+            if item.pen_r:
+                stage["pen_r"] = item.pen_r
+            stages.append(stage)
         manifest = {"stages": [], "stored_page": slot, "stored_layout": self.layout.name,
-                    "stored_png": remote}
+                    "stored_text": stages, "bg": list(self.push.BG)}
         try:
             with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "page.png"
-                render_page(page, self.layout, page_number=False).save(path)
-                self.push._send_event(event_id, manifest, directory, [str(path)],
+                self.push._send_event(self._next_id(), manifest, directory, [],
                                       self.push.EINK_HOST, self.app_dir)
         except Exception as exc:
             _report(self, exc)
