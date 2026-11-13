@@ -1188,6 +1188,8 @@ class NarrativeSession:
         self.ended = False
         # Whether Pooh's latest answer asked the participant something.
         self.awaiting_reply = False
+        # Whether the story has reached its goal (see _announce_goal).
+        self.goal_reached = False
 
     def _history(self) -> str:
         return (
@@ -1206,8 +1208,11 @@ class NarrativeSession:
 
     def _publish(self, output: SessionOutput) -> None:
         self._notify_listeners(output)
-        if self.ros_publisher is None:
-            return
+        if self.ros_publisher is not None:
+            self._publish_to_robot(output)
+        self._announce_goal(output)
+
+    def _publish_to_robot(self, output: SessionOutput) -> None:
         self.ros_publisher.publish(
             bot_response=output.bot_response,
             narrative_actions=output.narrative_actions,
@@ -1219,6 +1224,33 @@ class NarrativeSession:
             streamed=output.streamed,
             interaction_mode=output.interaction_mode,
         )
+
+    def _announce_goal(self, output: SessionOutput) -> None:
+        """Once the story reaches its goal (crowdsourcing.reached_goal), log
+        and tell the listeners so (source "story_goal", sent to no robot),
+        right after the turn that reached it: the picture book is finished
+        there and the postcards made, while the session goes on until the
+        participant leaves. A goodbye that reaches it ends the story anyway."""
+        from crowdsourcing import reached_goal
+
+        if (self.goal_reached or self.ended or output.interaction_mode == "exit"
+                or output.source in ("session_open", "session_close")
+                or not reached_goal(self)):
+            return
+        self.goal_reached = True
+        if self.log_path.exists():
+            append_session_record(self.log_path, {
+                "scenario": self.scenario.key,
+                "session_id": self.session_id,
+                "source": "story_goal",
+            })
+        self._notify_listeners(SessionOutput(
+            source="story_goal",
+            bot_response="",
+            interaction_mode="narrative",
+            scene_id="none",
+            updated_situation=self.current_situation,
+        ))
 
     def start(self) -> SessionOutput | None:
         """Start once and expose the scripted opening to every output path."""

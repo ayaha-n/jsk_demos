@@ -13,6 +13,10 @@ Backends:
   Pro through ``plush_memory/scripts/eink_memory_push.py``: the illustration
   materializes first, then the text is written by hand.  Once the book is
   done, the viewer lets the reader turn back through its pages by tapping.
+  The book is done at the story's goal (a ``story_goal`` turn), while the
+  session may go on: what is said after it is the epilogue, sent page by
+  page as whole pictures for the viewer to keep after the story's last
+  page, never drawn over the page being read.
 - ``PreviewBackend`` re-renders the current page as a PNG after each event,
   for working without the tablet.
 """
@@ -83,6 +87,9 @@ class Backend(Protocol):
     def write(self, event: WriteEntries, points_per_step: int) -> None: ...
     def add_picture(self, page: storybook.StoryPage) -> None: ...
     def end_book(self) -> None: ...
+    # An epilogue page, whole, to keep with the finished book (see
+    # LiveStorybook._store_epilogue); stored again as it grows.
+    def store_page(self, page: storybook.StoryPage, slot: int) -> None: ...
 
 
 # This project is tied to one specific tablet, reachable over Tailscale as
@@ -240,6 +247,25 @@ class EinkBackend:
     def end_book(self) -> None:
         self._end_page(book_end=True)
 
+    def store_page(self, page: storybook.StoryPage, slot: int) -> None:
+        """Send an epilogue page as one picture of the whole panel, for the
+        viewer to keep, not to draw: the reader may be on any page of the
+        finished book (see storybook_viewer's stored_page)."""
+        from storybook_render import render_page
+
+        event_id = self._next_id()
+        remote = f"{self.app_dir}/events/{event_id}/page.png"
+        manifest = {"stages": [], "stored_page": slot, "stored_layout": self.layout.name,
+                    "stored_png": remote}
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "page.png"
+                render_page(page, self.layout, page_number=False).save(path)
+                self.push._send_event(event_id, manifest, directory, [str(path)],
+                                      self.push.EINK_HOST, self.app_dir)
+        except Exception as exc:
+            _report(self, exc)
+
     def _end_page(self, book_end: bool = False) -> None:
         """Mark the page done, retrying a few times: the viewer keeps a page
         for reading back only on this mark, and starts reading only on the
@@ -347,6 +373,12 @@ class PreviewBackend:
 
     def end_book(self) -> None:
         pass
+
+    def store_page(self, page: storybook.StoryPage, slot: int) -> None:
+        from storybook_render import render_page
+
+        render_page(page, self.layout, page_number=False).save(
+            self.book_dir / f"epilogue_{slot + 1:02d}.png")
 
     def _save(self, page: storybook.StoryPage) -> None:
         from storybook_render import render_page
@@ -462,18 +494,41 @@ class LiveStorybook:
             return
         if self.builder is None or self.builder.finished:
             return
+        if self.builder.story_done:
+            # The epilogue: kept with the book, not written over the page
+            # being read (see _store_epilogue); the PDF gets it at the end.
+            self._store_epilogue(self.builder.add(value))
+            if self.builder.finished:
+                self._save()
+            return
         beat_id, _ = storybook.narrate(value, self.builder.config, frozenset(self.builder._covered_beats))
         if beat_id:
             # The scene before is over: its picture is being generated now.
             self._finish_awaited_page()
         for event in self.builder.add(value):
             self._draw(event)
-        if self.builder.finished:
+        if self.builder.story_done:
+            # At the story's goal, or the session's end before it: the book
+            # is finished, to be read back, while the session may go on.
             self._finish_awaited_page()
             self.builder.refresh_cover()  # with the closing picture in its bubble
             self._draw_cover()
             self._each_backend(lambda backend: backend.end_book())
             self._save()
+
+    def _store_epilogue(self, events: list[PageEvent]) -> None:
+        """Hand each epilogue page these events changed to the backends
+        whole, by its place in the epilogue (0, 1, …): the tablet keeps it
+        to be turned to after the story's last page, before the cover,
+        without drawing it over whatever page is being read."""
+        builder = self.builder
+        if builder is None or builder.epilogue_start is None:
+            return
+        changed = {event.page.index: event.page for event in events
+                   if event.page.index >= builder.epilogue_start}
+        for index, page in sorted(changed.items()):
+            slot = index - builder.epilogue_start
+            self._each_backend(lambda backend: backend.store_page(page, slot))
 
     def _awaits(self, config: storybook.StoryConfig) -> Any:
         """Whether a beat's picture is still to be generated (see
@@ -534,6 +589,12 @@ class LiveStorybook:
     def _end_book(self, save: bool = True) -> None:
         """Close an unfinished book: on shutdown (saved, as far as the
         session got), or when a newer session takes the tablet over."""
+        if self.builder is not None and not self.builder.finished and self.builder.story_done:
+            # Past the goal: the book itself was closed then.
+            self._store_epilogue(self.builder.finish())
+            if save:
+                self._save()
+            return
         if self.builder is not None and not self.builder.finished:
             for event in self.builder.finish():
                 self._draw(event)
@@ -567,7 +628,8 @@ class LiveStorybook:
         except Exception as exc:
             print(f"[絵本] PDFを保存できませんでした: {type(exc).__name__}: {exc}", file=sys.stderr)
             return
-        self.saved.append(path)
+        if path not in self.saved:
+            self.saved.append(path)
         print(f"[絵本] 保存しました: {path}", file=sys.stderr)
 
     def _draw(self, event: PageEvent) -> None:

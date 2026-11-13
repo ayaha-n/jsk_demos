@@ -74,6 +74,9 @@ CLOSING_MARGIN = 40
 # bottom-right corner, since the tablet ends a book on its cover and a tap
 # on the right turns to the first page.
 COVER_HINT = "めくる→"
+# Heading of the epilogue: what was said after the story reached its goal,
+# while the session went on (see StoryBuilder.story_done).
+EPILOGUE_TITLE = "そのあと"
 COVER_INNER_FRAME_INSET = 16  # the frame's inner line, inside its outer one
 COVER_PADDING = 40  # between the inner line and what is inside it
 COVER_TITLE_PEN_R = 4
@@ -352,7 +355,10 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
 
 @dataclass(frozen=True)
 class StoryTurn:
-    source: str  # session_open / participant / world_event / observed / session_close
+    # session_open / participant / world_event / observed / session_close /
+    # story_goal (the story reached its goal: the book is done, and what is
+    # said after it, while the session goes on, is the book's epilogue)
+    source: str
     pooh_text: str
     user_text: str = ""
     world_event_id: str | None = None
@@ -603,7 +609,8 @@ def narrate(
         # is not started again, with its narration and picture, when its
         # scripted event fires after all: the same picture never appears twice.
         beat_id = turn.world_event_id
-    elif turn.ends_story and "session_close" in config.beats:
+    elif ((turn.ends_story or turn.source == "story_goal") and "session_close" in config.beats
+          and "session_close" not in covered_beats):
         # ends_story, not source == "session_close": a participant who says
         # goodbye once resolved ends the session on an ordinary "participant"
         # turn (interaction_mode "exit"), not the idle-timeout "session_close"
@@ -613,6 +620,8 @@ def narrate(
         # reveal_direct) defines "session_close" for a guaranteed final
         # picture; one that already always ends on a beat
         # with its own picture (eeyore_birthday's story_wrap_up) need not.
+        # Reaching the story's goal (story_goal) closes the story there, so
+        # the final picture comes then, not when the session ends later.
         beat_id = "session_close"
     elif (
         turn.fixed_utterance_id
@@ -916,6 +925,12 @@ class StoryBuilder:
         # Made when the book finishes: the tablet ends on it, the PDF opens
         # with it.
         self.cover: StoryPage | None = None
+        # The story is told: 「おしまい」 and the cover are done, at its goal
+        # (a story_goal turn) or when the session ended before it. Turns
+        # after the goal go on epilogue pages (pages[epilogue_start:]) until
+        # the session ends (finished).
+        self.story_done = False
+        self.epilogue_start: int | None = None
         self.finished = False
         # What the robot saw with the participant's words (a handover seen
         # as 「どうぞ」 was said), kept to be retold with them: the session
@@ -926,9 +941,20 @@ class StoryBuilder:
         # Beats already given their own page (see narrate()'s covered_beats).
         self._covered_beats: set[str] = set()
 
+    @property
+    def story_pages(self) -> list[StoryPage]:
+        """The story's own pages, without the epilogue."""
+        return self.pages if self.epilogue_start is None else self.pages[:self.epilogue_start]
+
+    @property
+    def epilogue_pages(self) -> list[StoryPage]:
+        return [] if self.epilogue_start is None else self.pages[self.epilogue_start:]
+
     def add(self, turn: StoryTurn) -> list[PageEvent]:
         if self.finished:
             return []
+        if turn.source == "story_goal":
+            return self._reach_goal(turn)
         events: list[PageEvent] = []
         if turn.source == "observed" and turn.with_speech:
             events.extend(self._retell_seen())
@@ -945,7 +971,9 @@ class StoryBuilder:
             events.extend(self._retell_on_its_own(turn.observed_actions))
             return events
         self._just_seen = ()
-        beat_id, entries = narrate(turn, self.config, frozenset(self._covered_beats))
+        # In the epilogue no scene opens: every beat counts as told.
+        covered = frozenset(self.config.beats) if self.story_done else frozenset(self._covered_beats)
+        beat_id, entries = narrate(turn, self.config, covered)
         if beat_id is not None:
             self._covered_beats.add(beat_id)
         if not self.pages or (beat_id is not None and not self._continue_in_next_column(beat_id)):
@@ -955,14 +983,35 @@ class StoryBuilder:
             events.extend(self.finish())
         return events
 
+    def _reach_goal(self, turn: StoryTurn) -> list[PageEvent]:
+        """The story's goal: its last scene (if the scenario has one for
+        it), 「おしまい」 and the cover; the session goes on in the epilogue."""
+        if self.story_done or not self.pages:
+            return []
+        events = self._retell_seen()
+        beat_id, entries = narrate(turn, self.config, frozenset(self._covered_beats))
+        if beat_id is not None:
+            self._covered_beats.add(beat_id)
+            if not self._continue_in_next_column(beat_id):
+                events.append(self._new_page(beat_id))
+        events.extend(self._place(entries))
+        return events + self._close_story()
+
     def finish(self) -> list[PageEvent]:
         if self.finished or not self.pages:
             self.finished = True
             return []
         events = self._retell_seen()
+        if not self.story_done:
+            events += self._close_story()
         self.finished = True
+        return events
+
+    def _close_story(self) -> list[PageEvent]:
         self.cover = self._cover_page()
-        return events + self._place([StoryEntry("closing", self.config.closing)])
+        events = self._place([StoryEntry("closing", self.config.closing)])
+        self.story_done = True
+        return events
 
     def refresh_cover(self) -> None:
         """Make the cover again, once a picture it shows has come."""
@@ -1047,6 +1096,7 @@ class StoryBuilder:
             "size": list(self.layout.size),
             "picture_box": list(self.layout.picture_box),
             "pages": [page.to_dict() for page in self.pages],
+            "epilogue_start": self.epilogue_start,
         }
 
     def _continue_in_next_column(self, beat_id: str) -> bool:
@@ -1096,6 +1146,12 @@ class StoryBuilder:
 
     def _place(self, entries: list[StoryEntry]) -> list[PageEvent]:
         events: list[PageEvent] = []
+        if entries and self.story_done and self.epilogue_start is None:
+            # The first words after the story: the epilogue starts overleaf,
+            # under its heading, never below 「おしまい」.
+            self.epilogue_start = len(self.pages)
+            events.append(self._new_page(None))
+            entries = [StoryEntry("title", EPILOGUE_TITLE), *entries]
         batch: list[PlacedEntry] = []
 
         def put(page: StoryPage, placed: PlacedEntry) -> None:

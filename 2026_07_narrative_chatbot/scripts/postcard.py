@@ -258,7 +258,8 @@ def scenes_from_book(builder: storybook.StoryBuilder) -> list[Scene]:
 
     frame = postcard_items.load_frame(builder.config.scenario)
     scenes: list[Scene] = []
-    for page in builder.pages:
+    # The story only: what was said after its goal (the epilogue) is not.
+    for page in builder.story_pages:
         if page.beat_id is not None or not scenes:
             beat = builder.config.beats.get(page.beat_id or "")
             scenes.append(Scene(page.beat_id, None, narration=beat.narration if beat else "",

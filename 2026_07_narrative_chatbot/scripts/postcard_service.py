@@ -1,8 +1,8 @@
 """Make each session's postcards in the background once it has ended.
 
 An output listener, like the picture book's: once a session reaches its
-story's goal (crowdsourcing.reached_goal: footprints solved, Eeyore's gift
-decided), or ends without it, it waits until that session's illustrations
+story's goal (its "story_goal" output, sent when crowdsourcing.reached_goal
+first holds: footprints solved, Eeyore's gift decided), or ends without it, it waits until that session's illustrations
 are dealt with (drawn or given up on), so the cards can use the pictures
 drawn from this very conversation, then makes the postcards the way
 ``scripts/postcard.py`` does from the log so far, and saves them next to the
@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from crowdsourcing import reached_goal
 
 # How long to wait for a session's pictures before making the cards with
 # whatever pictures there are (the book's own fallbacks).
@@ -161,7 +160,9 @@ class PostcardMaker:
         with self._lock:
             if session_id in self.jobs:
                 return
-        goal = not ended and reached_goal(session)
+        # The session says when the story reached its goal (right after the
+        # turn that did), once the book has its last scene.
+        goal = not ended and getattr(output, "source", "") == "story_goal"
         if not ended and not goal:
             return
         with self._lock:

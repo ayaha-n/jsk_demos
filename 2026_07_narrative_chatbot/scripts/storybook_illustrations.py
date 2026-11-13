@@ -505,6 +505,8 @@ class SessionIllustrations:
         self._promises: dict[tuple[str, str], Future] = {}
         self._active: dict[str, tuple[storybook.StoryConfig, str]] = {}
         self._covered: dict[str, set[str]] = {}
+        # Sessions whose story reached its goal (a story_goal turn).
+        self._past_goal: set[str] = set()
         # A beat with elicits_description held back one more beat change,
         # the same reason generate_from_log() defers it; see __call__.
         self._deferred: dict[str, tuple[storybook.StoryConfig, str]] = {}
@@ -723,7 +725,11 @@ class SessionIllustrations:
         # participant in between.
         with self._lock:
             covered = self._covered.setdefault(session.session_id, set())
-            beat_id, _ = storybook.narrate(turn, config, frozenset(covered))
+            # Past the story's goal the book is done: no more scenes to draw.
+            told = frozenset(config.beats) if session.session_id in self._past_goal else frozenset(covered)
+            beat_id, _ = storybook.narrate(turn, config, told)
+            if turn.source == "story_goal":
+                self._past_goal.add(session.session_id)
             if beat_id:
                 covered.add(beat_id)
             turns = self._turns.setdefault(session.session_id, [])
@@ -749,6 +755,7 @@ class SessionIllustrations:
                 self._turns.pop(session.session_id, None)
                 active = self._active.pop(session.session_id, None)
                 self._covered.pop(session.session_id, None)
+                self._past_goal.discard(session.session_id)
                 deferred = self._deferred.pop(session.session_id, None)
                 if deferred:
                     to_submit.append(deferred)

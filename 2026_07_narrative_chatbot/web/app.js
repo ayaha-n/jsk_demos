@@ -429,8 +429,10 @@ async function loadSelectedLog() {
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-    body.records.forEach(appendLogRecord);
-    const notes = [`${body.records.length}件`];
+    // A story_goal line only marks where the story reached its goal.
+    const records = body.records.filter((record) => record.source !== "story_goal");
+    records.forEach(appendLogRecord);
+    const notes = [`${records.length}件`];
     if (body.invalid_lines) notes.push(`読めない行: ${body.invalid_lines}`);
     if (body.truncated) notes.push("表示上限以降は省略");
     logViewerStatus.textContent = notes.join(" / ");

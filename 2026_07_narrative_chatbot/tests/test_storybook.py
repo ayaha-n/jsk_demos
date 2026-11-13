@@ -333,6 +333,51 @@ class BuilderTest(WithIllustrations):
         self.assertEqual(builder.add(StoryTurn("participant", "おーい", user_text="x")), [])
         self.assertEqual(builder.finish(), [])
 
+    def test_goal_finishes_the_book_and_what_follows_is_its_epilogue(self):
+        builder = self.builder()
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.add(StoryTurn("world_event", "よかった。", world_event_id="story_wrap_up"))
+        events = builder.add(StoryTurn("story_goal", ""))
+        self.assertEqual(events[-1].placed[-1].entry.style, "closing")
+        self.assertTrue(builder.story_done)
+        self.assertFalse(builder.finished)
+        self.assertIsNotNone(builder.cover)
+        story = list(builder.pages)
+        events = builder.add(StoryTurn("participant", "うん。", user_text="たのしかった"))
+        # Overleaf, under its heading, never below 「おしまい」.
+        self.assertIsInstance(events[0], NewPage)
+        self.assertEqual(builder.epilogue_start, len(story))
+        epilogue = builder.epilogue_pages
+        self.assertEqual([item.entry.text for item in epilogue[0].placed][:2],
+                         [storybook.EPILOGUE_TITLE, "「たのしかった」と、あなたは いいました。"])
+        self.assertIsNone(epilogue[0].beat_id)
+        self.assertEqual(builder.story_pages, story)
+        # A scene's event after the goal opens no scene; the end adds no
+        # second 「おしまい」.
+        builder.add(StoryTurn("world_event", "あれ？", world_event_id="pooh_tastes_honey"))
+        builder.add(StoryTurn("session_close", "またね。", ends_story=True))
+        self.assertTrue(builder.finished)
+        self.assertEqual(len(builder.story_pages), len(story))
+        styles = [item.entry.style for page in builder.pages for item in page.placed]
+        self.assertEqual(styles.count("closing"), 1)
+        self.assertNotIn("pooh_tastes_honey", [page.beat_id for page in builder.epilogue_pages])
+
+    def test_goal_opens_the_story_s_last_scene(self):
+        footprints = load_story_config("footprints")
+        builder = StoryBuilder(footprints, LAYOUTS["portrait"], full_width)
+        builder.add(StoryTurn("session_open", "やあ。"))
+        builder.add(StoryTurn("story_goal", ""))
+        self.assertEqual(builder.pages[-1].beat_id, "session_close")
+        self.assertEqual([item.entry.style for item in builder.pages[-1].placed],
+                         ["narration", "closing"])
+        builder.add(StoryTurn("session_close", "またね。", ends_story=True))
+        self.assertEqual([page.beat_id for page in builder.pages].count("session_close"), 1)
+
+    def test_a_goal_before_anything_was_said_is_ignored(self):
+        builder = self.builder()
+        self.assertEqual(builder.add(StoryTurn("story_goal", "")), [])
+        self.assertFalse(builder.story_done)
+
     def test_long_passage_continues_overleaf(self):
         builder = self.builder()
         builder.add(StoryTurn("session_open", ""))
@@ -630,6 +675,33 @@ class BookFromLogTest(unittest.TestCase):
         self.assertEqual(entries[-1].style, "closing")
 
 
+class GoalFromLogTest(unittest.TestCase):
+    def test_logged_goal_closes_the_story_and_postcards_leave_out_the_epilogue(self):
+        import postcard
+
+        scenario = get_scenario("eeyore_birthday")
+        records = [
+            {"scenario": "eeyore_birthday", "source": "participant",
+             "user_action": "こんにちは", "bot_response": "やあ。", "interaction_mode": "narrative"},
+            {"scenario": "eeyore_birthday", "source": "story_goal"},
+            {"scenario": "eeyore_birthday", "source": "participant",
+             "user_action": "あとのはなし", "bot_response": "うん。", "interaction_mode": "narrative"},
+        ]
+        with patch.object(storybook, "compose_cover", return_value=None):
+            book = storybook.build_book(
+                records, scenario=scenario.key, opening_line=scenario.opening_line,
+                measure=full_width,
+            )
+        self.assertEqual(book.epilogue_start, len(book.story_pages))
+        epilogue = [item.entry.text for page in book.epilogue_pages for item in page.placed]
+        self.assertIn("「あとのはなし」と、あなたは いいました。", epilogue)
+        scenes = postcard.scenes_from_book(book)
+        quoted = [entry.text for scene in scenes for entry in scene.entries]
+        self.assertNotIn("「あとのはなし」と、あなたは いいました。", quoted)
+        self.assertIn("「こんにちは」と、あなたは いいました。", quoted)
+        self.assertEqual(book.to_dict()["epilogue_start"], book.epilogue_start)
+
+
 class FakeBackend:
     def __init__(self, orientation="portrait"):
         self._orientation = orientation
@@ -652,6 +724,9 @@ class FakeBackend:
 
     def end_book(self):
         self.calls.append(("end",))
+
+    def store_page(self, page, slot):
+        self.calls.append(("store", slot, [item.entry.text for item in page.placed]))
 
 
 def fake_session(session_id, scenario="eeyore_birthday"):
@@ -708,6 +783,37 @@ class LiveStorybookTest(unittest.TestCase):
         self.assertEqual(self.backend.calls[-1], ("end",))
         self.assertTrue(self.live.builder.finished)
         self.assertIsNone(self.live.session_id)
+
+    def test_book_is_done_at_the_goal_and_the_epilogue_is_only_stored(self):
+        with tempfile.TemporaryDirectory() as log_dir, \
+                patch.dict("os.environ", {"POOH_LOG_DIR": log_dir}):
+            session = fake_session("j" * 32)
+            session.log_path = Path(log_dir) / "session_goal_jjjjjjjj.jsonl"
+            self.live(session, fake_output("session_open"))
+            self.live(session, fake_output("participant", user="まえ"))
+            self.live(session, fake_output("story_goal", ""))
+            saved = Path(log_dir) / "storybooks" / "session_goal_jjjjjjjj.pdf"
+            deadline = time.monotonic() + 10
+            while not self.live.saved and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertEqual(self.backend.calls[-1], ("end",))
+            self.assertEqual(self.live.saved, [saved])
+            self.assertFalse(self.live.builder.finished)
+            done = len(self.backend.calls)
+            self.live(session, fake_output("participant", user="あと"))
+            self.live(session, fake_output("participant", user="もっと"))
+            self.live(session, fake_output("session_close", "またね。", mode="exit"))
+            self.assertTrue(self.live.close())
+            after = self.backend.calls[done:]
+            # Kept page by page, never drawn: no new page, writing or end.
+            self.assertTrue(after)
+            self.assertTrue(all(call[0] == "store" for call in after))
+            self.assertEqual({call[1] for call in after}, {0})
+            self.assertIn("「もっと」と、あなたは いいました。", after[-1][2])
+            self.assertEqual(after[-1][2][0], storybook.EPILOGUE_TITLE)
+            # The PDF is written again with the epilogue, in the same place.
+            self.assertEqual(self.live.saved, [saved])
+            self.assertTrue(self.live.builder.finished)
 
     def test_finished_book_is_saved_as_pdf_beside_the_log(self):
         with tempfile.TemporaryDirectory() as log_dir, \

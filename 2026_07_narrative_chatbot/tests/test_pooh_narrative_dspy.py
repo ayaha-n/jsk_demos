@@ -2,6 +2,7 @@
 
 import ast
 import json
+import tempfile
 import sys
 import types
 import unittest
@@ -334,6 +335,44 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(public["source"], "session_open")
         self.assertEqual(public["situation"]["place"], scenario.initial_situation.place)
         self.assertNotIn("turn", public)
+
+    def test_session_says_once_when_its_story_reaches_its_goal(self):
+        scenario = pooh.get_scenario("footprints")
+        heard = []
+        session = pooh.NarrativeSession(
+            Mock(), "model", "program", scenario,
+            output_listeners=[lambda session, output: heard.append(output.source)],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            session.log_path = Path(directory) / "session.jsonl"
+            session.log_path.write_text("", encoding="utf-8")
+
+            def turn(mode="narrative"):
+                return pooh.SessionOutput(
+                    source="participant", bot_response="うん。", interaction_mode=mode,
+                    scene_id="none", updated_situation=session.current_situation)
+
+            session._publish(turn())
+            session.controller.state.resolved = True
+            session._publish(turn())
+            session._publish(turn())
+            records = [json.loads(line) for line in session.log_path.read_text().splitlines()]
+        self.assertEqual(heard, ["participant", "participant", "story_goal", "participant"])
+        self.assertEqual([record["source"] for record in records], ["story_goal"])
+
+    def test_a_goodbye_that_reaches_the_goal_ends_the_story_without_one(self):
+        scenario = pooh.get_scenario("footprints")
+        heard = []
+        session = pooh.NarrativeSession(
+            Mock(), "model", "program", scenario,
+            output_listeners=[lambda session, output: heard.append(output.source)],
+        )
+        session.controller.state.resolved = True
+        with patch.object(pooh, "append_session_record"):
+            session._publish(pooh.SessionOutput(
+                source="participant", bot_response="またね。", interaction_mode="exit",
+                scene_id="none", updated_situation=session.current_situation))
+        self.assertEqual(heard, ["participant"])
 
     def test_narrative_sessions_keep_state_and_timers_separate(self):
         scenario = pooh.get_scenario("eeyore_birthday")

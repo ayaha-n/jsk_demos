@@ -208,6 +208,7 @@ name = "storybook_viewer"
 version = "0.1.0"
 dependencies = [
  "plush_memory_viewer",
+ "png",
  "serde_json",
 ]
 

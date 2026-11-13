@@ -196,7 +196,10 @@ class PostcardsAtTheGoalTest(PostcardMakerTest):
         try:
             maker(self.goal_session(False), ended(source="participant"))
             self.assertIsNone(maker.status("s1"))
+            # The turn that reached it, then the session's story_goal right after.
             maker(self.goal_session(True), ended(source="participant"))
+            self.assertIsNone(maker.status("s1"))
+            maker(self.goal_session(True), ended(source="story_goal"))
             self.assertEqual(pictures.flushed, ["s1"])
             self.assertTrue(wait_for(lambda: maker.status("s1").status == "ready"))
             maker(self.goal_session(True), ended())  # the end later: not made again
