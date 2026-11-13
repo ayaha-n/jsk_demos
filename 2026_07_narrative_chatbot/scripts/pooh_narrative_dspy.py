@@ -41,6 +41,7 @@ except ImportError:
     raise SystemExit(1)
 
 
+from crowdsourcing import IDLE_CLOSE_EVENTS
 from mishearing_cases import (
     MishearingCandidate,
     contains_technical_term,
@@ -1076,10 +1077,11 @@ def create_event_controller(
     return scenario.event_controller_factory(clock)
 
 
-# The conventional event id a scenario's own required_events uses for "close
-# the session after enough silence once the story is wrapped up"; stripped by
-# --no-idle-close. A scenario without such an event is unaffected.
-IDLE_CLOSE_EVENT_ID = "idle_close_after_wrap_up"
+# The event ids scenarios' own required_events use for "close the session
+# after enough silence once the story is wrapped up" (Eeyore) or "once the
+# footprints are found to be ours" (footprints); stripped by --no-idle-close.
+# A scenario without such an event is unaffected.
+IDLE_CLOSE_EVENT_IDS = IDLE_CLOSE_EVENTS
 
 
 def without_idle_close(
@@ -1087,7 +1089,7 @@ def without_idle_close(
 ) -> Callable[[Callable[[], float]], NarrativeEventController] | None:
     """Wrap a scenario's event-controller factory (``--no-idle-close``) so
     the story never auto-closes on silence after its wrap-up; a no-op for a
-    scenario with no event controller, or none named ``IDLE_CLOSE_EVENT_ID``."""
+    scenario with no event controller, or none in ``IDLE_CLOSE_EVENT_IDS``."""
     if factory is None:
         return None
 
@@ -1095,7 +1097,7 @@ def without_idle_close(
         controller = factory(clock)
         controller.required_events = tuple(
             event for event in controller.required_events
-            if event.event_id != IDLE_CLOSE_EVENT_ID
+            if event.event_id not in IDLE_CLOSE_EVENT_IDS
         )
         return controller
 

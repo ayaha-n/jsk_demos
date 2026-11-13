@@ -336,6 +336,16 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(public["situation"]["place"], scenario.initial_situation.place)
         self.assertNotIn("turn", public)
 
+    def test_no_idle_close_strips_every_scenario_s_idle_close(self):
+        for key, event_id in (("eeyore_birthday", "idle_close_after_wrap_up"),
+                              ("footprints", "idle_close_after_reveal")):
+            factory = pooh.get_scenario(key).event_controller_factory
+            ids = [event.event_id for event in factory(lambda: 0.0).required_events]
+            self.assertIn(event_id, ids)
+            ids = [event.event_id
+                   for event in pooh.without_idle_close(factory)(lambda: 0.0).required_events]
+            self.assertNotIn(event_id, ids, key)
+
     def test_session_says_once_when_its_story_reaches_its_goal(self):
         scenario = pooh.get_scenario("footprints")
         heard = []
