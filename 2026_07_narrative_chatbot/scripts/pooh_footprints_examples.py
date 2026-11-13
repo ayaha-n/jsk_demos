@@ -525,8 +525,9 @@ FOOTPRINTS_TRAINSET = [
         ),
         interaction_mode="narrative",
         current_scene="8",
-        bot_response="そう？とにかく、もうおやつのじかんだね。これで解決だね。ほかにも、なにか話したいことある？",
-        question_kind="participant_own",
+        # 解決の後も問いかけで話を閉じない（「ないよ」で終わってしまうため）。
+        bot_response="そう？とにかく、もうおやつのじかんだね。これで解決だね。",
+        question_kind="none",
     ),
 ]
 

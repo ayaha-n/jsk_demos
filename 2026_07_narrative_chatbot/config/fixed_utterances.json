@@ -103,7 +103,7 @@
       "arm_next": ["onegai"]
   },
   "eeyore_birthday.story_wrap_up": {
-    "text": "よかった。これでイーヨーも、きっとにっこりしてくれるよ。ほかにも、なにかぼくとおはなししたいこと、ある？",
+    "text": "よかった。これでイーヨーも、きっとにっこりしてくれるよ。",
       "wav": "eeyore_birthday.story_wrap_up.wav",
       "motion": {
 	  "eyebrow": "happy",
