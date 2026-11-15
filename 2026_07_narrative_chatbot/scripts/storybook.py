@@ -77,6 +77,10 @@ COVER_HINT = "めくる→"
 # Heading of the epilogue: what was said after the story reached its goal,
 # while the session went on (see StoryBuilder.story_done).
 EPILOGUE_TITLE = "そのあと"
+# The epilogue's own picture, drawn from what was said in it once the
+# session ends, on its first page (a scenario opts in with a beat of this
+# id in config/storybook.json: its prompt, no bundled picture).
+EPILOGUE_BEAT = "epilogue"
 COVER_INNER_FRAME_INSET = 16  # the frame's inner line, inside its outer one
 COVER_PADDING = 40  # between the inner line and what is inside it
 COVER_TITLE_PEN_R = 4
@@ -1150,7 +1154,7 @@ class StoryBuilder:
             # The first words after the story: the epilogue starts overleaf,
             # under its heading, never below 「おしまい」.
             self.epilogue_start = len(self.pages)
-            events.append(self._new_page(None))
+            events.append(self._new_page(EPILOGUE_BEAT if EPILOGUE_BEAT in self.config.beats else None))
             entries = [StoryEntry("title", EPILOGUE_TITLE), *entries]
         batch: list[PlacedEntry] = []
 

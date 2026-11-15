@@ -41,6 +41,7 @@ class PostcardJob:
     status: str  # "waiting" (for pictures) | "making" | "ready" | "failed"
     pdf: Path
     error: str = ""
+    goal: bool = False  # made at the story's goal (the session went on)
 
 
 def postcard_path(log_path: Path) -> Path:
@@ -100,6 +101,33 @@ def usable_cards(plan: list, scenes: list, style: Any) -> list:
     return [card for card in plan if card.text.strip() and postcard.dialogue_fits(card, style, scenes)]
 
 
+def plan_cards(scenes: list, title: str, cards: int, style: Any,
+               name: str) -> tuple[list, str, list[str]]:
+    """The cards for ``scenes``: picked by the LM, or without it when it
+    cannot (or misses a condition), leaving out cards that do not fit.
+    Returns the plan, how it was made ("lm" or "extractive") and what it
+    still misses."""
+    import postcard
+
+    source = "lm"
+    try:
+        plan, errors = postcard.lm_dialogue_plan(scenes, title, cards, style)
+    except Exception as exc:  # no API key, network, refusal: still make cards
+        print(f"[ポストカード] LMを使えません（{type(exc).__name__}）。LMを使わずに作ります。",
+              file=sys.stderr)
+        plan, errors = [], ["LM unavailable"]
+    if errors:
+        plan, source = postcard.extractive_dialogue_plan(scenes, cards, style), "extractive"
+        errors = postcard.check_dialogue_plan(plan, scenes, cards, style)
+        if errors:
+            plan = usable_cards(plan, scenes, style)
+            if not plan:
+                raise ValueError("カードを作れません: " + " / ".join(errors))
+            print(f"[ポストカード] {name}: 条件を満たさないカードを除き、{len(plan)}枚で作ります: "
+                  + " / ".join(errors), file=sys.stderr)
+    return plan, source, errors
+
+
 def make_postcards(log_path: Path, pdf: Path, paper: str = "hagaki") -> str:
     """The postcards of a finished log, as scripts/postcard.py makes them by
     default; returns how the plan was made ("lm" or "extractive")."""
@@ -109,26 +137,50 @@ def make_postcards(log_path: Path, pdf: Path, paper: str = "hagaki") -> str:
     builder = build_from_log(log_path, "portrait")
     scenes = postcard.scenes_from_book(builder)
     style = postcard.STYLES[postcard.DEFAULT_STYLE]
-    source = "lm"
-    try:
-        plan, errors = postcard.lm_dialogue_plan(scenes, builder.config.title,
-                                                 postcard.DEFAULT_CARDS, style)
-    except Exception as exc:  # no API key, network, refusal: still make cards
-        print(f"[ポストカード] LMを使えません（{type(exc).__name__}）。LMを使わずに作ります。",
-              file=sys.stderr)
-        plan, errors = [], ["LM unavailable"]
-    if errors:
-        plan, source = postcard.extractive_dialogue_plan(scenes, postcard.DEFAULT_CARDS, style), "extractive"
-        errors = postcard.check_dialogue_plan(plan, scenes, postcard.DEFAULT_CARDS, style)
-        if errors:
-            plan = usable_cards(plan, scenes, style)
-            if not plan:
-                raise ValueError("カードを作れません: " + " / ".join(errors))
-            print(f"[ポストカード] {log_path.name}: 条件を満たさないカードを除き、{len(plan)}枚で作ります: "
-                  + " / ".join(errors), file=sys.stderr)
+    plan, source, errors = plan_cards(scenes, builder.config.title, postcard.DEFAULT_CARDS,
+                                      style, log_path.name)
     postcard.write_pdf(plan, scenes, builder.config.title, pdf, style, paper)
     pdf.with_suffix(".json").write_text(postcard.plan_to_json(plan, style, source, errors),
                                         encoding="utf-8")
+    return source
+
+
+def make_epilogue_postcard(log_path: Path, pdf: Path, paper: str = "hagaki") -> str | None:
+    """One more card, from what was said after the story's goal (the
+    epilogue), after the story's cards in the same PDF (made again with it);
+    a card made before for the epilogue is replaced. None, and nothing
+    changed, if nothing was said after the goal."""
+    import dataclasses
+
+    import postcard
+    from storybook_render import build_from_log
+
+    builder = build_from_log(log_path, "portrait")
+    scenes = postcard.scenes_from_book(builder)
+    epilogue = postcard.epilogue_scene(builder)
+    if epilogue is None:
+        return None
+    style = postcard.STYLES[postcard.DEFAULT_STYLE]
+    story_plan: list = []
+    story_source = ""
+    plan_path = pdf.with_suffix(".json")
+    if plan_path.is_file():
+        text = plan_path.read_text(encoding="utf-8")
+        story_plan, saved_style = postcard.plan_from_json(text)
+        style = saved_style or style
+        story_source = str(json.loads(text).get("source", "")).split("+")[0]
+        story_plan = [card for card in story_plan if card.last_scene < len(scenes)]
+    plan, source, errors = plan_cards([epilogue], builder.config.title, 1, style, log_path.name)
+    offset = len(scenes)
+    plan = [dataclasses.replace(card, first_scene=card.first_scene + offset,
+                                last_scene=card.last_scene + offset,
+                                picture_scene=None if card.picture_scene is None
+                                else card.picture_scene + offset)
+            for card in plan]
+    postcard.write_pdf(story_plan + plan, scenes + [epilogue], builder.config.title, pdf, style, paper)
+    combined = f"{story_source}+epilogue:{source}" if story_source else f"epilogue:{source}"
+    plan_path.write_text(postcard.plan_to_json(story_plan + plan, style, combined, errors),
+                         encoding="utf-8")
     return source
 
 
@@ -138,9 +190,14 @@ class PostcardMaker:
     def __init__(self, illustrations: Any = None,
                  make: Callable[[Path, Path], Any] = make_postcards,
                  wait_sec: float = ILLUSTRATION_WAIT_SEC, poll_sec: float = POLL_SEC,
-                 on_status: Callable[[str, str, Path], None] | None = None) -> None:
+                 on_status: Callable[[str, str, Path], None] | None = None,
+                 make_epilogue: Callable[[Path, Path], Any] | None = make_epilogue_postcard) -> None:
         self.illustrations = illustrations
         self.make = make
+        # The epilogue's card, once a session that went on past its goal
+        # ends (None: no such card).
+        self.make_epilogue = make_epilogue
+        self._epilogues: set[str] = set()
         self.wait_sec = wait_sec
         self.poll_sec = poll_sec
         self.on_status = on_status
@@ -158,6 +215,18 @@ class PostcardMaker:
             return  # nothing said yet
         session_id = session.session_id
         with self._lock:
+            past_goal = session_id in self.jobs and self.jobs[session_id].goal
+            if ended and past_goal and self.make_epilogue is not None \
+                    and session_id not in self._epilogues:
+                self._epilogues.add(session_id)
+            else:
+                past_goal = False
+        if past_goal:
+            # Its cards were made at the goal; what was said since gets one
+            # more card, once its picture is drawn.
+            self._pool.submit(self._run_epilogue, session_id, Path(log_path))
+            return
+        with self._lock:
             if session_id in self.jobs:
                 return
         # The session says when the story reached its goal (right after the
@@ -168,7 +237,7 @@ class PostcardMaker:
         with self._lock:
             if session_id in self.jobs:
                 return
-            self.jobs[session_id] = PostcardJob("waiting", postcard_path(Path(log_path)))
+            self.jobs[session_id] = PostcardJob("waiting", postcard_path(Path(log_path)), goal=goal)
         self._notify(session_id)
         if goal and hasattr(self.illustrations, "flush"):
             self.illustrations.flush(session_id)
@@ -217,6 +286,31 @@ class PostcardMaker:
             return
         self._set(session_id, "ready")
         print(f"[ポストカード] {log_path.name}: 作りました（{source}）: {pdf}", file=sys.stderr)
+
+    def _run_epilogue(self, session_id: str, log_path: Path) -> None:
+        """The epilogue's card, after the session's own (this pool runs one
+        job at a time), once every picture of the session is dealt with
+        (the epilogue's is drawn when it ends)."""
+        deadline = time.monotonic() + self.wait_sec
+        while not self._pictures_ready(session_id, False) and time.monotonic() < deadline:
+            if self._closing.wait(self.poll_sec):
+                break
+        with self._lock:
+            job = self.jobs[session_id]
+            before, pdf = job.status, job.pdf
+        self._set(session_id, "making")
+        try:
+            source = self.make_epilogue(log_path, pdf)
+        except Exception as exc:
+            # The story's cards are still there as they were.
+            self._set(session_id, before, self.jobs[session_id].error)
+            print(f"[ポストカード] {log_path.name}: 後日談のカードを作れませんでした: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            return
+        self._set(session_id, "ready" if source is not None or before == "ready" else before)
+        if source is not None:
+            print(f"[ポストカード] {log_path.name}: 後日談のカードを足しました（{source}）: {pdf}",
+                  file=sys.stderr)
 
     def close(self) -> None:
         """Make the cards of every session that has ended, without waiting

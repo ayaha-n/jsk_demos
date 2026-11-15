@@ -1902,11 +1902,13 @@ def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]
 
         from functools import partial
 
-        from postcard_service import make_postcards
+        from postcard_service import make_epilogue_postcard, make_postcards
 
+        paper = getattr(args, "postcard_size", "l")
         listeners.append(PostcardMaker(
             illustrations=illustrations,
-            make=partial(make_postcards, paper=getattr(args, "postcard_size", "l"))))
+            make=partial(make_postcards, paper=paper),
+            make_epilogue=partial(make_epilogue_postcard, paper=paper)))
     return listeners
 
 

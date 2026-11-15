@@ -609,6 +609,7 @@ class LiveStorybook:
             # being read (see _store_epilogue); the PDF gets it at the end.
             self._store_epilogue(self.builder.add(value))
             if self.builder.finished:
+                self._finish_epilogue_picture()
                 self._save()
             return
         beat_id, _ = storybook.narrate(value, self.builder.config, frozenset(self.builder._covered_beats))
@@ -647,6 +648,7 @@ class LiveStorybook:
         self._corrections_seen = seen
         corrections = storybook_corrections.load(Path(self._log_path))
         rebuilt = StoryBuilder(builder.config, builder.layout, builder.measure,
+                               awaits_illustration=self._awaits(builder.config),
                                compose_cover=True)
         for turn in storybook_corrections.apply_to_turns(self._turns, corrections):
             rebuilt.add(turn)
@@ -679,6 +681,29 @@ class LiveStorybook:
         for index, page in sorted(changed.items()):
             slot = index - builder.epilogue_start
             self._each_backend(lambda backend: backend.store_page(page, slot))
+
+    def _finish_epilogue_picture(self) -> None:
+        """Once the session is over, wait (a while) for the epilogue's
+        picture, drawn from what was said in it, and give the tablet its
+        first page again with the picture."""
+        builder = self.builder
+        if builder is None or builder.epilogue_start is None or self.illustrations is None:
+            return
+        page = builder.pages[builder.epilogue_start]
+        if not page.awaits_illustration or page.illustration or page.beat_id is None:
+            return
+        session_id = builder.config.session_id
+        deadline = time.monotonic() + ILLUSTRATION_WAIT_SEC
+        self.illustrations.wait(
+            session_id, page.beat_id,
+            cancelled=lambda: (self._latest_session_id != session_id
+                               or time.monotonic() > deadline),
+        )
+        if not builder.attach_illustration(page):
+            print("[絵本] 後日談の挿絵がないので、文字だけで閉じます", file=sys.stderr)
+            return
+        count = len(builder.epilogue_pages)
+        self._each_backend(lambda backend: backend.store_page(page, 0, count))
 
     def _awaits(self, config: storybook.StoryConfig) -> Any:
         """Whether a beat's picture is still to be generated (see
@@ -743,6 +768,7 @@ class LiveStorybook:
             # Past the goal: the book itself was closed then.
             self._store_epilogue(self.builder.finish())
             if save:
+                self._finish_epilogue_picture()
                 self._save()
             return
         if self.builder is not None and not self.builder.finished:

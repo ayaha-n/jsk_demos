@@ -281,6 +281,42 @@ def scenes_from_book(builder: storybook.StoryBuilder) -> list[Scene]:
     return scenes
 
 
+def epilogue_scene(builder: storybook.StoryBuilder) -> Scene | None:
+    """What was said after the story's goal (the book's epilogue), as one
+    scene for a card of its own; None if the participant said nothing in
+    it. Its picture is the one drawn from it, or, if none was, the story's
+    last picture."""
+    import postcard_items
+
+    pages = builder.epilogue_pages
+    if not pages:
+        return None
+    scenario = builder.config.scenario
+    beat_id = storybook.EPILOGUE_BEAT
+    scene = Scene(beat_id, None, item=item_for_beat(scenario, beat_id),
+                  frame=postcard_items.load_frame(scenario),
+                  no_item=postcard_items.beat_hides_item(scenario, beat_id))
+    for page in pages:
+        if page.illustration and scene.illustration is None:
+            scene.illustration = page.illustration
+            scene.picture_kind = picture_kind(page.illustration, builder.config, page.beat_id)
+        for placed in page.placed:
+            entry = placed.entry
+            if entry.style in ("title", "closing", "hint"):
+                continue
+            if scene.entries and _is_continuation(scene.entries[-1], entry):
+                continue
+            scene.entries.append(entry)
+    if not participant_words(scene.entries):
+        return None
+    if scene.illustration is None:
+        last = next((page for page in reversed(builder.story_pages) if page.illustration), None)
+        if last is not None:
+            scene.illustration = last.illustration
+            scene.picture_kind = picture_kind(last.illustration, builder.config, last.beat_id)
+    return scene
+
+
 def top_level_quotes(text: str) -> list[tuple[int, int, str]]:
     """Each outermost 「…」 as (start, end, inside): a quote that itself
     quotes a name (「…「ウズウズ」って…」) stays one quote."""

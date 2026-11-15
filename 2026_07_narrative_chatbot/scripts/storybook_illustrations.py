@@ -505,8 +505,10 @@ class SessionIllustrations:
         self._promises: dict[tuple[str, str], Future] = {}
         self._active: dict[str, tuple[storybook.StoryConfig, str]] = {}
         self._covered: dict[str, set[str]] = {}
-        # Sessions whose story reached its goal (a story_goal turn).
+        # Sessions whose story reached its goal (a story_goal turn), and
+        # where in their turns it did: what follows is the epilogue.
         self._past_goal: set[str] = set()
+        self._goal_at: dict[str, tuple[storybook.StoryConfig, int]] = {}
         # A beat with elicits_description held back one more beat change,
         # the same reason generate_from_log() defers it; see __call__.
         self._deferred: dict[str, tuple[storybook.StoryConfig, str]] = {}
@@ -730,6 +732,12 @@ class SessionIllustrations:
             beat_id, _ = storybook.narrate(turn, config, told)
             if turn.source == "story_goal":
                 self._past_goal.add(session.session_id)
+                self._goal_at[session.session_id] = (config, len(self._turns.get(session.session_id, [])))
+            elif (session.session_id in self._past_goal and turn.user_text
+                  and storybook.EPILOGUE_BEAT in config.beats):
+                # Something said after the goal: the epilogue gets its own
+                # picture once the session ends (see epilogue_turns).
+                self._promises.setdefault((config.session_id, storybook.EPILOGUE_BEAT), Future())
             if beat_id:
                 covered.add(beat_id)
             turns = self._turns.setdefault(session.session_id, [])
@@ -751,7 +759,10 @@ class SessionIllustrations:
             before = list(turns)
             turns.append(turn)
             snapshot = list(turns)
+            epilogue = None
             if turn.ends_story:
+                goal = self._goal_at.pop(session.session_id, None)
+                epilogue = epilogue_turns(snapshot, goal[1] if goal else None)
                 self._turns.pop(session.session_id, None)
                 active = self._active.pop(session.session_id, None)
                 self._covered.pop(session.session_id, None)
@@ -767,6 +778,8 @@ class SessionIllustrations:
             self.submit(config, beat_id, snapshot)
         if active:
             self.submit(active[0], active[1], snapshot)
+        if epilogue and storybook.EPILOGUE_BEAT in config.beats:
+            self.submit(config, storybook.EPILOGUE_BEAT, epilogue)
 
     def done(self, session_id, beat_id):
         """Whether the scene's picture has been dealt with (drawn, or given
@@ -818,11 +831,28 @@ class SessionIllustrations:
         with self._lock:
             active = [(config, beat, list(self._turns.get(session_id, [])))
                       for session_id, (config, beat) in self._active.items()]
+            # Sessions still going on past their goal: their epilogue too.
+            active += [(config, storybook.EPILOGUE_BEAT, turns)
+                       for session_id, (config, goal_at) in self._goal_at.items()
+                       if storybook.EPILOGUE_BEAT in config.beats
+                       for turns in [epilogue_turns(self._turns.get(session_id, []), goal_at)]
+                       if turns]
             self._active.clear()
             self._turns.clear()
+            self._goal_at.clear()
         for config, beat, turns in active:
             self.submit(config, beat, turns)
         self._pool.shutdown(wait=True)
+
+
+def epilogue_turns(turns, goal_at):
+    """The turns of the epilogue (from the story's goal on), if anything was
+    said in it; else None. Its picture is drawn from these alone, so it shows
+    what was talked about after the story, not the story again."""
+    if goal_at is None:
+        return None
+    epilogue = list(turns[goal_at:])
+    return epilogue if any(turn.user_text for turn in epilogue) else None
 
 
 def generate_from_log(path: Path, *, force=False, only: list[str] | None = None) -> None:
@@ -855,8 +885,11 @@ def generate_from_log(path: Path, *, force=False, only: list[str] | None = None)
             generator.submit(config, deferred, seen, force=force)
         deferred = None
 
+    goal_at = None
     try:
         for turn in storybook.turns_from_log(records, scenario.opening_line):
+            if turn.source == "story_goal" and goal_at is None:
+                goal_at = len(seen)
             beat_id, _ = storybook.narrate(turn, config, frozenset(covered))
             if beat_id:
                 covered.add(beat_id)
@@ -872,6 +905,10 @@ def generate_from_log(path: Path, *, force=False, only: list[str] | None = None)
         flush_deferred()
         if current and (not only or current in only):
             generator.submit(config, current, seen, force=force)
+        epilogue = epilogue_turns(seen, goal_at)
+        if epilogue and storybook.EPILOGUE_BEAT in config.beats \
+                and (not only or storybook.EPILOGUE_BEAT in only):
+            generator.submit(config, storybook.EPILOGUE_BEAT, epilogue, force=force)
     finally:
         generator.close()
     if generator.failures:
