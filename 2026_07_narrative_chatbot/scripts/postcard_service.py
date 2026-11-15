@@ -139,10 +139,31 @@ def make_postcards(log_path: Path, pdf: Path, paper: str = "hagaki") -> str:
     style = postcard.STYLES[postcard.DEFAULT_STYLE]
     plan, source, errors = plan_cards(scenes, builder.config.title, postcard.DEFAULT_CARDS,
                                       style, log_path.name)
-    postcard.write_pdf(plan, scenes, builder.config.title, pdf, style, paper)
-    pdf.with_suffix(".json").write_text(postcard.plan_to_json(plan, style, source, errors),
-                                        encoding="utf-8")
+    write_cards(plan, scenes, builder.config.title, pdf, style, paper,
+                postcard.plan_to_json(plan, style, source, errors))
     return source
+
+
+def write_cards(plan: list, scenes: list, title: str, pdf: Path, style: Any, paper: str,
+                plan_json: str) -> None:
+    """The cards' PDF and their plan (``.json`` beside it), each written
+    aside first and then put in place at once: the printing GUI may be
+    showing or printing the PDF while it is made again (the epilogue's card
+    added), and never reads half a file."""
+    import postcard
+
+    pdf.parent.mkdir(parents=True, exist_ok=True)
+    pdf_part = pdf.with_name(pdf.name + ".part")
+    json_path = pdf.with_suffix(".json")
+    json_part = json_path.with_name(json_path.name + ".part")
+    try:
+        postcard.write_pdf(plan, scenes, title, pdf_part, style, paper)
+        json_part.write_text(plan_json, encoding="utf-8")
+        os.replace(pdf_part, pdf)
+        os.replace(json_part, json_path)
+    finally:
+        pdf_part.unlink(missing_ok=True)
+        json_part.unlink(missing_ok=True)
 
 
 def make_epilogue_postcard(log_path: Path, pdf: Path, paper: str = "hagaki") -> str | None:
@@ -178,10 +199,9 @@ def make_epilogue_postcard(log_path: Path, pdf: Path, paper: str = "hagaki") -> 
                                 picture_scene=None if card.picture_scene is None
                                 else card.picture_scene + offset)
             for card in plan]
-    postcard.write_pdf(story_plan + plan, scenes + epilogue, builder.config.title, pdf, style, paper)
     combined = f"{story_source}+epilogue:{source}" if story_source else f"epilogue:{source}"
-    plan_path.write_text(postcard.plan_to_json(story_plan + plan, style, combined, errors),
-                         encoding="utf-8")
+    write_cards(story_plan + plan, scenes + epilogue, builder.config.title, pdf, style, paper,
+                postcard.plan_to_json(story_plan + plan, style, combined, errors))
     return source
 
 
@@ -299,16 +319,22 @@ class PostcardMaker:
         with self._lock:
             job = self.jobs[session_id]
             before, pdf = job.status, job.pdf
-        self._set(session_id, "making")
+        # The story's cards stay "ready" while the card is added: the
+        # printing GUI keeps the PDF selected (it drops a PDF that is being
+        # made), and the PDF is replaced at once (write_cards).
+        if before != "ready":
+            self._set(session_id, "making")
         try:
             source = self.make_epilogue(log_path, pdf)
         except Exception as exc:
             # The story's cards are still there as they were.
-            self._set(session_id, before, self.jobs[session_id].error)
+            if before != "ready":
+                self._set(session_id, before, self.jobs[session_id].error)
             print(f"[ポストカード] {log_path.name}: 後日談のカードを作れませんでした: "
                   f"{type(exc).__name__}: {exc}", file=sys.stderr)
             return
-        self._set(session_id, "ready" if source is not None or before == "ready" else before)
+        if before != "ready":
+            self._set(session_id, "ready" if source is not None else before)
         if source is not None:
             print(f"[ポストカード] {log_path.name}: 後日談のカードを足しました（{source}）: {pdf}",
                   file=sys.stderr)

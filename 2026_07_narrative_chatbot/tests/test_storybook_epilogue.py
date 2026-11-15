@@ -263,6 +263,8 @@ class EpiloguePostcardTest(unittest.TestCase):
         plan = json.loads(pdf.with_suffix(".json").read_text(encoding="utf-8"))
         self.assertEqual(plan["source"], "extractive+epilogue:extractive")
         self.assertIn("わたしは おはなを あげたいな", plan["cards"][-1]["text"])
+        self.assertEqual(sorted(p.name for p in pdf.parent.iterdir()),
+                         ["session_epilogue.json", "session_epilogue.pdf"])  # nothing left aside
         # Made again, it replaces its card rather than adding another.
         postcard_service.make_epilogue_postcard(log, pdf, "l")
         self.assertEqual(pdf_pages(pdf), story_cards + 1)
@@ -300,7 +302,9 @@ class MakerEpilogueTest(unittest.TestCase):
                 made.append("epilogue")
                 return "lm"
 
-            maker = PostcardMaker(None, make=make, make_epilogue=make_epilogue)
+            updates = []
+            maker = PostcardMaker(None, make=make, make_epilogue=make_epilogue,
+                                  on_status=lambda sid, status, pdf: updates.append(status))
             try:
                 maker(session, SimpleNamespace(source="story_goal", interaction_mode="narrative"))
                 deadline = time.monotonic() + 5
@@ -312,6 +316,8 @@ class MakerEpilogueTest(unittest.TestCase):
                 maker.close()
             self.assertEqual(made, ["story", "epilogue"])
             self.assertEqual(maker.status("s1").status, "ready")
+            # Never back to "making" once ready: the printing GUI keeps the PDF.
+            self.assertEqual(updates, ["waiting", "making", "ready"])
 
     def test_a_session_that_ended_before_its_goal_gets_no_epilogue_card(self):
         with tempfile.TemporaryDirectory() as directory:

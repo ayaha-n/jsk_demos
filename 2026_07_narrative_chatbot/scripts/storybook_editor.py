@@ -162,9 +162,12 @@ def refresh_book(path: Path, eink: bool = True) -> str:
 
 
 def remake_postcards(path: Path, paper: str) -> None:
-    from postcard_service import make_postcards, postcard_path
+    """The story's cards, then the epilogue's (if anything was said after
+    the goal), from the corrected words."""
+    from postcard_service import make_epilogue_postcard, make_postcards, postcard_path
 
     make_postcards(path, postcard_path(path), paper)
+    make_epilogue_postcard(path, postcard_path(path), paper)
 
 
 # ---------------------------------------------------------------------------
