@@ -78,8 +78,9 @@ COVER_HINT = "めくる→"
 # while the session went on (see StoryBuilder.story_done).
 EPILOGUE_TITLE = "そのあと"
 # The epilogue's own picture, drawn from what was said in it once the
-# session ends, on its first page (a scenario opts in with a beat of this
-# id in config/storybook.json: its prompt, no bundled picture).
+# session ends, on its first page: every scenario with a book has this beat,
+# from config/storybook.json's epilogue_prompt (no bundled picture), unless
+# it gives its own beats.epilogue.
 EPILOGUE_BEAT = "epilogue"
 COVER_INNER_FRAME_INSET = 16  # the frame's inner line, inside its outer one
 COVER_PADDING = 40  # between the inner line and what is inside it
@@ -336,6 +337,10 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
         beat_id: StoryBeat(beat_id=beat_id, **beat)
         for beat_id, beat in spec.get("beats", {}).items()
     }
+    if beats and EPILOGUE_BEAT not in beats and data.get("epilogue_prompt"):
+        # Every book's epilogue has its picture, from the shared prompt
+        # (a scenario may give its own beats.epilogue instead).
+        beats[EPILOGUE_BEAT] = StoryBeat(beat_id=EPILOGUE_BEAT, prompt=data["epilogue_prompt"])
     return StoryConfig(
         scenario=scenario,
         title=spec.get("title", ""),

@@ -136,9 +136,6 @@
           "narration": "こうして、イーヨーへの おくりものが きまりました。",
           "illustration": "eeyore_birthday/story_wrap_up_fallback.png",
           "prompt": "This bear from the reference image walks happily carrying a wrapped birthday present in one paw and waving goodbye with the other empty paw. No balloon or balloon string."
-        },
-        "epilogue": {
-          "prompt": "After the story of choosing Eeyore's birthday present is over, this bear from the reference image sits relaxed and chats happily with the reader. Draw the one thing the latest exchange was about (an object, food, or place the two of them talked about), held by or next to the bear. Do not repeat the gift scene unless the talk was about it."
         }
       },
       "closing": "おしまい"
@@ -206,13 +203,11 @@
           "narration": "あしあとの しょうたいが わかって、プーは ほっとした かおに なりました。",
           "illustration": "footprints/session_close.png",
           "prompt": "This bear from the reference image stands in a snowy forest clearing beside a bare bush, waving one raised paw with a warm smile, a short trail of round paw-shaped footprints in the snow behind it. No second animal, no magnifying glass, no honey pot. No human hand, arm or fingers anywhere in the picture; the reader is present only as a soft, faceless gray shadow falling into the scene from the bottom edge."
-        },
-        "epilogue": {
-          "prompt": "After the mystery of the footprints is solved, this bear from the reference image sits relaxed in the snowy forest and chats happily with the reader. Draw the one thing the latest exchange was about (an object, food, animal or place the two of them talked about), held by or next to the bear. Do not draw footprints unless the talk was about them."
         }
       },
       "closing": "おしまい"
     }
   },
+  "epilogue_prompt": "After the story is over, this bear from the reference image sits relaxed where the story took place and chats happily with the reader. Draw the one thing the latest exchange was about (an object, food, animal or place the two of them talked about), held by or next to the bear. Do not repeat a scene from the story itself unless the talk was about it.",
   "participant_presence": "The person this bear is with (the reader) is never drawn as a whole figure: no face or body. When the scene has them handing, holding out or touching something, only their hand and forearm reach into the picture from its edge. Otherwise they are present only as a soft, faceless gray shadow falling into the scene from the bottom edge, as if the reader were standing just outside the picture."
 }
