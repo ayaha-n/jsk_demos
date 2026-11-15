@@ -209,6 +209,7 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "plush_memory_viewer",
+ "png",
  "serde_json",
 ]
 

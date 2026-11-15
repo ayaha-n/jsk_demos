@@ -89,7 +89,11 @@ class Backend(Protocol):
     def end_book(self) -> None: ...
     # An epilogue page, whole, to keep with the finished book (see
     # LiveStorybook._store_epilogue); stored again as it grows.
-    def store_page(self, page: storybook.StoryPage, slot: int) -> None: ...
+    def store_page(self, page: storybook.StoryPage, slot: int,
+                   epilogue_pages: int | None = None) -> None: ...
+    # A page of the finished story laid out again after a correction to
+    # what was heard (see push_corrected_book).
+    def replace_page(self, page: storybook.StoryPage, index: int, story_pages: int) -> None: ...
 
 
 # This project is tied to one specific tablet, reachable over Tailscale as
@@ -247,12 +251,29 @@ class EinkBackend:
     def end_book(self) -> None:
         self._end_page(book_end=True)
 
-    def store_page(self, page: storybook.StoryPage, slot: int) -> None:
+    def store_page(self, page: storybook.StoryPage, slot: int,
+                   epilogue_pages: int | None = None) -> None:
         """Send an epilogue page for the viewer to keep, not to draw: the
         reader may be on any page of the finished book. Its text goes as
         text stages (``stored_text``, each placed as ``write`` places it),
         which the viewer writes with the same pen as a live page, off the
-        panel (see storybook_viewer's stored_page)."""
+        panel (see storybook_viewer's stored_page). ``epilogue_pages``: how
+        many the epilogue has now, when a correction has made it shorter."""
+        extra: dict[str, Any] = {"stored_page": slot}
+        if epilogue_pages is not None:
+            extra["epilogue_pages"] = epilogue_pages
+        self._send_stored(page, extra)
+
+    def replace_page(self, page: storybook.StoryPage, index: int, story_pages: int) -> None:
+        """Send a page of the finished story, picture and text, for the
+        viewer to put in place of its page ``index`` (or after the last one)
+        without drawing it, as an epilogue page is kept; ``story_pages``: how
+        many the story has now (the viewer drops any past them). For a
+        correction to what was heard, laid out again (see
+        ``push_corrected_book``)."""
+        self._send_stored(page, {"replace_page": index, "story_pages": story_pages})
+
+    def _send_stored(self, page: storybook.StoryPage, extra: dict[str, Any]) -> None:
         stages = []
         for item in page.placed:
             stage = {"x": item.x - WRAP_SLACK_PX // 2, "y": item.y, "w": item.w + WRAP_SLACK_PX,
@@ -262,11 +283,18 @@ class EinkBackend:
             if item.pen_r:
                 stage["pen_r"] = item.pen_r
             stages.append(stage)
-        manifest = {"stages": [], "stored_page": slot, "stored_layout": self.layout.name,
-                    "stored_text": stages, "bg": list(self.push.BG)}
+        event_id = self._next_id()
+        manifest = {"stages": [], "stored_layout": self.layout.name, "stored_text": stages,
+                    "stored_event": event_id, "bg": list(self.push.BG), **extra}
         try:
             with tempfile.TemporaryDirectory() as directory:
-                self.push._send_event(self._next_id(), manifest, directory, [],
+                files = []
+                picture = stored_picture(page, self.layout, Path(directory))
+                if picture is not None:
+                    path, (x, y) = picture
+                    manifest["stored_picture"] = {"image": path.name, "x": x, "y": y}
+                    files.append(str(path))
+                self.push._send_event(event_id, manifest, directory, files,
                                       self.push.EINK_HOST, self.app_dir)
         except Exception as exc:
             _report(self, exc)
@@ -314,6 +342,60 @@ class EinkBackend:
         increasing, since the viewer draws events in name order."""
         self._last_id = max(int(time.time() * 1000), self._last_id + 1)
         return str(self._last_id)
+
+
+def stored_picture(page: storybook.StoryPage, layout: PageLayout,
+                   directory: Path) -> tuple[Path, tuple[int, int]] | None:
+    """A kept page's picture, ready for the viewer to put as it is: cropped
+    to its subject, flattened onto the page white and scaled into its box
+    (as the PDF places it), saved as an RGB PNG in ``directory``; and where
+    its top-left goes."""
+    from PIL import Image
+
+    from storybook_render import place_illustration
+
+    path = find_illustration(page.illustration) if page.illustration else None
+    if path is None:
+        return None
+    image, (x, y, w, h) = place_illustration(path, page.picture_box or layout.picture_box)
+    target = directory / "picture.png"
+    image.convert("RGB").resize((w, h), Image.LANCZOS).save(target)
+    return target, (x, y)
+
+
+def page_signature(page: storybook.StoryPage) -> tuple[Any, ...]:
+    """What a page shows: two pages alike in this look the same."""
+    return (page.illustration, page.picture_box, page.frame_margin,
+            tuple((tuple(item.lines), item.x, item.y, item.w, item.px, item.align, item.pen_r)
+                  for item in page.placed))
+
+
+def push_corrected_book(backend: Any, new: StoryBuilder, old: StoryBuilder | None = None) -> int:
+    """Give the tablet's finished book the pages of ``new`` (the book laid
+    out again with corrections to what was heard) that differ from ``old``
+    (what the tablet has; all of them without it): the story's pages by
+    their place, the epilogue's by theirs, and how many of each there are
+    now, so a correction that shortens either drops the pages left over.
+    Returns how many pages were sent."""
+    sent = 0
+    new_story, new_epilogue = new.story_pages, new.epilogue_pages
+    old_story = old.story_pages if old is not None else []
+    old_epilogue = old.epilogue_pages if old is not None else []
+    changed = [index for index, page in enumerate(new_story)
+               if index >= len(old_story) or page_signature(page) != page_signature(old_story[index])]
+    if not changed and len(new_story) != len(old_story) and new_story:
+        changed = [len(new_story) - 1]  # only shorter: say so with the last page
+    for index in changed:
+        backend.replace_page(new_story[index], index, len(new_story))
+        sent += 1
+    changed = [slot for slot, page in enumerate(new_epilogue)
+               if slot >= len(old_epilogue) or page_signature(page) != page_signature(old_epilogue[slot])]
+    if not changed and len(new_epilogue) < len(old_epilogue) and new_epilogue:
+        changed = [len(new_epilogue) - 1]
+    for slot in changed:
+        backend.store_page(new_epilogue[slot], slot, len(new_epilogue))
+        sent += 1
+    return sent
 
 
 @contextlib.contextmanager
@@ -379,11 +461,17 @@ class PreviewBackend:
     def end_book(self) -> None:
         pass
 
-    def store_page(self, page: storybook.StoryPage, slot: int) -> None:
+    def store_page(self, page: storybook.StoryPage, slot: int,
+                   epilogue_pages: int | None = None) -> None:
         from storybook_render import render_page
 
         render_page(page, self.layout, page_number=False).save(
             self.book_dir / f"epilogue_{slot + 1:02d}.png")
+
+    def replace_page(self, page: storybook.StoryPage, index: int, story_pages: int) -> None:
+        from storybook_render import render_page
+
+        render_page(page, self.layout).save(self.book_dir / f"page_{index + 1:02d}.png")
 
     def _save(self, page: storybook.StoryPage) -> None:
         from storybook_render import render_page
@@ -420,6 +508,11 @@ class LiveStorybook:
         self._awaited_page: storybook.StoryPage | None = None
         self.saved: list[Path] = []  # PDFs of finished books
         self._log_path: Path | None = None
+        # The turns of the book's session as they came, to lay the book out
+        # again with the operator's corrections to what was heard; and the
+        # corrections file as last seen (its mtime).
+        self._turns: list[storybook.StoryTurn] = []
+        self._corrections_seen: float | None = None
         self._lock = threading.Lock()
         self._queue: queue.Queue[Any] = queue.Queue()
         self._worker = threading.Thread(target=self._run, name="storybook")
@@ -445,6 +538,12 @@ class LiveStorybook:
         if self._queue.qsize() > 1:
             print("[絵本] 書きかけのページを書き終えるまで待っています…", file=sys.stderr)
         self._worker.join(timeout)
+        if self._log_path is not None and any(isinstance(b, EinkBackend) for b in self.backends):
+            # From now on the corrections editor brings the tablet's book
+            # up to date itself.
+            state = read_tablet_state()
+            if state is not None and state.get("pid") == os.getpid():
+                write_tablet_state(Path(self._log_path), state.get("layout", ""), None)
         return not self._worker.is_alive()
 
     def _read_orientation(self) -> str:
@@ -463,6 +562,7 @@ class LiveStorybook:
                 item = self._queue.get(timeout=PICTURE_POLL_SEC)
             except queue.Empty:
                 self._draw_arrived_picture()
+                self._apply_corrections()
                 continue
             if item is _STOP:
                 try:
@@ -495,10 +595,15 @@ class LiveStorybook:
             self.builder = StoryBuilder(config, layout, awaits_illustration=self._awaits(config),
                                         compose_cover=True)
             self._awaited_page = None
+            self._turns = []
+            self._corrections_seen = None
             self._each_backend(lambda backend: backend.begin_book(layout))
+            if self._log_path is not None and any(isinstance(b, EinkBackend) for b in self.backends):
+                write_tablet_state(Path(self._log_path), layout.name, os.getpid())
             return
         if self.builder is None or self.builder.finished:
             return
+        self._turns.append(value)
         if self.builder.story_done:
             # The epilogue: kept with the book, not written over the page
             # being read (see _store_epilogue); the PDF gets it at the end.
@@ -520,6 +625,46 @@ class LiveStorybook:
             self._draw_cover()
             self._each_backend(lambda backend: backend.end_book())
             self._save()
+
+    def _apply_corrections(self) -> None:
+        """Once the book is finished, take up the operator's corrections to
+        what was heard (``storybook_corrections``, edited while the session
+        may go on): lay the book out again from the session's turns as
+        corrected, give the tablet the pages that changed, and save the PDF
+        again. The epilogue goes on from the book laid out again."""
+        import storybook_corrections
+
+        builder = self.builder
+        if builder is None or not builder.story_done or self._log_path is None:
+            return
+        path = storybook_corrections.corrections_path(Path(self._log_path))
+        try:
+            seen: float | None = path.stat().st_mtime
+        except OSError:
+            seen = None
+        if seen == self._corrections_seen:
+            return
+        self._corrections_seen = seen
+        corrections = storybook_corrections.load(Path(self._log_path))
+        rebuilt = StoryBuilder(builder.config, builder.layout, builder.measure,
+                               compose_cover=True)
+        for turn in storybook_corrections.apply_to_turns(self._turns, corrections):
+            rebuilt.add(turn)
+        if builder.finished:
+            rebuilt.finish()
+        # A picture that came after its page went to the tablet: the tablet
+        # has it drawn, as the book laid out again has it in place.
+        self._awaited_page = None
+        sent = [0]
+
+        def push(backend: Any) -> None:
+            sent[0] += push_corrected_book(backend, rebuilt, builder)
+
+        self._each_backend(push)
+        self.builder = rebuilt
+        print(f"[絵本] 訂正を反映しました（{len(corrections)}件、{sent[0]}ページを送り直し）",
+              file=sys.stderr)
+        self._save()
 
     def _store_epilogue(self, events: list[PageEvent]) -> None:
         """Hand each epilogue page these events changed to the backends
@@ -654,6 +799,52 @@ class LiveStorybook:
             except Exception as exc:
                 # The conversation goes on without the book.
                 _report(backend, exc)
+
+
+def tablet_state_path() -> Path:
+    """Which book the tablet has, and whether a live book still owns it."""
+    log_dir = Path(os.getenv("POOH_LOG_DIR", str(storybook.PROJECT_ROOT / "logs")))
+    return log_dir / "storybooks" / ".tablet.json"
+
+
+def write_tablet_state(log_path: Path, layout: str, pid: int | None) -> None:
+    """Record that the tablet has the book of ``log_path``, laid out
+    ``layout``, kept up to date by the process ``pid`` (None: by no one;
+    the corrections editor then sends corrected pages itself)."""
+    import json
+
+    path = tablet_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {"log": str(Path(log_path).resolve()), "layout": layout, "pid": pid}
+        fd, tmp = tempfile.mkstemp(prefix=".tablet.", dir=path.parent)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream)
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"[絵本] タブレットの状態を書けませんでした: {exc}", file=sys.stderr)
+
+
+def read_tablet_state() -> dict[str, Any] | None:
+    import json
+
+    try:
+        data = json.loads(tablet_state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def process_alive(pid: Any) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def pace_for_backlog(backlog: int) -> int:

@@ -610,7 +610,7 @@ async def _storybook_records(request: web.Request) -> tuple[Path, list[dict[str,
     records, _, _ = await asyncio.to_thread(_read_log, path)
     if not records:
         return web.json_response({"error": "empty log"}, status=404)
-    return path, records
+    return path, _corrected(path, records)
 
 
 async def read_storybook(request: web.Request) -> web.Response:
@@ -756,7 +756,15 @@ def _session_records(log_path: Path | None) -> list[dict[str, Any]]:
     if log_path is None or not log_path.is_file():
         return []
     records, _, _ = _read_log(log_path)
-    return records
+    return _corrected(log_path, records)
+
+
+def _corrected(log_path: Path, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The records as the operator corrected what was heard (the picture
+    book tells the corrected words; the log itself keeps what was heard)."""
+    import storybook_corrections
+
+    return storybook_corrections.apply_corrections(records, storybook_corrections.load(log_path))
 
 
 def _session_scenario(entry: WebSession) -> str | None:
@@ -986,6 +994,7 @@ def create_app(
     end_after_minutes: float | None = None,
     tts: TTSCache | None = None,
     postcards: Any = None,
+    postcard_paper: str = "l",
 ) -> web.Application:
     app = web.Application()
     if postcards is not None:
@@ -1044,6 +1053,18 @@ def create_app(
     app.router.add_get("/static/style.css", static_stylesheet)
     app.router.add_get("/static/bear.js", static_bear_script)
     app.router.add_get("/static/crowdsourcing.js", static_crowdsourcing_script)
+    # Correcting what the recognizer heard, for the picture book (this PC only).
+    import storybook_editor
+
+    def corrections_guard(request: web.Request) -> web.Response | None:
+        if not _local_log_access_allowed(request):
+            return web.json_response({"error": "local access only"}, status=403)
+        if not _authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return None
+
+    storybook_editor.add_routes(app, effective_log_dir, guard=corrections_guard,
+                                paper=postcard_paper)
     return app
 
 
@@ -1224,12 +1245,15 @@ def main() -> int:
         tts=tts,
         postcards=next((listener for listener in listeners
                         if type(listener).__name__ == "PostcardMaker"), None),
+        postcard_paper=getattr(args, "postcard_size", "l"),
     )
     if args.crowdsourcing:
         print(f"合言葉: {args.passphrase}" if args.passphrase
               else "合言葉: なし（--passphrase で、完了コードの下に出せます）")
     suffix = f"/?token={access_token}" if access_token else "/"
     print(f"Web UI: http://{args.host}:{args.port}{suffix}")
+    print(f"聞き間違いの訂正（この PC から）: http://127.0.0.1:{args.port}/corrections"
+          + (f"?token={access_token}" if access_token else ""))
     try:
         if cloudflared is None:
             web.run_app(app, host=args.host, port=args.port, print=None)

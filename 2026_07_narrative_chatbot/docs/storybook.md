@@ -24,7 +24,7 @@
 
 ## タブレット側（storybook_viewer）
 
-`storybook_viewer/` は AppLoad アプリで、[plush_memory](https://github.com/ayaha-n/plush_memory) の e-ink viewer をライブラリとして使い（plush_memory README の "Reusing the viewer in another app"）、書き終えた絵本の読み返しと、後日談のページ（描かずにしまっておく `stored_page`）だけを足している。後日談に対応していない古い viewer は、後日談のページを受け取ると読み返しモードを抜けてしまう（タップでめくれなくなる）ので、この版の PC 側を使う前に viewer を入れ直す。PC からは `plush_memory/scripts/eink_memory_push.py` で ssh 越しに送る。タブレットには plush_memory と同じく xovi と AppLoad が必要。
+`storybook_viewer/` は AppLoad アプリで、[plush_memory](https://github.com/ayaha-n/plush_memory) の e-ink viewer をライブラリとして使い（plush_memory README の "Reusing the viewer in another app"）、書き終えた絵本の読み返しと、後日談のページ（描かずにしまっておく `stored_page`）、聞き間違いを直したページの差し替え（`replace_page`、下の「聞き間違いの訂正」）だけを足している。後日談に対応していない古い viewer は、後日談のページを受け取ると読み返しモードを抜けてしまう（タップでめくれなくなる）ので、この版の PC 側を使う前に viewer を入れ直す。PC からは `plush_memory/scripts/eink_memory_push.py` で ssh 越しに送る。タブレットには plush_memory と同じく xovi と AppLoad が必要。
 
 一度だけビルドして入れる:
 
@@ -101,6 +101,25 @@ python scripts/storybook_render.py logs/saved_examples/<...>.jsonl --layout port
 PDF リンクは、画面で選んだ向きの PDF をその場で作って返す。向きを指定しない `.../storybook.pdf` は、ライブで保存した PDF があればそれを返す。
 
 `--storybook-preview DIR` を付けると、書いているページを PNG として DIR にも書き出す（タブレットなしでの確認用。`--storybook-eink` と併用もできる）。
+
+## 聞き間違いの訂正
+
+音声認識が聞き間違えた参加者の発言は、オペレータがあとから直せる。直すのは参加者が言ったこと（`user_action` の「」の中）だけで、プーの返事はそのまま。
+
+- 画面: この PC のブラウザで開く（ほかのマシンや `--public` からは開けない）。
+  - ロボット（`pooh_narrative_dspy.py --ros-relay`）: 絵本かポストカードを作る設定（`--storybook-eink`・`--storybook-preview`・`--postcards`）なら、チャットが `http://127.0.0.1:8090/corrections` に出す（ポートは `--corrections-port`、0 で出さない。ポートが使われていれば理由を出して出さない）。
+  - Web UI（`web_server.py`）: `http://127.0.0.1:<port>/corrections`（トークンがあれば `?token=…`。起動時に表示する）。
+  - チャットを止めたあと: `python scripts/storybook_editor.py`（`http://127.0.0.1:8090/corrections`。`--no-eink` でタブレットに送らない）。
+- 使い方: セッションを選び、発言を書き直して「直す」。「元に戻す」で聞き取ったままに戻す。
+- 直した内容はログの隣の `<ログ名>_corrections.json` に入る（発言の番号、聞き取った文、直した文）。ログ自体は聞き取ったまま残す。直す前にログのその発言が聞き取った文のままか確かめ、違えば当てない。
+- ログから作るもの（Web の絵本・PDF・ポストカード・会話からの挿絵の生成）は、どれもログを読むところでこのファイルを当てるので、直した言葉になる（`storybook_render.read_log`）。過去ログの会話の表示は聞き取ったまま。
+- 直すと:
+  - 絵本の PDF を保存し直す。
+  - タブレットの本がこのセッションのもので、書き終えていれば（ゴールのあと）、変わったページだけを送り直す。表示中のページは書き換えず、次にめくったときに反映される。文字が増えてページが増えたり減ったりしても、後日談と表紙は物語の後ろに付いたまま。後日談の発言も直せる。
+    - チャットが動いていれば、チャットのライブの絵本が訂正ファイルを見ていて（1秒ごと）、受け取ったターンから本を組み直して送る。後日談はその組み直した本に続ける。
+    - チャットが止まっていれば、訂正の画面が全部のページを送る。どちらがタブレットの本を持っているかは `logs/storybooks/.tablet.json`（ライブの本が始まるときに書き、チャットが止まると持ち主を消す）で決める。
+  - ポストカードは自動では作り直さない（印刷済みのことがある）。画面の「ポストカードを作り直す」で、直した言葉から作り直す（LM がやりとりを選び直す。20〜40秒）。
+- タブレットでの差し替えには、この版の viewer（`replace_page`・`stored_picture` に対応したもの）を入れ直す必要がある。古い viewer は差し替えのページを受け取ると、ページを描かずに読み返しモードを抜けてしまう。
 
 ## 挿絵
 

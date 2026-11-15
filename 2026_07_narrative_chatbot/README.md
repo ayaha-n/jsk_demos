@@ -159,6 +159,8 @@ Model-output quality, state retention across generated turns, and the LLM evalua
 │   ├── storybook.py                 # Session -> picture-book pages (narration, layout)
 │   ├── storybook_live.py            # Live book on the tablet / PNG preview
 │   ├── storybook_render.py          # Log -> PDF (and page PNGs)
+│   ├── storybook_corrections.py     # Operator's corrections to what was misheard
+│   ├── storybook_editor.py          # Page to correct them (also served by the chatbot)
 │   ├── storybook_illustrations.py   # Illustration generation per scene
 │   ├── postcard.py                  # Book -> printable postcards (PDF)
 │   ├── print_postcards.py           # Postcards -> the SELPHY printer, borderless
