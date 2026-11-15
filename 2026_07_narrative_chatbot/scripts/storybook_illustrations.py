@@ -435,6 +435,47 @@ NO_READER_HAND = (
 )
 
 
+# An image model given an undecorated pot tied a blue bow on it, and a ribbon
+# with no color in the scene summary came out blue though 赤 had been agreed
+# (logs/session_20261115T122614236604_0b4a4b70: リボンの色：赤).
+NO_EXTRA_DECORATION = (
+    "Do not add ribbons, bows, wrapping, labels or other decorations the scene "
+    "does not mention."
+)
+# Answers in a 'question：answer' decided entry that leave the color open.
+UNDECIDED_COLORS = ("未定", "未指定", "決めていない", "決まっていない", "まだ", "おまかせ", "なし")
+
+
+def agreed_colors(turns) -> dict[str, str]:
+    """Colors agreed in the story, by object: ``{"リボン": "赤"}`` from the
+    latest state's decided entry ``リボンの色：赤``. Read here rather than
+    left to the scene summary, which may drop the color."""
+    state = next((turn.situation for turn in reversed(turns) if turn.situation), {})
+    colors: dict[str, str] = {}
+    for entry in state.get("decided", []) if isinstance(state, dict) else []:
+        if not isinstance(entry, str):
+            continue
+        question, _, answer = entry.replace(":", "：").partition("：")
+        question = question.strip().rstrip("？?").strip()
+        answer = answer.strip()
+        if not question.endswith("の色") or not answer:
+            continue
+        thing = question[:-len("の色")].strip()
+        if thing and not any(word in answer for word in UNDECIDED_COLORS):
+            colors.pop(thing, None)
+            colors[thing] = answer  # a later decision replaces an earlier one
+    return colors
+
+
+def colors_rule(colors: dict[str, str]) -> str:
+    if not colors:
+        return ""
+    return ("Colors agreed in the story: "
+            + ", ".join(f"{thing} = {color}" for thing, color in colors.items())
+            + ". If any of these objects is in the picture, draw it in exactly this color; "
+            "do not add it otherwise.")
+
+
 def reader_acted(config, beat_id, turns):
     """Whether the robot saw the reader do something in the scene (handing,
     holding out or touching), the only time a hand may be drawn."""
@@ -446,10 +487,12 @@ def reader_acted(config, beat_id, turns):
 
 
 def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existing: bool = False,
-                 reader_hand: bool = True) -> str:
+                 reader_hand: bool = True, colors: dict[str, str] | None = None) -> str:
     """The image API receives only the visual summary and shared drawing rules;
-    ``reader_hand`` is whether the reader's hand may be in it (reader_acted)."""
+    ``reader_hand`` is whether the reader's hand may be in it (reader_acted),
+    ``colors`` the colors agreed in the story (agreed_colors)."""
     hand = READER_HAND if reader_hand else NO_READER_HAND
+    agreed = colors_rule(colors or {})
     if edit_existing:
         return reference_descriptions(
             "Edit this existing picture-book illustration with a few local changes. "
@@ -461,17 +504,18 @@ def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existi
             + (" and the reader's hand" if reader_hand else "")
             + " only as described in the following scene. Keep the whole bear and objects "
             "inside the frame with clear margins. No extra objects, characters, "
-            "writing, speech bubbles, scenery or colored backdrop.\nScene: " + description
-            + "\n" + ANATOMY + " " + hand
+            "writing, speech bubbles, scenery or colored backdrop. " + NO_EXTRA_DECORATION
+            + "\nScene: " + description
+            + "\n" + ANATOMY + " " + hand + ("\n" + agreed if agreed else "")
         )
     return reference_descriptions("\n".join(filter(None, (
         "Illustrate the following single scene using the bear in the reference "
         "image. Draw only the described action and props. Do not add a wrapped "
-        "gift box unless the scene explicitly includes one. No text, lettering, "
+        "gift box unless the scene explicitly includes one. " + NO_EXTRA_DECORATION + " No text, lettering, "
         "speech bubbles or thought bubbles. Do not visualize imagined events or "
         "offscreen friends. Keep the background fully transparent, not filled "
         "with a yellow or sepia color; draw only a small patch of ground.",
-        "Scene: " + description, ANATOMY + " " + hand,
+        "Scene: " + description, ANATOMY + " " + hand, agreed,
         config.participant_presence if reader_hand else "", config.illustration_style,
     ))))
 
@@ -612,8 +656,9 @@ class SessionIllustrations:
                                and beat_id == "story_wrap_up" and summary.balloon_color is not None)
             if balloon_closing:
                 reference_name = "eeyore_birthday/story_wrap_up.png"
+            colors = agreed_colors(turns)
             prompt = scene_prompt(config, description, edit_existing=bool(reference_name),
-                                  reader_hand=reader_acted(config, beat_id, turns))
+                                  reader_hand=reader_acted(config, beat_id, turns), colors=colors)
             if balloon_closing:
                 prompt += (
                     "\nUse image 2's closing composition as the base, retaining the bear and "
@@ -631,6 +676,7 @@ class SessionIllustrations:
                 "cache_key": cache_key,
                 "description": description,
                 "balloon_color": summary.balloon_color,
+                "agreed_colors": colors,
                 "illustration_needed": summary.illustration_needed,
                 "answered": summary.answered,
                 "imagined": summary.imagined,
