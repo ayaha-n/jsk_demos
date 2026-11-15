@@ -281,22 +281,24 @@ def scenes_from_book(builder: storybook.StoryBuilder) -> list[Scene]:
     return scenes
 
 
-def epilogue_scene(builder: storybook.StoryBuilder) -> Scene | None:
-    """What was said after the story's goal (the book's epilogue), as one
-    scene for a card of its own; None if the participant said nothing in
-    it. Its picture is the one drawn from it, or, if none was, the story's
-    last picture."""
+def epilogue_scenes(builder: storybook.StoryBuilder) -> list[Scene]:
+    """What was said after the story's goal (the book's epilogue), as its
+    parts' scenes (a long epilogue has a part, with its picture, every so
+    many things said: storybook.epilogue_parts), for a card of its own;
+    none if the participant said nothing in it. Without any picture drawn
+    from it, its first part borrows the story's last one."""
     import postcard_items
 
-    pages = builder.epilogue_pages
-    if not pages:
-        return None
     scenario = builder.config.scenario
-    beat_id = storybook.EPILOGUE_BEAT
-    scene = Scene(beat_id, None, item=item_for_beat(scenario, beat_id),
-                  frame=postcard_items.load_frame(scenario),
-                  no_item=postcard_items.beat_hides_item(scenario, beat_id))
-    for page in pages:
+    frame = postcard_items.load_frame(scenario)
+    scenes: list[Scene] = []
+    for page in builder.epilogue_pages:
+        if page.beat_id is not None or not scenes:
+            beat_id = page.beat_id or storybook.EPILOGUE_BEAT
+            scenes.append(Scene(beat_id, None, item=item_for_beat(scenario, storybook.EPILOGUE_BEAT),
+                                frame=frame,
+                                no_item=postcard_items.beat_hides_item(scenario, storybook.EPILOGUE_BEAT)))
+        scene = scenes[-1]
         if page.illustration and scene.illustration is None:
             scene.illustration = page.illustration
             scene.picture_kind = picture_kind(page.illustration, builder.config, page.beat_id)
@@ -307,14 +309,14 @@ def epilogue_scene(builder: storybook.StoryBuilder) -> Scene | None:
             if scene.entries and _is_continuation(scene.entries[-1], entry):
                 continue
             scene.entries.append(entry)
-    if not participant_words(scene.entries):
-        return None
-    if scene.illustration is None:
+    if not participant_words([entry for scene in scenes for entry in scene.entries]):
+        return []
+    if not any(scene.illustration for scene in scenes):
         last = next((page for page in reversed(builder.story_pages) if page.illustration), None)
         if last is not None:
-            scene.illustration = last.illustration
-            scene.picture_kind = picture_kind(last.illustration, builder.config, last.beat_id)
-    return scene
+            scenes[0].illustration = last.illustration
+            scenes[0].picture_kind = picture_kind(last.illustration, builder.config, last.beat_id)
+    return scenes
 
 
 def top_level_quotes(text: str) -> list[tuple[int, int, str]]:

@@ -562,6 +562,7 @@ class LiveStorybook:
                 item = self._queue.get(timeout=PICTURE_POLL_SEC)
             except queue.Empty:
                 self._draw_arrived_picture()
+                self._draw_arrived_epilogue_pictures()
                 self._apply_corrections()
                 continue
             if item is _STOP:
@@ -682,28 +683,55 @@ class LiveStorybook:
             slot = index - builder.epilogue_start
             self._each_backend(lambda backend: backend.store_page(page, slot))
 
-    def _finish_epilogue_picture(self) -> None:
-        """Once the session is over, wait (a while) for the epilogue's
-        picture, drawn from what was said in it, and give the tablet its
-        first page again with the picture."""
+    def _epilogue_pictures_due(self) -> list[tuple[int, storybook.StoryPage]]:
+        """The epilogue's pages (by their place in it) laid out around a
+        picture still to come."""
         builder = self.builder
         if builder is None or builder.epilogue_start is None or self.illustrations is None:
-            return
-        page = builder.pages[builder.epilogue_start]
-        if not page.awaits_illustration or page.illustration or page.beat_id is None:
-            return
-        session_id = builder.config.session_id
-        deadline = time.monotonic() + ILLUSTRATION_WAIT_SEC
-        self.illustrations.wait(
-            session_id, page.beat_id,
-            cancelled=lambda: (self._latest_session_id != session_id
-                               or time.monotonic() > deadline),
-        )
-        if not builder.attach_illustration(page):
-            print("[絵本] 後日談の挿絵がないので、文字だけで閉じます", file=sys.stderr)
+            return []
+        return [(slot, page) for slot, page in enumerate(builder.epilogue_pages)
+                if page.awaits_illustration and page.illustration is None and page.beat_id]
+
+    def _store_epilogue_picture(self, slot: int, page: storybook.StoryPage) -> None:
+        """Put a page's picture that has come (or been given up on) in place,
+        and give the tablet the page again with it."""
+        builder = self.builder
+        page.awaits_illustration = False  # dealt with, either way
+        if builder is None or not builder.attach_illustration(page):
             return
         count = len(builder.epilogue_pages)
-        self._each_backend(lambda backend: backend.store_page(page, 0, count))
+        self._each_backend(lambda backend: backend.store_page(page, slot, count))
+
+    def _draw_arrived_epilogue_pictures(self) -> None:
+        """Each part of a long epilogue gets its picture once that part is
+        over, while the session goes on: put each in as it comes."""
+        done = getattr(self.illustrations, "done", None)
+        if done is None:
+            return
+        for slot, page in self._epilogue_pictures_due():
+            try:
+                if done(self.builder.config.session_id, page.beat_id):
+                    self._store_epilogue_picture(slot, page)
+            except Exception as exc:
+                print(f"[絵本] 後日談の挿絵を入れられませんでした: {type(exc).__name__}: {exc}",
+                      file=sys.stderr)
+
+    def _finish_epilogue_picture(self) -> None:
+        """Once the session is over, wait (a while) for the epilogue's
+        pictures still being drawn (its last part's is drawn now) and give
+        the tablet their pages again with them."""
+        due = self._epilogue_pictures_due()
+        if not due:
+            return
+        session_id = self.builder.config.session_id
+        deadline = time.monotonic() + ILLUSTRATION_WAIT_SEC
+        for slot, page in due:
+            self.illustrations.wait(
+                session_id, page.beat_id,
+                cancelled=lambda: (self._latest_session_id != session_id
+                                   or time.monotonic() > deadline),
+            )
+            self._store_epilogue_picture(slot, page)
 
     def _awaits(self, config: storybook.StoryConfig) -> Any:
         """Whether a beat's picture is still to be generated (see

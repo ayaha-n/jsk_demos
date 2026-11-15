@@ -147,7 +147,8 @@ def make_postcards(log_path: Path, pdf: Path, paper: str = "hagaki") -> str:
 
 def make_epilogue_postcard(log_path: Path, pdf: Path, paper: str = "hagaki") -> str | None:
     """One more card, from what was said after the story's goal (the
-    epilogue), after the story's cards in the same PDF (made again with it);
+    epilogue: the exchange and picture of one of its parts that go best
+    together), after the story's cards in the same PDF (made again with it);
     a card made before for the epilogue is replaced. None, and nothing
     changed, if nothing was said after the goal."""
     import dataclasses
@@ -157,8 +158,8 @@ def make_epilogue_postcard(log_path: Path, pdf: Path, paper: str = "hagaki") -> 
 
     builder = build_from_log(log_path, "portrait")
     scenes = postcard.scenes_from_book(builder)
-    epilogue = postcard.epilogue_scene(builder)
-    if epilogue is None:
+    epilogue = postcard.epilogue_scenes(builder)
+    if not epilogue:
         return None
     style = postcard.STYLES[postcard.DEFAULT_STYLE]
     story_plan: list = []
@@ -170,14 +171,14 @@ def make_epilogue_postcard(log_path: Path, pdf: Path, paper: str = "hagaki") -> 
         style = saved_style or style
         story_source = str(json.loads(text).get("source", "")).split("+")[0]
         story_plan = [card for card in story_plan if card.last_scene < len(scenes)]
-    plan, source, errors = plan_cards([epilogue], builder.config.title, 1, style, log_path.name)
+    plan, source, errors = plan_cards(epilogue, builder.config.title, 1, style, log_path.name)
     offset = len(scenes)
     plan = [dataclasses.replace(card, first_scene=card.first_scene + offset,
                                 last_scene=card.last_scene + offset,
                                 picture_scene=None if card.picture_scene is None
                                 else card.picture_scene + offset)
             for card in plan]
-    postcard.write_pdf(story_plan + plan, scenes + [epilogue], builder.config.title, pdf, style, paper)
+    postcard.write_pdf(story_plan + plan, scenes + epilogue, builder.config.title, pdf, style, paper)
     combined = f"{story_source}+epilogue:{source}" if story_source else f"epilogue:{source}"
     plan_path.write_text(postcard.plan_to_json(story_plan + plan, style, combined, errors),
                          encoding="utf-8")
