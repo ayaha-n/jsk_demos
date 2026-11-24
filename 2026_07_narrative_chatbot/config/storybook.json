@@ -208,5 +208,6 @@
       "closing": "おしまい"
     }
   },
+  "epilogue_prompt": "After the story is over, this bear from the reference image sits relaxed where the story took place and chats happily with the reader. Draw the one thing the latest exchange was about (an object, food, animal or place the two of them talked about), held by or next to the bear. Do not repeat a scene from the story itself unless the talk was about it.",
   "participant_presence": "The person this bear is with (the reader) is never drawn as a whole figure: no face or body. When the scene has them handing, holding out or touching something, only their hand and forearm reach into the picture from its edge. Otherwise they are present only as a soft, faceless gray shadow falling into the scene from the bottom edge, as if the reader were standing just outside the picture."
 }

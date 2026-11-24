@@ -78,6 +78,44 @@ COVER_HINT_EN = "Turn →"
 # Heading of the epilogue: what was said after the story reached its goal,
 # while the session went on (see StoryBuilder.story_done).
 EPILOGUE_TITLE = "そのあと"
+# The epilogue's own picture, drawn from what was said in it once the
+# session ends, on its first page: every scenario with a book has this beat,
+# from config/storybook.json's epilogue_prompt (no bundled picture), unless
+# it gives its own beats.epilogue.
+EPILOGUE_BEAT = "epilogue"
+# A long epilogue gets more pictures: a new part, opening a page with its
+# own picture, every so many things the participant says, up to so many
+# parts (the last runs on to the end). Its picture is drawn from that part
+# once it is over (see epilogue_parts).
+EPILOGUE_PICTURE_EVERY = 8
+EPILOGUE_PICTURES_MAX = 6
+
+
+def epilogue_beat(part: int) -> str:
+    """The beat of the epilogue's ``part`` (0, 1, …): "epilogue",
+    "epilogue_2", …"""
+    return EPILOGUE_BEAT if part == 0 else f"{EPILOGUE_BEAT}_{part + 1}"
+
+
+def opens_epilogue_part(said_before: int, parts: int) -> bool:
+    """Whether the participant's next words, after ``said_before`` of them
+    in the epilogue so far, open a new part, ``parts`` having been opened."""
+    return (said_before > 0 and said_before % EPILOGUE_PICTURE_EVERY == 0
+            and parts < EPILOGUE_PICTURES_MAX)
+
+
+def epilogue_parts(turns: Iterable["StoryTurn"]) -> list[list["StoryTurn"]]:
+    """The epilogue's turns (from the story's goal on) in its parts, as the
+    book opens them."""
+    parts: list[list[StoryTurn]] = [[]]
+    said = 0
+    for turn in turns:
+        if turn.user_text:
+            if opens_epilogue_part(said, len(parts)):
+                parts.append([])
+            said += 1
+        parts[-1].append(turn)
+    return parts
 COVER_INNER_FRAME_INSET = 16  # the frame's inner line, inside its outer one
 COVER_PADDING = 40  # between the inner line and what is inside it
 COVER_TITLE_PEN_R = 4
@@ -337,6 +375,12 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH,
         beat_id: StoryBeat(beat_id=beat_id, **beat)
         for beat_id, beat in spec.get("beats", {}).items()
     }
+    prompt = beats[EPILOGUE_BEAT].prompt if EPILOGUE_BEAT in beats else data.get("epilogue_prompt")
+    if beats and prompt:
+        # Every book's epilogue has its pictures, one per part, from the
+        # shared prompt (a scenario may give its own beats.epilogue instead).
+        for part in range(EPILOGUE_PICTURES_MAX):
+            beats.setdefault(epilogue_beat(part), StoryBeat(beat_id=epilogue_beat(part), prompt=prompt))
     title, closing = spec.get("title", ""), spec.get("closing", "おしまい")
     if language == "en":
         from english_mode import english_text
@@ -973,6 +1017,9 @@ class StoryBuilder:
         self._just_seen: tuple[str, ...] = ()
         # Beats already given their own page (see narrate()'s covered_beats).
         self._covered_beats: set[str] = set()
+        # What the participant has said in the epilogue, and its parts so far.
+        self._epilogue_said = 0
+        self._epilogue_parts = 1
 
     @property
     def story_pages(self) -> list[StoryPage]:
@@ -1011,6 +1058,14 @@ class StoryBuilder:
             self._covered_beats.add(beat_id)
         if not self.pages or (beat_id is not None and not self._continue_in_next_column(beat_id)):
             events.append(self._new_page(beat_id))
+        if self.story_done and turn.user_text:
+            if self.epilogue_start is not None \
+                    and opens_epilogue_part(self._epilogue_said, self._epilogue_parts) \
+                    and epilogue_beat(self._epilogue_parts) in self.config.beats:
+                # A long epilogue: its next part opens a page with its picture.
+                events.append(self._new_page(epilogue_beat(self._epilogue_parts)))
+                self._epilogue_parts += 1
+            self._epilogue_said += 1
         events.extend(self._place(entries))
         if turn.ends_story:
             events.extend(self.finish())
@@ -1184,7 +1239,7 @@ class StoryBuilder:
             # The first words after the story: the epilogue starts overleaf,
             # under its heading, never below 「おしまい」.
             self.epilogue_start = len(self.pages)
-            events.append(self._new_page(None))
+            events.append(self._new_page(EPILOGUE_BEAT if EPILOGUE_BEAT in self.config.beats else None))
             entries = [StoryEntry("title", EPILOGUE_TITLE), *entries]
         batch: list[PlacedEntry] = []
 

@@ -435,6 +435,47 @@ NO_READER_HAND = (
 )
 
 
+# An image model given an undecorated pot tied a blue bow on it, and a ribbon
+# with no color in the scene summary came out blue though 赤 had been agreed
+# (logs/session_20261115T122614236604_0b4a4b70: リボンの色：赤).
+NO_EXTRA_DECORATION = (
+    "Do not add ribbons, bows, wrapping, labels or other decorations the scene "
+    "does not mention."
+)
+# Answers in a 'question：answer' decided entry that leave the color open.
+UNDECIDED_COLORS = ("未定", "未指定", "決めていない", "決まっていない", "まだ", "おまかせ", "なし")
+
+
+def agreed_colors(turns) -> dict[str, str]:
+    """Colors agreed in the story, by object: ``{"リボン": "赤"}`` from the
+    latest state's decided entry ``リボンの色：赤``. Read here rather than
+    left to the scene summary, which may drop the color."""
+    state = next((turn.situation for turn in reversed(turns) if turn.situation), {})
+    colors: dict[str, str] = {}
+    for entry in state.get("decided", []) if isinstance(state, dict) else []:
+        if not isinstance(entry, str):
+            continue
+        question, _, answer = entry.replace(":", "：").partition("：")
+        question = question.strip().rstrip("？?").strip()
+        answer = answer.strip()
+        if not question.endswith("の色") or not answer:
+            continue
+        thing = question[:-len("の色")].strip()
+        if thing and not any(word in answer for word in UNDECIDED_COLORS):
+            colors.pop(thing, None)
+            colors[thing] = answer  # a later decision replaces an earlier one
+    return colors
+
+
+def colors_rule(colors: dict[str, str]) -> str:
+    if not colors:
+        return ""
+    return ("Colors agreed in the story: "
+            + ", ".join(f"{thing} = {color}" for thing, color in colors.items())
+            + ". If any of these objects is in the picture, draw it in exactly this color; "
+            "do not add it otherwise.")
+
+
 def reader_acted(config, beat_id, turns):
     """Whether the robot saw the reader do something in the scene (handing,
     holding out or touching), the only time a hand may be drawn."""
@@ -446,10 +487,12 @@ def reader_acted(config, beat_id, turns):
 
 
 def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existing: bool = False,
-                 reader_hand: bool = True) -> str:
+                 reader_hand: bool = True, colors: dict[str, str] | None = None) -> str:
     """The image API receives only the visual summary and shared drawing rules;
-    ``reader_hand`` is whether the reader's hand may be in it (reader_acted)."""
+    ``reader_hand`` is whether the reader's hand may be in it (reader_acted),
+    ``colors`` the colors agreed in the story (agreed_colors)."""
     hand = READER_HAND if reader_hand else NO_READER_HAND
+    agreed = colors_rule(colors or {})
     if edit_existing:
         return reference_descriptions(
             "Edit this existing picture-book illustration with a few local changes. "
@@ -461,17 +504,18 @@ def scene_prompt(config: storybook.StoryConfig, description: str, *, edit_existi
             + (" and the reader's hand" if reader_hand else "")
             + " only as described in the following scene. Keep the whole bear and objects "
             "inside the frame with clear margins. No extra objects, characters, "
-            "writing, speech bubbles, scenery or colored backdrop.\nScene: " + description
-            + "\n" + ANATOMY + " " + hand
+            "writing, speech bubbles, scenery or colored backdrop. " + NO_EXTRA_DECORATION
+            + "\nScene: " + description
+            + "\n" + ANATOMY + " " + hand + ("\n" + agreed if agreed else "")
         )
     return reference_descriptions("\n".join(filter(None, (
         "Illustrate the following single scene using the bear in the reference "
         "image. Draw only the described action and props. Do not add a wrapped "
-        "gift box unless the scene explicitly includes one. No text, lettering, "
+        "gift box unless the scene explicitly includes one. " + NO_EXTRA_DECORATION + " No text, lettering, "
         "speech bubbles or thought bubbles. Do not visualize imagined events or "
         "offscreen friends. Keep the background fully transparent, not filled "
         "with a yellow or sepia color; draw only a small patch of ground.",
-        "Scene: " + description, ANATOMY + " " + hand,
+        "Scene: " + description, ANATOMY + " " + hand, agreed,
         config.participant_presence if reader_hand else "", config.illustration_style,
     ))))
 
@@ -505,8 +549,12 @@ class SessionIllustrations:
         self._promises: dict[tuple[str, str], Future] = {}
         self._active: dict[str, tuple[storybook.StoryConfig, str]] = {}
         self._covered: dict[str, set[str]] = {}
-        # Sessions whose story reached its goal (a story_goal turn).
+        # Sessions whose story reached its goal (a story_goal turn), and
+        # where in their turns it did: what follows is the epilogue.
         self._past_goal: set[str] = set()
+        self._goal_at: dict[str, tuple[storybook.StoryConfig, int]] = {}
+        # How many of each session's epilogue parts have been sent to draw.
+        self._epilogue_sent: dict[str, int] = {}
         # A beat with elicits_description held back one more beat change,
         # the same reason generate_from_log() defers it; see __call__.
         self._deferred: dict[str, tuple[storybook.StoryConfig, str]] = {}
@@ -608,8 +656,9 @@ class SessionIllustrations:
                                and beat_id == "story_wrap_up" and summary.balloon_color is not None)
             if balloon_closing:
                 reference_name = "eeyore_birthday/story_wrap_up.png"
+            colors = agreed_colors(turns)
             prompt = scene_prompt(config, description, edit_existing=bool(reference_name),
-                                  reader_hand=reader_acted(config, beat_id, turns))
+                                  reader_hand=reader_acted(config, beat_id, turns), colors=colors)
             if balloon_closing:
                 prompt += (
                     "\nUse image 2's closing composition as the base, retaining the bear and "
@@ -627,6 +676,7 @@ class SessionIllustrations:
                 "cache_key": cache_key,
                 "description": description,
                 "balloon_color": summary.balloon_color,
+                "agreed_colors": colors,
                 "illustration_needed": summary.illustration_needed,
                 "answered": summary.answered,
                 "imagined": summary.imagined,
@@ -730,6 +780,7 @@ class SessionIllustrations:
             beat_id, _ = storybook.narrate(turn, config, told)
             if turn.source == "story_goal":
                 self._past_goal.add(session.session_id)
+                self._goal_at[session.session_id] = (config, len(self._turns.get(session.session_id, [])))
             if beat_id:
                 covered.add(beat_id)
             turns = self._turns.setdefault(session.session_id, [])
@@ -751,7 +802,11 @@ class SessionIllustrations:
             before = list(turns)
             turns.append(turn)
             snapshot = list(turns)
+            # The epilogue's parts that are over (all of them at the end).
+            epilogue = self._epilogue_due(session.session_id, snapshot, final=turn.ends_story)
             if turn.ends_story:
+                self._goal_at.pop(session.session_id, None)
+                self._epilogue_sent.pop(session.session_id, None)
                 self._turns.pop(session.session_id, None)
                 active = self._active.pop(session.session_id, None)
                 self._covered.pop(session.session_id, None)
@@ -767,6 +822,32 @@ class SessionIllustrations:
             self.submit(config, beat_id, snapshot)
         if active:
             self.submit(active[0], active[1], snapshot)
+        for part_config, part_beat, part_turns in epilogue:
+            self.submit(part_config, part_beat, part_turns)
+
+    def _epilogue_due(self, session_id, turns, final):
+        """(Under the lock.) The epilogue's parts to draw now: each part, from
+        what was said in it, once the next has opened, and the last one at
+        the session's end (``final``). The part going on is promised, so the
+        live book can wait for its picture."""
+        goal = self._goal_at.get(session_id)
+        if goal is None:
+            return []
+        config, goal_at = goal
+        if storybook.EPILOGUE_BEAT not in config.beats:
+            return []
+        parts = storybook.epilogue_parts(turns[goal_at:])
+        sent = self._epilogue_sent.get(session_id, 0)
+        over = len(parts) if final else len(parts) - 1
+        due = [(config, storybook.epilogue_beat(index), parts[index])
+               for index in range(sent, over)
+               if storybook.epilogue_beat(index) in config.beats
+               and any(turn.user_text for turn in parts[index])]
+        self._epilogue_sent[session_id] = max(sent, over)
+        current = len(parts) - 1
+        if not final and any(turn.user_text for turn in parts[current]):
+            self._promises.setdefault((config.session_id, storybook.epilogue_beat(current)), Future())
+        return due
 
     def done(self, session_id, beat_id):
         """Whether the scene's picture has been dealt with (drawn, or given
@@ -818,11 +899,28 @@ class SessionIllustrations:
         with self._lock:
             active = [(config, beat, list(self._turns.get(session_id, [])))
                       for session_id, (config, beat) in self._active.items()]
+            # Sessions still going on past their goal: their epilogue too.
+            for session_id in list(self._goal_at):
+                active += self._epilogue_due(session_id, self._turns.get(session_id, []), final=True)
             self._active.clear()
             self._turns.clear()
+            self._goal_at.clear()
+            self._epilogue_sent.clear()
         for config, beat, turns in active:
             self.submit(config, beat, turns)
         self._pool.shutdown(wait=True)
+
+
+def epilogue_pictures(turns, goal_at, config):
+    """The epilogue's pictures to draw: (beat, its part's turns) for each
+    part in which something was said. Each is drawn from its part alone, so
+    it shows what was talked about then, not the story again."""
+    if goal_at is None or storybook.EPILOGUE_BEAT not in config.beats:
+        return []
+    return [(storybook.epilogue_beat(index), part)
+            for index, part in enumerate(storybook.epilogue_parts(turns[goal_at:]))
+            if storybook.epilogue_beat(index) in config.beats
+            and any(turn.user_text for turn in part)]
 
 
 def generate_from_log(path: Path, *, force=False, only: list[str] | None = None) -> None:
@@ -855,8 +953,11 @@ def generate_from_log(path: Path, *, force=False, only: list[str] | None = None)
             generator.submit(config, deferred, seen, force=force)
         deferred = None
 
+    goal_at = None
     try:
         for turn in storybook.turns_from_log(records, scenario.opening_line):
+            if turn.source == "story_goal" and goal_at is None:
+                goal_at = len(seen)
             beat_id, _ = storybook.narrate(turn, config, frozenset(covered))
             if beat_id:
                 covered.add(beat_id)
@@ -872,6 +973,9 @@ def generate_from_log(path: Path, *, force=False, only: list[str] | None = None)
         flush_deferred()
         if current and (not only or current in only):
             generator.submit(config, current, seen, force=force)
+        for beat_id, part in epilogue_pictures(seen, goal_at, config):
+            if not only or beat_id in only or storybook.EPILOGUE_BEAT in only:
+                generator.submit(config, beat_id, part, force=force)
     finally:
         generator.close()
     if generator.failures:

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>聞き間違いの訂正</title>
+<style>
+:root {
+  --bg: #fbf6ea; --surface: #ffffff; --text: #2f2a22; --muted: #7a7064;
+  --border: #e4d9c3; --pooh: #fde7a6; --user: #dcebf7; --user-border: #a9c8e3;
+  --accent: #c7861e; --accent-text: #ffffff; --error: #b3261e; --ok: #2e7d32;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1f1c17; --surface: #2a2620; --text: #efe8dc; --muted: #a89e90;
+    --border: #3d372e; --pooh: #4a3c18; --user: #1f3446; --user-border: #33536f;
+    --accent: #e0a13a; --accent-text: #1f1c17; --error: #f2b8b5; --ok: #8bd48f;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+header { padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface);
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+header h1 { font-size: 18px; margin: 0; }
+select, button, input { font: inherit; color: inherit; }
+select { max-width: 100%; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface); }
+main { max-width: 860px; margin: 0 auto; padding: 16px; }
+.tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.tools a, button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface); text-decoration: none; color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+.status { min-height: 1.6em; color: var(--muted); }
+.status.error { color: var(--error); }
+.status.ok { color: var(--ok); }
+.turn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 10px; }
+.turn.corrected { border-color: var(--user-border); }
+.heard { color: var(--muted); font-size: 14px; }
+.heard s { color: var(--muted); }
+.row { display: flex; gap: 8px; margin: 6px 0; }
+.row input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--user-border);
+  border-radius: 6px; background: var(--user); }
+.pooh { font-size: 14px; background: var(--pooh); border-radius: 6px; padding: 4px 8px; }
+.empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>聞き間違いの訂正</h1>
+  <select id="logs" aria-label="セッション"></select>
+  <button id="reload" type="button">一覧を更新</button>
+</header>
+<main>
+  <div class="tools">
+    <a id="pdf-landscape" target="_blank" rel="noopener">絵本 PDF（横）</a>
+    <a id="pdf-portrait" target="_blank" rel="noopener">絵本 PDF（縦）</a>
+    <button id="postcards" type="button">ポストカードを作り直す</button>
+    <a id="postcards-pdf" target="_blank" rel="noopener" hidden>ポストカード PDF</a>
+  </div>
+  <p class="status" id="status" role="status"></p>
+  <div id="turns"></div>
+</main>
+<script>
+"use strict";
+const token = new URLSearchParams(location.search).get("token") || "";
+const base = "/corrections/api";
+const $ = (id) => document.getElementById(id);
+let current = null;
+
+async function call(path, options = {}) {
+  const headers = {"X-Pooh-Token": token, ...(options.headers || {})};
+  const response = await fetch(base + path, {...options, headers});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+function say(text, kind = "") {
+  $("status").textContent = text;
+  $("status").className = "status " + kind;
+}
+
+function withToken(path) {
+  return base + path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+}
+
+async function loadLogs() {
+  const {logs} = await call("/logs");
+  const select = $("logs");
+  const keep = select.value;
+  select.replaceChildren(...logs.map((log) => {
+    const option = document.createElement("option");
+    const when = new Date(log.modified_at * 1000).toLocaleString("ja-JP");
+    const mark = log.corrected ? `・訂正${log.corrected}` : "";
+    option.value = log.name;
+    option.textContent = `${when}  ${log.scenario}（発言${log.utterances}${mark}）`;
+    return option;
+  }));
+  if (keep && logs.some((log) => log.name === keep)) select.value = keep;
+  if (select.value) await loadLog(select.value);
+  else { $("turns").innerHTML = '<p class="empty">ログがありません。</p>'; }
+}
+
+async function loadLog(name) {
+  const detail = await call(`/logs/${encodeURIComponent(name)}`);
+  current = detail;
+  render(detail);
+  for (const layout of ["landscape", "portrait"]) {
+    $(`pdf-${layout}`).href = withToken(`/logs/${encodeURIComponent(name)}/storybook.pdf?layout=${layout}`);
+  }
+  $("postcards-pdf").href = withToken(`/logs/${encodeURIComponent(name)}/postcards.pdf`);
+  showPostcards(detail.postcards);
+}
+
+function render(detail) {
+  const turns = $("turns");
+  if (!detail.utterances.length) {
+    turns.innerHTML = '<p class="empty">参加者の発言がありません。</p>';
+    return;
+  }
+  turns.replaceChildren(...detail.utterances.map((u) => {
+    const box = document.createElement("div");
+    box.className = "turn" + (u.corrected !== null ? " corrected" : "");
+    const heard = document.createElement("div");
+    heard.className = "heard";
+    heard.textContent = "聞き取り: ";
+    const heardText = document.createElement(u.corrected !== null ? "s" : "span");
+    heardText.textContent = u.said;
+    heard.append(heardText);
+    const row = document.createElement("div");
+    row.className = "row";
+    const input = document.createElement("input");
+    input.value = u.corrected ?? u.said;
+    input.setAttribute("aria-label", `発言${u.utterance + 1}`);
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "primary";
+    save.textContent = "直す";
+    const undo = document.createElement("button");
+    undo.type = "button";
+    undo.textContent = "元に戻す";
+    undo.disabled = u.corrected === null;
+    save.onclick = () => correct(u, input.value, [save, undo]);
+    undo.onclick = () => correct(u, u.said, [save, undo]);
+    input.onkeydown = (event) => { if (event.key === "Enter" && !event.isComposing) save.click(); };
+    row.append(input, save, undo);
+    const pooh = document.createElement("div");
+    pooh.className = "pooh";
+    pooh.textContent = "プー: " + u.pooh;
+    box.append(heard, row, pooh);
+    return box;
+  }));
+}
+
+const REFRESHED = {
+  live: "保存しました。チャットの絵本がタブレットと PDF に反映します。",
+  tablet: "保存して、タブレットと PDF に反映しました。",
+  pdf: "保存して、PDF に反映しました（タブレットにはこの絵本がありません）。",
+  error: "保存しましたが、絵本の更新に失敗しました（ログを見てください）。",
+};
+
+async function correct(u, text, buttons) {
+  if (!text.trim()) { say("空にはできません。", "error"); return; }
+  buttons.forEach((b) => { b.disabled = true; });
+  say("保存しています…（タブレットに送るときは数十秒かかります）");
+  try {
+    const detail = await call(`/logs/${encodeURIComponent(current.name)}/utterances/${u.utterance}`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({heard: u.heard, text}),
+    });
+    current = detail;
+    render(detail);
+    say(REFRESHED[detail.refreshed] || "保存しました。", detail.refreshed === "error" ? "error" : "ok");
+  } catch (error) {
+    say("保存できませんでした: " + error.message, "error");
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
+function showPostcards(job) {
+  const button = $("postcards");
+  button.disabled = job && job.status === "making";
+  if (!job) return;
+  if (job.status === "making") say("ポストカードを作り直しています…");
+  else if (job.status === "ready") { say("ポストカードを作り直しました。", "ok"); $("postcards-pdf").hidden = false; }
+  else if (job.status === "failed") say("ポストカードを作れませんでした: " + (job.error || ""), "error");
+}
+
+async function remakePostcards() {
+  try {
+    showPostcards(await call(`/logs/${encodeURIComponent(current.name)}/postcards`, {method: "POST"}));
+    const name = current.name;
+    const poll = setInterval(async () => {
+      if (!current || current.name !== name) { clearInterval(poll); return; }
+      const detail = await call(`/logs/${encodeURIComponent(name)}`).catch(() => null);
+      if (!detail || !detail.postcards || detail.postcards.status !== "making") clearInterval(poll);
+      if (detail) showPostcards(detail.postcards);
+    }, 3000);
+  } catch (error) {
+    say("ポストカードを作れませんでした: " + error.message, "error");
+  }
+}
+
+$("logs").onchange = () => loadLog($("logs").value).catch((e) => say(e.message, "error"));
+$("reload").onclick = () => loadLogs().catch((e) => say(e.message, "error"));
+$("postcards").onclick = remakePostcards;
+loadLogs().catch((e) => say("読み込めませんでした: " + e.message, "error"));
+</script>
+</body>
+</html>

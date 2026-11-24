@@ -1961,6 +1961,11 @@ def add_storybook_arguments(parser: argparse.ArgumentParser) -> None:
         "--postcard-size", choices=("hagaki", "l"), default="l",
         help="--postcards の紙: l（L判 89×119mm、SELPHY の L、既定）／hagaki（はがき）",
     )
+    parser.add_argument(
+        "--corrections-port", type=int, default=8090, metavar="PORT",
+        help="ロボット（--ros-relay）で絵本かポストカードを作るとき、聞き間違いを直す画面を"
+             "この PC の http://127.0.0.1:PORT/corrections に出す（0 で出さない。docs/storybook.md）",
+    )
 
 
 def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]:
@@ -1985,11 +1990,13 @@ def create_storybook_listeners(args: argparse.Namespace) -> list[OutputListener]
 
         from functools import partial
 
-        from postcard_service import make_postcards
+        from postcard_service import make_epilogue_postcard, make_postcards
 
+        paper = getattr(args, "postcard_size", "l")
         listeners.append(PostcardMaker(
             illustrations=illustrations,
-            make=partial(make_postcards, paper=getattr(args, "postcard_size", "l"))))
+            make=partial(make_postcards, paper=paper),
+            make_epilogue=partial(make_epilogue_postcard, paper=paper)))
     return listeners
 
 
@@ -2031,6 +2038,15 @@ def main() -> int:
                     if isinstance(listener, PostcardMaker):
                         listener.on_status = receipt.update
                 listeners.insert(0, receipt)
+            editor = None
+            if (ros_publisher is not None and getattr(args, "corrections_port", 0)
+                    and (args.storybook_eink or args.storybook_preview or args.postcards)):
+                # The robot has no Web UI: the operator corrects what was
+                # misheard on this page instead.
+                from storybook_editor import start_in_background
+
+                editor = start_in_background(args.corrections_port, eink=args.storybook_eink,
+                                             paper=getattr(args, "postcard_size", "l"))
             try:
                 if args.start_on_mode and ros_publisher is not None:
                     run_chat_on_mode(
@@ -2062,6 +2078,8 @@ def main() -> int:
                 # Let the picture book write the ending before exiting.
                 for listener in listeners:
                     listener.close()
+                if editor is not None:
+                    editor.close()
         return 0
     except Exception as exc:
         # APIキーやLMリクエスト本文を含む可能性のある詳細tracebackは表示しない。

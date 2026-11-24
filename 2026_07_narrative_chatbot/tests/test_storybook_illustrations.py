@@ -13,8 +13,9 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 import storybook
 from storybook import StoryTurn
-from storybook_illustrations import (MODERATION_RETRIES, NO_READER_HAND, READER_HAND, SIMPLER_SCENE,
-                                     SessionIllustrations, reader_acted, reference_descriptions,
+from storybook_illustrations import (MODERATION_RETRIES, NO_EXTRA_DECORATION, NO_READER_HAND,
+                                     READER_HAND, SIMPLER_SCENE, SessionIllustrations, SceneSummary,
+                                     agreed_colors, reader_acted, reference_descriptions,
                                      scene_context, scene_prompt)
 
 EEYORE = storybook.load_story_config("eeyore_birthday")
@@ -64,6 +65,63 @@ class SceneContextTest(unittest.TestCase):
             with_hand = scene_prompt(EEYORE, "クマが壺を受け取る。", edit_existing=edit)
             self.assertIn(READER_HAND, with_hand)
             self.assertNotIn(NO_READER_HAND, with_hand)
+
+
+class AgreedColorsTest(unittest.TestCase):
+    """logs/session_20261115T122614236604_0b4a4b70: リボンの色：赤 was agreed,
+    yet the pot's ribbon came out blue."""
+
+    @staticmethod
+    def turns(*decided_lists):
+        return [StoryTurn("participant", "うん。", user_text="そうだね", situation={"decided": list(decided)})
+                for decided in decided_lists]
+
+    def test_colors_come_from_the_latest_decided_entries(self):
+        turns = self.turns(["リボンの色：青"],
+                           ["空になった壺をどうするか：あげる", "リボンの色：赤", "贈り物にする風船の色：緑"])
+        self.assertEqual(agreed_colors(turns), {"リボン": "赤", "贈り物にする風船": "緑"})
+
+    def test_a_later_decision_replaces_an_earlier_one(self):
+        turns = self.turns(["リボンの色：青", "リボンの色？：赤"])
+        self.assertEqual(agreed_colors(turns), {"リボン": "赤"})
+
+    def test_an_open_color_is_not_agreed(self):
+        turns = self.turns(["リボンの色：未定", "風船の色：まだ決めていない", "風船の数：三つ"])
+        self.assertEqual(agreed_colors(turns), {})
+        self.assertEqual(agreed_colors([StoryTurn("session_open", "やあ。")]), {})
+
+    def test_the_picture_is_asked_for_the_agreed_colors_and_no_other_decoration(self):
+        for edit in (False, True):
+            prompt = scene_prompt(EEYORE, "クマがリボンの結ばれた壺を持つ。", edit_existing=edit,
+                                  colors={"リボン": "赤"})
+            self.assertIn("リボン = 赤", prompt)
+            self.assertIn(NO_EXTRA_DECORATION, prompt)
+            self.assertNotIn("Colors agreed", scene_prompt(EEYORE, "クマが壺を持つ。", edit_existing=edit))
+
+    def test_a_summary_that_dropped_the_color_still_gets_it(self):
+        import json
+        import tempfile
+        from unittest import mock
+
+        config = replace(EEYORE, session_id="agreed-colors-test")
+        prompts = []
+        illustrations = SessionIllustrations(
+            summarize=lambda *args: SceneSummary("クマがリボンが結ばれた空の壺を持つ。"),
+            generate_image=lambda prompt, output, **references: prompts.append(prompt))
+        name = storybook.generated_illustration_name(config.scenario, config.session_id, "story_wrap_up")
+        turns = [StoryTurn("session_open", "やあ。"),
+                 StoryTurn("world_event", "できたね。", world_event_id="story_wrap_up",
+                           situation={"decided": ["空になった壺をどうするか：あげる", "リボンの色：赤"]})]
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(storybook, "ILLUSTRATION_ROOT", Path(tmp)):
+            try:
+                illustrations._generate(config, "story_wrap_up", turns, name, False)
+            finally:
+                illustrations.close()
+            saved = json.loads((Path(tmp) / name).with_suffix(".scene.json").read_text())
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("リボン = 赤", prompts[0])
+        self.assertEqual(saved["agreed_colors"], {"リボン": "赤"})
 
 
 class Blocked(Exception):

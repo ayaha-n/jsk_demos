@@ -47,7 +47,9 @@ SAVED_LOG = (
 
 
 class WithIllustrations(unittest.TestCase):
-    """Every beat of the Eeyore scenario has a (tiny) illustration file."""
+    """Every beat of the Eeyore scenario with a bundled picture has a (tiny)
+    illustration file (the epilogue has none: its picture is drawn from
+    what was said in it)."""
 
     def setUp(self):
         from PIL import Image
@@ -56,6 +58,8 @@ class WithIllustrations(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         for beat in EEYORE.beats.values():
+            if not beat.illustration:
+                continue
             path = root / beat.illustration
             path.parent.mkdir(parents=True, exist_ok=True)
             Image.new("RGB", (4, 4), "white").save(path)
@@ -350,7 +354,11 @@ class BuilderTest(WithIllustrations):
         epilogue = builder.epilogue_pages
         self.assertEqual([item.entry.text for item in epilogue[0].placed][:2],
                          [storybook.EPILOGUE_TITLE, "「たのしかった」と、あなたは いいました。"])
-        self.assertIsNone(epilogue[0].beat_id)
+        # The epilogue's own beat, whose picture is drawn once the session
+        # ends: none yet, so its text has the page to itself.
+        self.assertEqual(epilogue[0].beat_id, storybook.EPILOGUE_BEAT)
+        self.assertIsNone(epilogue[0].illustration)
+        self.assertEqual(epilogue[0].text_columns, builder.layout.plain_text_columns)
         self.assertEqual(builder.story_pages, story)
         # A scene's event after the goal opens no scene; the end adds no
         # second 「おしまい」.

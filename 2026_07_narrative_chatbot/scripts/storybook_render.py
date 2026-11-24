@@ -94,11 +94,18 @@ def render_page(page: StoryPage, layout: PageLayout, *, page_number: bool = True
     return canvas
 
 
-def read_log(path: Path) -> list[dict[str, Any]]:
+def read_log(path: Path, corrected: bool = True) -> list[dict[str, Any]]:
+    """A session log's records, with the operator's corrections to what the
+    speech recognizer heard (``storybook_corrections``) unless
+    ``corrected`` is false."""
+    import storybook_corrections
+
     records = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
             records.append(json.loads(line))
+    if corrected:
+        records = storybook_corrections.apply_corrections(records, storybook_corrections.load(path))
     return records
 
 
