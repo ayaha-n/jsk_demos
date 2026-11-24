@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="{{LANG}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -99,6 +99,7 @@
   <!-- Scenario-authored scene description; display only, not model input. -->
   <template id="scene-intro-template"><div class="scene-intro">{{SCENE_INTRO}}</div></template>
 
+  <script src="/static/i18n.js?v={{ASSET_VERSION}}"></script>
   <script src="/static/crowdsourcing.js?v={{ASSET_VERSION}}"></script>
   <script src="/static/app.js?v={{ASSET_VERSION}}"></script>
   <script src="/static/bear.js?v={{ASSET_VERSION}}"></script>

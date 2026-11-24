@@ -38,6 +38,15 @@ class TTSConfig:
     pitch_scale: float = 1.0
     intonation_scale: float = 1.0
     timeout: float = DEFAULT_TIMEOUT
+    # The synthesis language; /api/g2p reads Japanese only, so a voice in
+    # another language is synthesized from the text alone.
+    language: str = "JP"
+    use_g2p: bool = True
+
+    @classmethod
+    def for_language(cls, language: str, server_url: str) -> "TTSConfig":
+        """The voice for the session language ("ja" or "en", see VOICES)."""
+        return cls(server_url=server_url, **VOICES[language])
 
     def request_base(self) -> dict:
         return dict(
@@ -52,7 +61,7 @@ class TTSConfig:
             noisew=self.noisew,
             pitchScale=self.pitch_scale,
             intonationScale=self.intonation_scale,
-            language="JP",
+            language=self.language,
         )
 
     def cache_key(self, text: str) -> str:
@@ -60,14 +69,33 @@ class TTSConfig:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+# Each language's voice: Japanese is new_model3 (the dataclass's defaults).
+# English is pooh_en, an ordinary (not JP-Extra) model, at the speed of its
+# training data. Its server is another one (one model per server process):
+# pass that one's URL (e.g. http://127.0.0.1:8100) as --tts-server-url.
+VOICES: dict[str, dict] = {
+    "ja": {},
+    "en": dict(
+        model="pooh_en",
+        model_file="model_assets/pooh_en/pooh_en.safetensors",
+        speaker="pooh_en",
+        language="EN",
+        use_g2p=False,
+        speed=1.0,
+    ),
+}
+
+
 def synthesize(config: TTSConfig, text: str) -> bytes:
     """One full g2p+synthesis round trip; raises requests.RequestException
     or ValueError (a non-JSON /api/g2p response) on failure."""
     with requests.Session() as session:
-        g2p = session.post(
-            config.server_url + "/api/g2p", json={"text": text}, timeout=config.timeout)
-        g2p.raise_for_status()
-        request = dict(config.request_base(), text=text, moraToneList=g2p.json())
+        request = dict(config.request_base(), text=text, moraToneList=[])
+        if config.use_g2p:
+            g2p = session.post(
+                config.server_url + "/api/g2p", json={"text": text}, timeout=config.timeout)
+            g2p.raise_for_status()
+            request["moraToneList"] = g2p.json()
         response = session.post(
             config.server_url + "/api/synthesis", json=request, timeout=config.timeout)
         response.raise_for_status()

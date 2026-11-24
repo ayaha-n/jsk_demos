@@ -127,7 +127,7 @@ def write_pdf(builder: storybook.StoryBuilder, path: Path) -> Path:
     width, height = builder.layout.size
     path.parent.mkdir(parents=True, exist_ok=True)
     pdf = canvas.Canvas(str(path), pagesize=(width, height))
-    pdf.setTitle(builder.config.title or "絵本")
+    pdf.setTitle(builder.config.title or ("Picture book" if builder.config.language == "en" else "絵本"))
     cover = [builder.cover] if builder.cover is not None else []
     for page in cover + builder.pages:
         if page.frame_margin is not None:

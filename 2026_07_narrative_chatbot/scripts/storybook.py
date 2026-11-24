@@ -74,6 +74,7 @@ CLOSING_MARGIN = 40
 # bottom-right corner, since the tablet ends a book on its cover and a tap
 # on the right turns to the first page.
 COVER_HINT = "めくる→"
+COVER_HINT_EN = "Turn →"
 # Heading of the epilogue: what was said after the story reached its goal,
 # while the session went on (see StoryBuilder.story_done).
 EPILOGUE_TITLE = "そのあと"
@@ -158,6 +159,9 @@ class StoryConfig:
     # "どんな生き物だと思う？" himself): the beat, and its picture, then
     # start on the turn that settled it, instead of never at all.
     detail_beats: dict[str, str] = field(default_factory=dict)
+    # "en": the book of an English-mode session (english_mode), with the
+    # title, narration and closing of config/english.json.
+    language: str = "ja"
 
     def illustration_name(self, beat_id: str | None) -> str | None:
         beat = self.beats.get(beat_id or "")
@@ -324,7 +328,8 @@ def find_illustration(name: str) -> Path | None:
     return None
 
 
-def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> StoryConfig:
+def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH,
+                      language: str = "ja") -> StoryConfig:
     data = json.loads(path.read_text(encoding="utf-8"))
     spec = data["scenarios"].get(scenario, {})
     cover = spec.get("cover", {})
@@ -332,11 +337,21 @@ def load_story_config(scenario: str, path: Path = STORYBOOK_CONFIG_PATH) -> Stor
         beat_id: StoryBeat(beat_id=beat_id, **beat)
         for beat_id, beat in spec.get("beats", {}).items()
     }
+    title, closing = spec.get("title", ""), spec.get("closing", "おしまい")
+    if language == "en":
+        from english_mode import english_text
+
+        english = english_text().get("storybook", {}).get(scenario, {})
+        title, closing = english.get("title", title), english.get("closing", "The End")
+        narrations = english.get("beats", {})
+        beats = {beat_id: replace(beat, narration=narrations.get(beat_id, beat.narration))
+                 for beat_id, beat in beats.items()}
     return StoryConfig(
         scenario=scenario,
-        title=spec.get("title", ""),
+        title=title,
+        language=language,
         beats=beats,
-        closing=spec.get("closing", "おしまい"),
+        closing=closing,
         motion_phrases=data.get("motion_phrases", {}),
         illustration_style=data.get("illustration_style", ""),
         participant_presence=data.get("participant_presence", ""),
@@ -410,7 +425,8 @@ def turn_from_output(output: Any) -> StoryTurn:
     return StoryTurn(
         source=output.source,
         pooh_text=output.bot_response,
-        user_text=getattr(turn, "user_action", "") if turn is not None else "",
+        user_text=(getattr(output, "user_text", None)
+                   or (getattr(turn, "user_action", "") if turn is not None else "")),
         world_event_id=output.world_event_id,
         motion=dict(output.motion),
         ends_story=output.source == "session_close" or output.interaction_mode == "exit",
@@ -431,8 +447,9 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
     source = str(record.get("source", "participant"))
     return StoryTurn(
         source=source,
-        pooh_text=text,
-        user_text=str(record.get("user_action", "")),
+        # English mode: what was said, in English (the session's own text is Japanese).
+        pooh_text=str(record.get("spoken_response") or text),
+        user_text=str(record.get("user_text") or record.get("user_action", "")),
         world_event_id=record.get("world_event_id"),
         motion=fixed_utterance_motion(utterance_id) if utterance_id else {},
         ends_story=source == "session_close" or record.get("interaction_mode") == "exit",
@@ -589,6 +606,20 @@ def participant_entries(
     return entries
 
 
+def english_entries(turn: StoryTurn) -> list[StoryEntry]:
+    """An English-mode turn retold in English: what was said. What the robot
+    saw and how Pooh moved are worded in Japanese only, so they are left out."""
+    entries = []
+    said = (spoken_part(turn.user_text) if turn.user_text else "").strip()
+    if said:
+        # “Hello,” you said. / “Are you a robot?” you said.
+        said = said[:-1] + "," if said.endswith(".") else said if said[-1] in "?!" else said + ","
+        entries.append(StoryEntry("speech", f"“{said}” you said.", "participant"))
+    if turn.pooh_text:
+        entries.append(StoryEntry("speech", f"“{turn.pooh_text}”", "pooh"))
+    return entries
+
+
 def narrate(
     turn: StoryTurn, config: StoryConfig, covered_beats: frozenset[str] = frozenset()
 ) -> tuple[str | None, list[StoryEntry]]:
@@ -652,6 +683,8 @@ def narrate(
     beat = config.beats.get(beat_id or "")
     if beat is not None and beat.narration:
         entries.append(StoryEntry("narration", beat.narration))
+    if config.language == "en":
+        return beat_id, entries + english_entries(turn)
     entries.extend(participant_entries(
         turn.observed_actions, spoken_part(turn.user_text) if turn.user_text else ""))
     # The gesture goes with the line it was made with, so it is not read
@@ -1070,9 +1103,10 @@ class StoryBuilder:
             page.placed.append(PlacedEntry(
                 StoryEntry("title", self.config.title), lines, inner, cover.title_y,
                 width - 2 * inner, cover.title_px, "center", COVER_TITLE_PEN_R))
-        hint_w = int(self.measure(COVER_HINT, BODY_PX)) + 1
+        hint = COVER_HINT_EN if self.config.language == "en" else COVER_HINT
+        hint_w = int(self.measure(hint, BODY_PX)) + 1
         page.placed.append(PlacedEntry(
-            StoryEntry("hint", COVER_HINT), [COVER_HINT], width - inner - hint_w,
+            StoryEntry("hint", hint), [hint], width - inner - hint_w,
             height - inner - line_height(BODY_PX), hint_w, BODY_PX))
         return page
 
@@ -1231,9 +1265,15 @@ def build_book(
     layout: str = "portrait",
     measure: Measure = default_measure,
 ) -> StoryBuilder:
-    """The whole book of a finished (or interrupted) session log."""
+    """The whole book of a finished (or interrupted) session log; in English
+    for an English-mode session's."""
     records = list(records)
-    config = load_story_config(scenario)
+    language = "en" if any(record.get("language") == "en" for record in records) else "ja"
+    config = load_story_config(scenario, language=language)
+    if language == "en":
+        from english_mode import english_text
+
+        opening_line = english_text().get("lines", {}).get(opening_line, opening_line)
     if records:
         config = replace(config, session_id=str(records[0].get("session_id", "")))
     builder = StoryBuilder(config, LAYOUTS[layout], measure)

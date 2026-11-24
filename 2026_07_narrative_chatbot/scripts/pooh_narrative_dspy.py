@@ -330,8 +330,14 @@ class PoohNarrativeAgent(dspy.Module):
         pooh_preferences: str = "",
         on_response: Callable[[str], None] | None = None,
         fixed_line_for: Callable[[Any], str | None] | None = None,
+        mishearing: Any = None,
     ) -> Any:
-        """``on_response(text)``, if given, receives the line before interpret,
+        """``mishearing``, if given (english_mode.EnglishMishearing), finds
+        the technical terms and their candidates in the participant's own
+        language instead of the Japanese table and planner; the predictors
+        are the same either way, so a compiled program loads as it is.
+
+        ``on_response(text)``, if given, receives the line before interpret,
         so the robot can start speaking: sentence by sentence while the line
         is written, then the rest of it.  A meta turn's line may be replaced
         by the technical-term guard, so it is passed whole once checked; an
@@ -360,7 +366,8 @@ class PoohNarrativeAgent(dspy.Module):
             mode = str(classification.interaction_mode)
             current_scene = str(classification.current_scene)
             extracted_terms = [str(term) for term in classification.technical_terms]
-            known_terms = find_known_technical_terms(user_action)
+            known_terms = (find_known_technical_terms(user_action) if mishearing is None
+                           else mishearing.find_terms(user_action))
             technical_terms = list(dict.fromkeys(extracted_terms + known_terms))
             if technical_terms and mode != "exit":
                 mode = "meta"
@@ -388,11 +395,11 @@ class PoohNarrativeAgent(dspy.Module):
         if mode == "meta" and technical_terms:
             prior_mentions = count_prior_technical_mentions(history, technical_terms)
             if prior_mentions == 0:
-                candidates, unknown_terms = known_candidates_for(
-                    technical_terms, history
-                )
+                candidates, unknown_terms = (
+                    known_candidates_for if mishearing is None else mishearing.known_candidates
+                )(technical_terms, history)
                 if unknown_terms:
-                    planning = self.plan(
+                    planning = (self.plan if mishearing is None else mishearing.plan)(
                         current_situation=current_situation,
                         user_utterance=user_action,
                         technical_terms=unknown_terms,
@@ -864,6 +871,10 @@ class SessionOutput:
     # For source "observed": what the robot saw the participant do.
     observed_actions: list[str] = field(default_factory=list)
     observed_with_speech: bool = False
+    # English mode: bot_response is what Pooh says (English), and these are
+    # the line the session keeps (Japanese) and what the participant said.
+    bot_response_ja: str | None = None
+    user_text: str | None = None
 
     @property
     def motion(self) -> dict[str, str]:
@@ -963,12 +974,14 @@ def invoke(
     pooh_preferences: str = "",
     on_response: Callable[[str], None] | None = None,
     fixed_line_for: Callable[[Any], str | None] | None = None,
+    mishearing: Any = None,
 ) -> tuple[Any, float]:
     started = time.perf_counter()
     # Only passed when used, so agents without these hooks keep working.
     hooks = {
         name: value
-        for name, value in (("on_response", on_response), ("fixed_line_for", fixed_line_for))
+        for name, value in (("on_response", on_response), ("fixed_line_for", fixed_line_for),
+                            ("mishearing", mishearing))
         if value is not None
     }
     result = agent(
@@ -1173,7 +1186,22 @@ class NarrativeSession:
         ros_publisher: NarrativeRelayPublisher | None = None,
         session_id: str | None = None,
         output_listeners: Sequence[OutputListener] = (),
+        language: str = "ja",
+        translator: Any = None,
+        english_planner: Any = None,
     ) -> None:
+        """``language`` "en" (english_mode): the participant speaks English;
+        inside, the session stays Japanese, and what Pooh says goes out in
+        English (``translator``, and ``english_planner`` for mishearing, by
+        default made here)."""
+        self.language = language
+        if language == "en":
+            import english_mode
+
+            translator = translator or english_mode.Translator()
+            english_planner = english_planner or english_mode.english_planner()
+        self.translator = translator
+        self.english_planner = english_planner
         self.agent = agent
         self.model_name = model_name
         self.program_id = program_id
@@ -1192,6 +1220,32 @@ class NarrativeSession:
         self.awaiting_reply = False
         # Whether the story has reached its goal (see _announce_goal).
         self.goal_reached = False
+
+    def _speak(self, line: str) -> str:
+        """What Pooh says of a (Japanese) line, in the session's language."""
+        if self.language != "en" or not line:
+            return line
+        return self.translator.to_english(line)
+
+    def _in_language(self, output: SessionOutput, user_text: str | None = None) -> SessionOutput:
+        """English mode: the output says the line in English. Its fixed line's
+        id stays (the picture book finds its scene by it), but the robot is not
+        given it: its recording is in Japanese (see _publish_to_robot)."""
+        if self.language != "en":
+            return output
+        output.bot_response_ja = output.bot_response
+        output.bot_response = self._speak(output.bot_response)
+        output.user_text = user_text
+        return output
+
+    def _language_fields(self, spoken: str, user_text: str | None = None) -> dict[str, Any]:
+        """Log fields of English mode; none in Japanese, so its logs stay as they were."""
+        if self.language != "en":
+            return {}
+        fields: dict[str, Any] = {"language": self.language, "spoken_response": spoken}
+        if user_text is not None:
+            fields["user_text"] = user_text
+        return fields
 
     def _history(self) -> str:
         return (
@@ -1221,7 +1275,7 @@ class NarrativeSession:
             scene_id=output.scene_id,
             source=output.source,
             world_event_id=output.world_event_id,
-            fixed_utterance_id=output.fixed_utterance_id,
+            fixed_utterance_id=output.fixed_utterance_id if self.language == "ja" else None,
             turn_id=output.turn_id,
             streamed=output.streamed,
             interaction_mode=output.interaction_mode,
@@ -1270,7 +1324,7 @@ class NarrativeSession:
         )
         if self.controller is not None:
             self.controller.begin(self.controller.speech_seconds(output.bot_response))
-        self._publish(output)
+        self._publish(self._in_language(output))
         return output
 
     def close(self, reason: str = "requested", ending_line: bool = True) -> SessionOutput | None:
@@ -1288,6 +1342,7 @@ class NarrativeSession:
             updated_situation=self.current_situation,
             fixed_utterance_id=fixed_utterance_id(line) if line else None,
         )
+        output = self._in_language(output)
         if self.log_path.exists():
             # Only a session that has logged turns gets its ending recorded,
             # so the picture book of a past log ends where the session did.
@@ -1298,8 +1353,9 @@ class NarrativeSession:
                 "source": "session_close",
                 "close_reason": reason,
                 "interaction_mode": "exit",
-                "bot_response": output.bot_response,
-                "fixed_utterance_id": output.fixed_utterance_id,
+                "bot_response": line,
+                "fixed_utterance_id": fixed_utterance_id(line) if line else None,
+                **self._language_fields(output.bot_response),
             })
         if ending_line:
             self._publish(output)
@@ -1413,6 +1469,7 @@ class NarrativeSession:
         self.turns.append(turn)
         self.current_situation = result.updated_situation
         utterance_id = fixed_utterance_id(turn.bot_response) if event.fixed_response else None
+        spoken = self._speak(turn.bot_response)
         append_log(
             self.log_path,
             turn,
@@ -1427,6 +1484,7 @@ class NarrativeSession:
                 "generation_fallback": used_fallback,
                 "latency_ms": round(latency_ms, 1),
                 **({"proposed_narrative_actions": proposed} if proposed != actions else {}),
+                **self._language_fields(spoken),
             },
         )
         output = SessionOutput(
@@ -1447,7 +1505,7 @@ class NarrativeSession:
             turn=turn,
         )
         self.controller.observe_activity(self.controller.speech_seconds(turn.bot_response))
-        self._publish(output)
+        self._publish(self._in_language(output))
         return output
 
     def submit(self, user_input: str) -> SessionOutput | None:
@@ -1461,6 +1519,18 @@ class NarrativeSession:
             return None
         if user_input.casefold() == "exit":
             return self.close("exit_command")
+
+        user_text = None
+        mishearing = None
+        if self.language == "en":
+            # The program, the story's checks and the history read Japanese;
+            # what was misheard is found in the English itself.
+            import english_mode
+
+            user_text = user_input
+            user_input = self.translator.to_japanese(
+                user_text, self.turns[-1].bot_response if self.turns else self.scenario.opening_line)
+            mishearing = english_mode.EnglishMishearing(user_text, self.english_planner)
 
         if self.controller is not None:
             self.controller.observe_activity()
@@ -1479,7 +1549,8 @@ class NarrativeSession:
             elif sent_early:
                 print(f"警告: 応答の続きを送れませんでした: {text!r}", file=sys.stderr)
 
-        early = self.ros_publisher is not None and not (
+        # In English the whole line is translated before it is said.
+        early = self.ros_publisher is not None and self.language != "en" and not (
             self.controller.response_may_be_replaced(user_input, history)
             if self.controller is not None
             else False
@@ -1495,6 +1566,7 @@ class NarrativeSession:
             ),
             on_response=send_early if early else None,
             fixed_line_for=self.controller.fixed_line_for if self.controller is not None else None,
+            mishearing=mishearing,
         )
         streamed = bool(sent_early)
         generated_response = str(result.bot_response)
@@ -1577,6 +1649,7 @@ class NarrativeSession:
         self.current_situation = result.updated_situation
         # A generated line that happens to be a fixed one can reuse its WAV too.
         utterance_id = fixed_utterance_id(turn.bot_response)
+        spoken = self._speak(turn.bot_response)
         append_log(
             self.log_path,
             turn,
@@ -1590,6 +1663,7 @@ class NarrativeSession:
                 "response_replaced": response_replaced,
                 "question_kind": str(getattr(result, "question_kind", "none")),
                 **({"proposed_narrative_actions": proposed} if proposed != actions else {}),
+                **self._language_fields(spoken, user_text),
             },
         )
         if is_exit:
@@ -1611,6 +1685,7 @@ class NarrativeSession:
             turn_id=turn_id if streamed else None,
             streamed=streamed,
         )
+        output = self._in_language(output, user_text)
         self._publish(output)
         return output
 
@@ -1626,6 +1701,7 @@ def run_chat(
     ros_publisher: NarrativeRelayPublisher | None = None,
     output_listeners: Sequence[OutputListener] = (),
     stop_fn: Callable[[], str | None] | None = None,
+    language: str = "ja",
 ) -> bool:
     """One session; ``stop_fn`` returning a reason ends it: with the ending
     line (the robot left the narrative mode), or without it for "restarted".
@@ -1638,6 +1714,7 @@ def run_chat(
         event_controller=event_controller,
         ros_publisher=ros_publisher,
         output_listeners=output_listeners,
+        language=language,
     )
     print(f"シナリオ: {scenario.label}")
     print(session.current_situation)
@@ -1710,6 +1787,7 @@ def run_chat_on_mode(
     ros_publisher: NarrativeRelayPublisher,
     output_listeners: Sequence[OutputListener] = (),
     other_scenarios: dict[str, tuple[Any, str, Scenario]] | None = None,
+    language: str = "ja",
 ) -> None:
     """A session each time the robot enters the narrative mode; leaving the
     mode ends the session, as does the participant. The story is of the
@@ -1747,6 +1825,7 @@ def run_chat_on_mode(
             output_listeners=output_listeners,
             stop_fn=lambda: ("restarted" if ros_publisher.narrative_entries > started
                              else None if ros_publisher.narrative_mode else "mode_changed"),
+            language=language,
         ) and ros_publisher.connected:
             return  # Ctrl+C; a closed relay is waited for again
         print("\nナラティブモードを待っています。")
@@ -1832,8 +1911,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="--ros-relay と使う。ロボットがナラティブモードに入るたびに物語を始め、"
              "抜けると終わりのセリフで終える（中継が閉じるまで繰り返す）。",
     )
+    add_language_argument(parser)
     add_storybook_arguments(parser)
     return parser
+
+
+def add_language_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--language", choices=("ja", "en"), default="ja",
+        help="参加者とプーが話す言語。en では入力を日本語に訳してプログラムに渡し、"
+             "プーの応答を英語に訳して出す（聞き間違いは英語の表で。docs/english_mode.md）。",
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1957,6 +2045,7 @@ def main() -> int:
                                     cache_hash(train_model, judge_model, s), s)
                             for s in scenarios[1:]
                         },
+                        language=args.language,
                     )
                 else:
                     run_chat(
@@ -1967,6 +2056,7 @@ def main() -> int:
                         input_fn=ros_publisher.receive_user_input if ros_publisher else None,
                         ros_publisher=ros_publisher,
                         output_listeners=listeners,
+                        language=args.language,
                     )
             finally:
                 # Let the picture book write the ending before exiting.

@@ -29,6 +29,7 @@ Without `--public`, the server refuses a non-loopback `--host` unless `POOH_WEB_
 - **詳細** (each turn's mode, scene, actions and state changes) and **過去ログ** work only from this PC (`127.0.0.1` / `::1`), whatever the token.
 - Sessions run their LLM calls concurrently (calls within one session are serialized); `--max-sessions` (default 20) caps them.
 - `--ros-relay` also sends every Web turn to the robot (output only); use it with a single participant.
+- `--language en` (also on `pooh_narrative_dspy.py`) talks with an English-speaking participant: what they say is translated into Japanese for the Japanese program, and Pooh's lines into English; the page, the picture book and the postcards are in English, and with `--tts-server-url` pointing at the English voice's server (`pooh_en`, port 8100) Pooh speaks English. See [`english_mode.md`](english_mode.md).
 
 ## Talking to the robot
 

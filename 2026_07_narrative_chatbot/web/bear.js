@@ -19,11 +19,11 @@
     const notice=document.createElement("div");
     notice.className="bear-render-error";
     notice.setAttribute("role","alert");
-    notice.textContent="クマを表示できませんでした。会話は続けられます。";
+    notice.textContent=t("クマを表示できませんでした。会話は続けられます。");
     const details=document.createElement("details");
     details.className="local-only-feature";
     const summary=document.createElement("summary");
-    summary.textContent="表示エラーの詳細";
+    summary.textContent=t("表示エラーの詳細");
     const report=document.createElement("pre");
     const browser=typeof navigator!=="undefined" ? navigator.userAgent : "unknown";
     report.textContent=[reason,error?.message || String(error || ""),...contextAttempts,
@@ -44,7 +44,7 @@
   // Some GPU/driver combinations cannot create a multisampled context.
   const gl=context(true) || context(false);
   if(!gl) {
-    renderingFailed("クマの3D表示を開始できませんでした。");
+    renderingFailed(t("クマの3D表示を開始できませんでした。"));
     return;
   }
   function shader(type, source) {
@@ -82,7 +82,7 @@
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
   gl.useProgram(program);
   } catch(error) {
-    renderingFailed("クマの描画プログラムを開始できませんでした。",error);
+    renderingFailed(t("クマの描画プログラムを開始できませんでした。"),error);
     return;
   }
   host.dataset.bearRenderer="webgl";
@@ -379,7 +379,7 @@
   canvas.addEventListener("webglcontextlost",e=>{
     e.preventDefault(); if(animation!==null) cancelAnimationFrame(animation);
     animation=null;
-    renderingFailed("クマの3D表示が中断しました。");
+    renderingFailed(t("クマの3D表示が中断しました。"));
   });
   const labels={眉:"eyebrow",腕:"arm",首:"neck",鼻:"nose"};
   // Observe only the current conversation, never the past-log/book dialogs.

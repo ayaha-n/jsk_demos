@@ -15,7 +15,7 @@
   const passphrase = byId("study-passphrase");
   const RECEIPT_KEY = "pooh-study-session-id";
   const GOAL_NOTICE = byId("study-goal-notice").textContent;
-  const TIME_NOTICE = "お話の途中でも、「終了して絵本を見る」から終えて、今回のお話を絵本で振り返れます。";
+  const TIME_NOTICE = t("お話の途中でも、「終了して絵本を見る」から終えて、今回のお話を絵本で振り返れます。");
   let session = null, progress = {}, revision = null, layout = null;
   let observer = null, sentinel = null, opening = false, reporting = false, confirming = false;
   let generation = 0;
@@ -52,7 +52,7 @@
       body: JSON.stringify({ event, revision: requestedRevision, layout }),
     });
     const body = await response.json();
-    if (!response.ok) throw new Error(body.error || "記録できませんでした。もう一度お試しください。");
+    if (!response.ok) throw new Error(body.error || t("記録できませんでした。もう一度お試しください。"));
     if (session !== requestedSession || revision !== requestedRevision || generation !== requestedGeneration) return false;
     progress = body; render();
     return true;
@@ -65,7 +65,7 @@
     if (end.top < Math.max(root.top, modal.top, 0) ||
         end.bottom > Math.min(root.bottom, modal.bottom, window.innerHeight) + 1) return;
     reporting = true;
-    try { if (await report("last_page")) status.textContent = "最後のページまで表示しました。読了を確認できます。"; }
+    try { if (await report("last_page")) status.textContent = t("最後のページまで表示しました。読了を確認できます。"); }
     catch (error) { status.textContent = error.message; }
     finally { reporting = false; }
   }
@@ -80,9 +80,9 @@
     checkLastPage();
   }
   const imageReady = image => new Promise((resolve, reject) => {
-    if (image.complete) { image.naturalWidth ? resolve() : reject(new Error("挿絵を読み込めませんでした。絵本を開き直してください。")); return; }
+    if (image.complete) { image.naturalWidth ? resolve() : reject(new Error(t("挿絵を読み込めませんでした。絵本を開き直してください。"))); return; }
     image.addEventListener("load", resolve, { once: true });
-    image.addEventListener("error", () => reject(new Error("挿絵を読み込めませんでした。絵本を開き直してください。")), { once: true });
+    image.addEventListener("error", () => reject(new Error(t("挿絵を読み込めませんでした。絵本を開き直してください。"))), { once: true });
   });
   const api = {
     get goalReached() { return Boolean(progress.goal_reached); },
@@ -108,7 +108,7 @@
     pendingBook() {
       generation++; disconnect(); revision = null; opening = false; reporting = false;
       completion.hidden = false;
-      status.textContent = "絵本の準備ができると、読了を確認できます。"; render();
+      status.textContent = t("絵本の準備ができると、読了を確認できます。"); render();
     },
     async bookReady(book, id) {
       if (!book.study_revision || session !== id) return;
@@ -140,14 +140,14 @@
         if (!body.completion_code || generation !== expected) return;
         api.setState(body, id); completion.hidden = false; render();
         if (!dialog.open) dialog.showModal();
-        status.textContent = "保存済みの完了コードです。";
+        status.textContent = t("保存済みの完了コードです。");
       } catch { /* an expired, incomplete session uses the normal restart UI */ }
     },
   };
   readButton.addEventListener("click", async () => {
     if (readButton.disabled) return;
-    confirming = true; render(); status.textContent = "完了コードを取得しています…";
-    try { if (await report("read_confirmed")) status.textContent = "完了コードをコピーして回答欄に入力してください。"; }
+    confirming = true; render(); status.textContent = t("完了コードを取得しています…");
+    try { if (await report("read_confirmed")) status.textContent = t("完了コードをコピーして回答欄に入力してください。"); }
     catch (error) { status.textContent = error.message; }
     finally { confirming = false; render(); }
   });
@@ -155,14 +155,14 @@
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      status.textContent = `${name}をコピーしました。クラウドソーシングの回答欄に貼り付けてください。`;
+      status.textContent = t("{name}をコピーしました。クラウドソーシングの回答欄に貼り付けてください。", { name });
     } catch {
       input.focus(); input.select();
-      status.textContent = `${name}を選択しました。手動でコピーしてください。`;
+      status.textContent = t("{name}を選択しました。手動でコピーしてください。", { name });
     }
   }
-  byId("study-copy-button").addEventListener("click", () => copy(progress.completion_code, codeInput, "完了コード"));
-  byId("study-passphrase-copy-button").addEventListener("click", () => copy(progress.passphrase, passphrase, "合言葉"));
+  byId("study-copy-button").addEventListener("click", () => copy(progress.completion_code, codeInput, t("完了コード").toLowerCase()));
+  byId("study-passphrase-copy-button").addEventListener("click", () => copy(progress.passphrase, passphrase, t("合言葉").toLowerCase()));
   viewer.addEventListener("scroll", checkLastPage, { passive: true });
   dialog.addEventListener("scroll", checkLastPage, { passive: true });
   document.addEventListener("visibilitychange", checkLastPage);

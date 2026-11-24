@@ -432,7 +432,8 @@ class LiveStorybook:
             if output.source == "session_open":
                 self.session_id = session.session_id
                 self._latest_session_id = session.session_id
-                self._queue.put(("begin", (session.scenario.key, getattr(session, "log_path", None), session.session_id)))
+                self._queue.put(("begin", (session.scenario.key, getattr(session, "log_path", None),
+                                           session.session_id, getattr(session, "language", "ja"))))
             elif session.session_id != self.session_id:
                 return
             self._queue.put(("turn", turn))
@@ -489,9 +490,10 @@ class LiveStorybook:
             self.builder = None
             from dataclasses import replace
 
-            scenario, self._log_path, session_id = value
+            scenario, self._log_path, session_id, language = value
             layout = LAYOUTS[self._read_orientation()]
-            config = replace(storybook.load_story_config(scenario), session_id=session_id)
+            config = replace(storybook.load_story_config(scenario, language=language),
+                             session_id=session_id)
             self.builder = StoryBuilder(config, layout, awaits_illustration=self._awaits(config),
                                         compose_cover=True)
             self._awaited_page = None

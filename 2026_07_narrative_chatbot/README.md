@@ -21,6 +21,7 @@ See [`CODEX_INSTRUCTIONS_POOH_DSPY.md`](CODEX_INSTRUCTIONS_POOH_DSPY.md) for the
 | [`docs/postcard.md`](docs/postcard.md) | Postcards made from a session's picture book |
 | [`docs/printing.md`](docs/printing.md) | Printing the postcards on the SELPHY: printer, paper, setting up another PC |
 | [`docs/storybook.md`](docs/storybook.md) | The picture book: layout, the tablet app, reading back, illustrations |
+| [`docs/english_mode.md`](docs/english_mode.md) | English mode (`--language en`): translation around the Japanese program, mishearing in English |
 | [`docs/known_issues.md`](docs/known_issues.md) | Unverified concerns and open questions |
 
 ## Setup

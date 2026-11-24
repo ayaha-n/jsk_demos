@@ -5,7 +5,7 @@ const SESSION_KEY = "pooh-session-id";
 const TOKEN_KEY = "pooh-access-token";
 const MAX_RECONNECT_DELAY_MS = 10000;
 const crowd = window.PoohCrowdsourcing;
-const STUDY_LOCKED_NOTICE = "まだお話の途中です。お話がひと区切りつくと、「終了して絵本を見る」を押せるようになります。";
+const STUDY_LOCKED_NOTICE = t("まだお話の途中です。お話がひと区切りつくと、「終了して絵本を見る」を押せるようになります。");
 
 const log = document.getElementById("log");
 const statusLine = document.getElementById("status");
@@ -105,13 +105,13 @@ function updateControls() {
   endButton.classList.toggle("study-locked", studyLocked);
   endButton.setAttribute("aria-disabled", String(studyLocked || endButton.disabled));
   if (crowd) {
-    endButton.textContent = "終了して絵本を見る";
+    endButton.textContent = t("終了して絵本を見る");
     endButton.classList.toggle("goal-ready", crowd.endAllowed && !ended);
     crowd.updateControls({ ended });
   }
-  if (ended) statusLine.textContent = "終了しました。「はじめから」で新しく開始できます。";
-  else if (!connected) statusLine.textContent = "接続しています…";
-  else if (busy) statusLine.textContent = "プーが考えています…";
+  if (ended) statusLine.textContent = t("終了しました。「はじめから」で新しく開始できます。");
+  else if (!connected) statusLine.textContent = t("接続しています…");
+  else if (busy) statusLine.textContent = t("プーが考えています…");
   else statusLine.textContent = "";
   if (canType) inputText.focus();
 }
@@ -259,7 +259,7 @@ function appendOutput(output, { autoplay = false } = {}) {
   node.className = "message pooh";
   const speaker = document.createElement("span");
   speaker.className = "speaker";
-  speaker.textContent = "プー";
+  speaker.textContent = t("プー");
   const body = document.createElement("div");
   body.textContent = output.bot_response;
   const details = document.createElement("div");
@@ -274,7 +274,7 @@ function appendOutput(output, { autoplay = false } = {}) {
 }
 
 function formatLogTime(value) {
-  if (!value) return "時刻不明";
+  if (!value) return t("時刻不明");
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("ja-JP");
 }
@@ -292,18 +292,18 @@ function appendLogRecord(record, index) {
   if (record.user_action) {
     const user = document.createElement("div");
     user.className = "log-record-user";
-    user.textContent = `参加者: ${record.user_action}`;
+    user.textContent = t("参加者: {text}", { text: record.user_text || record.user_action });
     item.appendChild(user);
   }
 
   const pooh = document.createElement("div");
   pooh.className = "log-record-pooh";
-  pooh.textContent = `プー: ${record.bot_response || ""}`;
+  pooh.textContent = t("プー: {text}", { text: record.spoken_response || record.bot_response || "" });
   item.appendChild(pooh);
 
   const details = document.createElement("details");
   const summary = document.createElement("summary");
-  summary.textContent = "記録の詳細";
+  summary.textContent = t("記録の詳細");
   const body = document.createElement("pre");
   body.textContent = JSON.stringify({
     source: record.source,
@@ -352,14 +352,14 @@ function appendStoryPage(page, book, container = logViewer) {
     if (page.illustration_url) {
       const image = document.createElement("img");
       image.addEventListener("error", () => {
-        image.alt = "挿絵を読み込めませんでした。絵本を開いている間に再試行します。";
+        image.alt = t("挿絵を読み込めませんでした。絵本を開いている間に再試行します。");
       });
       image.addEventListener("load", () => { image.alt = ""; });
       image.src = page.illustration_url;
       image.alt = "";
       picture.appendChild(image);
     } else {
-      picture.textContent = `（さしえ: ${page.illustration}）`;
+      picture.textContent = t("（さしえ: {name}）", { name: page.illustration });
     }
     sheet.appendChild(picture);
   }
@@ -405,17 +405,17 @@ async function loadSelectedStorybook(name) {
     logPostcardsPdf.hidden = false;
   }
   body.pages.forEach((page) => appendStoryPage(page, body));
-  logViewerStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
+  logViewerStatus.textContent = t("{title} · {count}ページ", { title: body.title || t("絵本"), count: body.pages.length });
 }
 
 async function loadSelectedLog() {
   const name = logSelect.value;
   if (!name) {
     logViewer.replaceChildren();
-    logViewerStatus.textContent = "確認できるログはありません。";
+    logViewerStatus.textContent = t("確認できるログはありません。");
     return;
   }
-  logViewerStatus.textContent = "読み込んでいます…";
+  logViewerStatus.textContent = t("読み込んでいます…");
   logViewer.replaceChildren();
   logStorybookPdf.hidden = true;
   logPostcardsPdf.hidden = true;
@@ -432,17 +432,17 @@ async function loadSelectedLog() {
     // A story_goal line only marks where the story reached its goal.
     const records = body.records.filter((record) => record.source !== "story_goal");
     records.forEach(appendLogRecord);
-    const notes = [`${records.length}件`];
-    if (body.invalid_lines) notes.push(`読めない行: ${body.invalid_lines}`);
-    if (body.truncated) notes.push("表示上限以降は省略");
+    const notes = [t("{count}件", { count: records.length })];
+    if (body.invalid_lines) notes.push(t("読めない行: {count}", { count: body.invalid_lines }));
+    if (body.truncated) notes.push(t("表示上限以降は省略"));
     logViewerStatus.textContent = notes.join(" / ");
   } catch (error) {
-    logViewerStatus.textContent = `ログを読み込めませんでした: ${error.message}`;
+    logViewerStatus.textContent = t("ログを読み込めませんでした: {message}", { message: error.message });
   }
 }
 
 async function refreshLogList() {
-  logViewerStatus.textContent = "ログ一覧を取得しています…";
+  logViewerStatus.textContent = t("ログ一覧を取得しています…");
   try {
     const response = await fetch("/api/logs", { headers: authenticatedHeaders() });
     const body = await response.json();
@@ -462,7 +462,7 @@ async function refreshLogList() {
   } catch (error) {
     logSelect.replaceChildren();
     logViewer.replaceChildren();
-    logViewerStatus.textContent = `ログ一覧を取得できませんでした: ${error.message}`;
+    logViewerStatus.textContent = t("ログ一覧を取得できませんでした: {message}", { message: error.message });
   }
 }
 
@@ -534,7 +534,7 @@ function handleMessage(message) {
       storageSet(SESSION_KEY, null);
       sessionId = null;
       ended = true;
-      appendNotice("セッションの有効期限が切れました。「はじめから」で新しく開始できます。");
+      appendNotice(t("セッションの有効期限が切れました。「はじめから」で新しく開始できます。"));
       break;
   }
   updateControls();
@@ -589,7 +589,7 @@ async function startNewSession() {
   postcardsUnavailable = false;
   sessionId = null;
   storageSet(SESSION_KEY, null);
-  statusLine.textContent = "準備しています…";
+  statusLine.textContent = t("準備しています…");
   let response;
   try {
     response = await fetch("/api/sessions", {
@@ -597,13 +597,13 @@ async function startNewSession() {
       headers: authenticatedHeaders(),
     });
   } catch {
-    appendNotice("サーバに接続できませんでした。", true);
+    appendNotice(t("サーバに接続できませんでした。"), true);
     statusLine.textContent = "";
     return;
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    appendNotice(body.error || `開始できませんでした（${response.status}）。`, true);
+    appendNotice(body.error || t("開始できませんでした（{status}）。", { status: response.status }), true);
     statusLine.textContent = "";
     return;
   }
@@ -625,7 +625,7 @@ form.addEventListener("submit", (event) => {
 document.addEventListener("pooh-touch", (event) => {
   if (!socket || socket.readyState !== WebSocket.OPEN || ended) return;
   if (!touchSupported) {
-    appendNotice("タップの記録には、Webサーバを再起動してから画面を再読み込みしてください。", true);
+    appendNotice(t("タップの記録には、Webサーバを再起動してから画面を再読み込みしてください。"), true);
     return;
   }
   socket.send(JSON.stringify({ type: "touch", part: event.detail.part }));
@@ -636,7 +636,7 @@ endButton.addEventListener("click", () => {
     if (!ended) appendNotice(STUDY_LOCKED_NOTICE, true);
     return;
   }
-  if (!endButton.disabled && socket !== null && !ended && confirm("本当に終了しますか？")) {
+  if (!endButton.disabled && socket !== null && !ended && confirm(t("本当に終了しますか？"))) {
     socket.send(JSON.stringify({ type: "close" }));
   }
 });
@@ -652,7 +652,7 @@ async function abandonSession(id) {
 }
 
 restartButton.addEventListener("click", async () => {
-  if (!ended && sessionId !== null && !confirm("現在のセッションを終了して、はじめから始めますか？")) return;
+  if (!ended && sessionId !== null && !confirm(t("現在のセッションを終了して、はじめから始めますか？"))) return;
   const previous = sessionId;
   sessionId = null;
   if (previous !== null) await abandonSession(previous);
@@ -680,7 +680,7 @@ async function loadOwnStorybook(quiet = false) {
   const layout = encodeURIComponent(storybookLayout.value);
   // The PDF in the orientation shown here.
   storybookPdf.href = `${base}.pdf?token=${token}&layout=${layout}`;
-  if (!quiet) storybookStatus.textContent = "読み込んでいます…";
+  if (!quiet) storybookStatus.textContent = t("読み込んでいます…");
   const requestedSessionId = endedSessionId;
   try {
     const response = await fetch(`${base}?layout=${layout}`, { headers: authenticatedHeaders() });
@@ -699,7 +699,7 @@ async function loadOwnStorybook(quiet = false) {
       storybookViewer.replaceChildren();
       ownStorybookSnapshot = "";
       storybookStatus.textContent =
-        `${body.title || "絵本"} · 挿絵を準備しています（${ready}/${illustrated.length}）…`;
+        t("{title} · 挿絵を準備しています（{ready}/{total}）…", { title: body.title || t("絵本"), ready, total: illustrated.length });
       storybookProgress.max = illustrated.length;
       storybookProgress.value = ready;
       storybookProgress.hidden = false;
@@ -713,12 +713,12 @@ async function loadOwnStorybook(quiet = false) {
       } else {
         retryFailedStoryImages(storybookViewer);
       }
-      storybookStatus.textContent = `${body.title || "絵本"} · ${body.pages.length}ページ`;
+      storybookStatus.textContent = t("{title} · {count}ページ", { title: body.title || t("絵本"), count: body.pages.length });
       storybookProgress.hidden = true;
       crowd?.bookReady(body, requestedSessionId);
     }
   } catch (error) {
-    if (!quiet) storybookStatus.textContent = `絵本を読み込めませんでした: ${error.message}`;
+    if (!quiet) storybookStatus.textContent = t("絵本を読み込めませんでした: {message}", { message: error.message });
     storybookProgress.hidden = true;
   } finally {
     ownStorybookLoading = false;
@@ -746,8 +746,8 @@ async function refreshOwnPostcards() {
     const ready = body.status === "ready";
     storybookPostcards.hidden = !ready;
     if (ready) storybookPostcards.href = `${body.url}?token=${encodeURIComponent(accessToken())}`;
-    const note = { waiting: "ポストカードを準備中…", making: "ポストカードを準備中…",
-                   failed: "ポストカードを作れませんでした" }[body.status] || "";
+    const note = { waiting: t("ポストカードを準備中…"), making: t("ポストカードを準備中…"),
+                   failed: t("ポストカードを作れませんでした") }[body.status] || "";
     storybookPostcardsStatus.textContent = note;
     storybookPostcardsStatus.hidden = !note;
   } catch (error) {

@@ -59,6 +59,23 @@ class SynthesizeTests(unittest.TestCase):
         self.assertEqual(synth_call.kwargs["json"]["moraToneList"], [["a", 1]])
         self.assertEqual(synth_call.kwargs["json"]["text"], "やあ")
 
+    def test_an_english_voice_is_synthesized_without_the_japanese_g2p(self):
+        config = web_tts.TTSConfig.for_language("en", "http://tts.example")
+        synth_response = unittest.mock.Mock(content=b"RIFF...")
+        synth_response.raise_for_status = unittest.mock.Mock()
+        session = _fake_session([synth_response])
+        with unittest.mock.patch.object(web_tts.requests, "Session", return_value=session):
+            web_tts.synthesize(config, "Hello")
+        (synth_call,) = session.post.call_args_list
+        self.assertEqual(synth_call.args[0], "http://tts.example/api/synthesis")
+        self.assertEqual(synth_call.kwargs["json"]["language"], "EN")
+        self.assertEqual(synth_call.kwargs["json"]["model"], "pooh_en")
+        self.assertEqual(synth_call.kwargs["json"]["moraToneList"], [])
+        self.assertEqual(synth_call.kwargs["json"]["speed"], 1.0)
+        # Japanese is as before.
+        self.assertEqual(web_tts.TTSConfig.for_language("ja", "http://x"),
+                         web_tts.TTSConfig(server_url="http://x"))
+
     def test_propagates_a_failed_request(self):
         config = web_tts.TTSConfig(server_url="http://tts.example")
         session = _fake_session([requests.ConnectionError("down")])

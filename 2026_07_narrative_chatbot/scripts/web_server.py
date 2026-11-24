@@ -393,7 +393,8 @@ def _asset_version() -> str:
     """Changes whenever a frontend asset does: the page asks for them by
     this, so a browser never keeps using a copy cached before an update."""
     return str(max(
-        (WEB_ROOT / name).stat().st_mtime_ns for name in ("app.js", "style.css", "bear.js", "crowdsourcing.js")
+        (WEB_ROOT / name).stat().st_mtime_ns for name in ("app.js", "style.css", "bear.js", "crowdsourcing.js",
+                                                    "i18n.js")
     ))
 
 
@@ -474,6 +475,10 @@ async def static_bear_script(request: web.Request) -> web.FileResponse:
 
 async def static_crowdsourcing_script(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_ROOT / "crowdsourcing.js", headers=NO_CACHE)
+
+
+async def static_i18n_script(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(WEB_ROOT / "i18n.js", headers=NO_CACHE)
 
 
 def _resolve_log_path(log_dir: Path, name: str) -> Path | None:
@@ -986,6 +991,7 @@ def create_app(
     end_after_minutes: float | None = None,
     tts: TTSCache | None = None,
     postcards: Any = None,
+    language: str = "ja",
 ) -> web.Application:
     app = web.Application()
     if postcards is not None:
@@ -1007,6 +1013,8 @@ def create_app(
     app[LOG_DIR_KEY] = effective_log_dir
     index_template = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
     app[INDEX_HTML_KEY] = index_template.replace(
+        "{{LANG}}", "en" if language == "en" else "ja"
+    ).replace(
         "{{SCENARIO_TITLE}}", html.escape(scenario_title)
     ).replace("{{SCENE_INTRO}}", html.escape(scene_intro)).replace(
         "{{CROWDSOURCING}}", "true" if crowdsourcing else "false"
@@ -1041,6 +1049,7 @@ def create_app(
     app.router.add_get("/ws/{session_id}", session_socket)
     # Do not expose index.html as a static file: it would bypass per-peer UI hiding.
     app.router.add_get("/static/app.js", static_app_script)
+    app.router.add_get("/static/i18n.js", static_i18n_script)
     app.router.add_get("/static/style.css", static_stylesheet)
     app.router.add_get("/static/bear.js", static_bear_script)
     app.router.add_get("/static/crowdsourcing.js", static_crowdsourcing_script)
@@ -1132,9 +1141,16 @@ def build_factory(
             ros_publisher=publisher,
             session_id=session_id,
             output_listeners=shared_listeners,
+            language=getattr(args, "language", "ja"),
         )
 
-    return factory, scenario.label, scenario.scene_intro, listeners
+    title, scene_intro = scenario.label, scenario.scene_intro
+    if getattr(args, "language", "ja") == "en":
+        from english_mode import scenario_text
+
+        title = scenario_text(scenario.key, "title", title)
+        scene_intro = scenario_text(scenario.key, "scene_intro", scene_intro)
+    return factory, title, scene_intro, listeners
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1168,8 +1184,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--public", action="store_true",
                         help="Cloudflare quick tunnel で公開用HTTPS URLを出す（キー付き、終了で停止）。"
                              "公開経由では過去ログとタブレットは使えない。")
-    from pooh_narrative_dspy import add_storybook_arguments
+    from pooh_narrative_dspy import add_language_argument, add_storybook_arguments
 
+    add_language_argument(parser)
     add_storybook_arguments(parser)
     return parser
 
@@ -1209,7 +1226,8 @@ def main() -> int:
         # APIキーやLMリクエスト本文を含む可能性のある詳細tracebackは表示しない。
         print(f"エラー: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    tts = TTSCache(TTSConfig(server_url=args.tts_server_url.rstrip("/"))) if args.tts_server_url else None
+    tts = (TTSCache(TTSConfig.for_language(args.language, args.tts_server_url.rstrip("/")))
+           if args.tts_server_url else None)
     app = create_app(
         factory,
         ttl_seconds=args.session_ttl,
@@ -1217,6 +1235,7 @@ def main() -> int:
         access_token=access_token,
         scenario_title=scenario_title,
         scene_intro=scene_intro,
+        language=args.language,
         local_output_listeners=listeners,
         crowdsourcing=args.crowdsourcing,
         passphrase=args.passphrase,

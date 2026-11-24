@@ -286,11 +286,12 @@ def top_level_quotes(text: str) -> list[tuple[int, int, str]]:
     quotes a name (「…「ウズウズ」って…」) stays one quote."""
     quotes, depth, start = [], 0, 0
     for index, char in enumerate(text):
-        if char == "「":
+        # “…” too: an English-mode book quotes that way (storybook.english_entries).
+        if char in "「“":
             if depth == 0:
                 start = index
             depth += 1
-        elif char == "」" and depth > 0:
+        elif char in "」”" and depth > 0:
             depth -= 1
             if depth == 0:
                 quotes.append((start, index + 1, text[start + 1:index]))
@@ -566,7 +567,11 @@ def _scenes_for_lm(scenes: list[Scene], quotes: list[Quote]) -> str:
 
 def tidy_quote(text: str) -> str:
     """Speech recognition's punctuation, in the book's: 「わわ，たくさん」 ->
-    「わわ、たくさん」, 「、、」 -> 「、」. The words are left alone."""
+    「わわ、たくさん」, 「、、」 -> 「、」. The words are left alone. English
+    (english_mode) keeps its own punctuation."""
+    if not is_japanese(text):
+        # The book quotes 「“Hello,” you said.」: the sentence's own full stop.
+        return re.sub(r",$", ".", re.sub(r"\s+", " ", text).strip())
     text = text.replace("，", "、").replace(",", "、").replace("．", "。")
     return re.sub(r"([、。])\1+", r"\1", text).strip()
 
@@ -730,6 +735,7 @@ def lm_plan(scenes: list[Scene], title: str, cards: int, style: Style = POEM,
 SPEAKER_NAMES = {"participant": "あなた", "pooh": "プー"}
 _NAMED_LINE = re.compile(r"^(あなた|プー)?\s*(「.*」)\s*$")
 _SENTENCE_END = re.compile(r"(?<=[。！？!?…])(?![。！？!?…」』）)])")
+_ENGLISH_SENTENCE_END = re.compile(r"(?<=[.!?…])(?<!\b[A-Z][a-z]\.)(?=\s+\S)")
 
 # The card, in mm from its top: the frame's inside, and what goes in it.
 DIALOGUE_TOP, DIALOGUE_BOTTOM = 10.5, 134.5
@@ -768,13 +774,22 @@ def _script(char: str) -> str:
     return "other"
 
 
+def is_japanese(text: str) -> bool:
+    """Whether ``text`` has any kana or kanji (else it is English, english_mode)."""
+    return any(_script(char) != "other" for char in text)
+
+
 def phrases(text: str) -> list[str]:
-    """The text cut into phrases (文節) a line may break between: by BudouX
+    """English: its words (each with the space after it).
+
+    Japanese: the text cut into phrases (文節) a line may break between: by BudouX
     when it is installed, else by a simple rule -- after punctuation, before
     an opening bracket, and where hiragana gives way to kanji, katakana or
     anything else (「見た目は｜どんな｜感じだと｜思う？」). The rule never
     breaks inside a word, but finds fewer places to break in long hiragana."""
     global _BUDOUX
+    if not is_japanese(text):
+        return re.findall(r"\S+\s*", text)
     try:
         import budoux
     except ImportError:
@@ -816,11 +831,11 @@ def wrap_phrases(text: str, size: float, width_pt: float,
     for a whole line is the only thing broken inside, by the book's rules."""
     lines, line = [], ""
     for phrase in phrases(text.strip()):
-        if measure(line + phrase, size) <= width_pt:
+        if measure((line + phrase).rstrip(), size) <= width_pt:
             line += phrase
             continue
         if line:
-            lines.append(line)
+            lines.append(line.rstrip())
             line = ""
         if measure(phrase, size) <= width_pt:
             line = phrase
@@ -841,7 +856,7 @@ def wrap_phrases(text: str, size: float, width_pt: float,
                 lines.extend(pieces[:-1])
                 line = pieces[-1]
     if line:
-        lines.append(line)
+        lines.append(line.rstrip())
     return lines
 
 
@@ -862,7 +877,10 @@ def _particle_parts(phrase: str) -> list[str]:
 
 
 def split_sentences(text: str) -> list[str]:
-    return [part for part in _SENTENCE_END.split(text) if part.strip()]
+    # An English sentence keeps the space before the next one, so joined
+    # back (dialogue_line) they read as they were said.
+    pattern = _SENTENCE_END if is_japanese(text) else _ENGLISH_SENTENCE_END
+    return [part for part in pattern.split(text) if part.strip()]
 
 
 @dataclass(frozen=True)
@@ -882,7 +900,7 @@ def utterances_of(scenes: list[Scene]) -> list[Utterance]:
 
 def dialogue_line(utterance: Utterance, first: int, last: int) -> str:
     name = SPEAKER_NAMES.get(utterance.speaker, "")
-    return f"{name}「{''.join(utterance.sentences[first:last + 1])}」"
+    return f"{name}「{''.join(utterance.sentences[first:last + 1]).strip()}」"
 
 
 @dataclass

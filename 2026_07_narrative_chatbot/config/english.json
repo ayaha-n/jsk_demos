@@ -1,0 +1,59 @@
+{
+  "_comment": "English mode (docs/english_mode.md): what is shown or said in English instead of the scenario's Japanese. scenarios: the Web UI's title and scene description. storybook: the picture book's title, each beat's narration and the closing (config/storybook.json's, in English). lines: Pooh's fixed lines (by their Japanese text), said as written here; any other line is translated by the LM.",
+  "scenarios": {
+    "tea_party": {
+      "title": "A Tea Party in the Forest",
+      "scene_intro": "A clearing in the forest. Pooh is sitting at a table. On the table are cups, plates and a pot of honey. A blue balloon is nearby."
+    },
+    "eeyore_birthday": {
+      "title": "A Birthday Present for Eeyore",
+      "scene_intro": "A clearing in the Hundred Acre Wood. Pooh is sitting at a table. On the table are cups, plates and a pot of honey. Colorful balloons and ribbons are nearby."
+    },
+    "footprints": {
+      "title": "Whose Footprints?",
+      "scene_intro": "The Hundred Acre Wood after a snowfall. Strange footprints circle a small bush, and Pooh is peering at them."
+    }
+  },
+  "storybook": {
+    "tea_party": {
+      "title": "The Tea Party in the Forest",
+      "closing": "The End",
+      "beats": {
+        "opening": "In a clearing in the forest, Pooh was sitting at a table."
+      }
+    },
+    "eeyore_birthday": {
+      "title": "Eeyore's Birthday",
+      "closing": "The End",
+      "beats": {
+        "opening": "In a clearing in the Hundred Acre Wood, Pooh was sitting at a table.",
+        "honey_gift_committed": "Pooh decided on a present for Eeyore.",
+        "pooh_tastes_honey": "Pooh took out the pot of honey, meaning to have just one taste.",
+        "pooh_ate_honey": "Before he knew it, the honey in the pot was all gone.",
+        "story_wrap_up": "And so, the present for Eeyore was decided."
+      }
+    },
+    "footprints": {
+      "title": "Whose Footprints?",
+      "closing": "The End",
+      "beats": {
+        "opening": "In the snowy forest, Pooh found some footprints he had never seen before.",
+        "ask_appearance": "Pooh and you talked about what the owner of the footprints might look like.",
+        "start_following": "Pooh and you began to follow the footprints.",
+        "second_animal": "The footprints became four, and Pooh was very surprised.",
+        "fourth_animal": "The footprints grew even more, until there were eight.",
+        "reveal_hint": "Pooh noticed that the footprints were just the size of his feet and yours.",
+        "reveal_direct": "Pooh realized that the footprints were their own.",
+        "session_close": "Now that he knew whose footprints they were, Pooh looked relieved."
+      }
+    }
+  },
+  "lines": {
+    "今日は来てくれて、ありがとう。今からお茶会をするところなんだ。": "Thank you for coming today. I'm just about to have a tea party.",
+    "またね。いっしょに過ごせて、うれしかったよ。": "Bye for now. I was happy to spend time with you.",
+    "いまね、イーヨーにあってきたんだけど、かわいそうに、ひどいことになってるのさ。今日はイーヨーのお誕生日だったんだよ。それなのに、誰も気が付かなかったってんで、とてもふさいじゃってるんだ。ぼくたち、なにか用意しなきゃ。きみは、なにかいい考えある？": "I've just seen Eeyore, and the poor thing is in a dreadful state. Today is Eeyore's birthday, you see. But nobody noticed, so he's feeling very gloomy. We must get something ready for him. Do you have a good idea?",
+    "またね。イーヨーのお祝いをいっしょに考えてくれて、ありがとう。": "Bye for now. Thank you for thinking about Eeyore's birthday with me.",
+    "やあ、ぼくね、いま、何かを追いかけているんだ。": "Hello! I'm following something right now.",
+    "またね。足跡の正体、一緒に考えてくれてありがとう。": "Bye for now. Thank you for wondering with me whose footprints they were."
+  }
+}
