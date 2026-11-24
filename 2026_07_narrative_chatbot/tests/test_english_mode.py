@@ -88,6 +88,26 @@ class ForwardTest(unittest.TestCase):
         self.assertEqual([c.heard_as for c in inputs["mishearing_candidates"]], ["dro"])
 
 
+class RomanizedWordTest(unittest.TestCase):
+    def test_honey_written_out_in_latin_letters_is_translated(self):
+        to_english = Mock(return_value=Mock(english=(
+            "I think it would be nice to give him a pot of hachimitsu. Mitsu is sweet.")))
+        translator = english_mode.Translator(to_japanese=Mock(), to_english=to_english, lines={})
+        self.assertEqual(
+            translator.to_english("ぼく、ハチミツの壺を贈るのがいいと思うんだ。みつは甘いよ。"),
+            "I think it would be nice to give him a pot of honey. Honey is sweet.")
+
+    def test_a_misheard_word_in_latin_letters_is_kept(self):
+        self.assertEqual(
+            english_mode.replace_romanized_words("Mitsu? What is mitsu?", "mitsuってなあに？"),
+            "Mitsu? What is mitsu?")
+
+    def test_other_words_are_left_alone(self):
+        self.assertEqual(
+            english_mode.replace_romanized_words("Mitsubishi made it.", "三菱が作ったんだ。"),
+            "Mitsubishi made it.")
+
+
 class FakeTranslator:
     def to_japanese(self, english, pooh_said_before=""):
         return f"[ja]{english}"

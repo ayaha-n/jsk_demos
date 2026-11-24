@@ -246,11 +246,41 @@ class TranslatePoohToEnglish(dspy.Signature):
     bear: short sentences and plain words. Keep the meaning, any question,
     and the length; add nothing. Keep every word written in Latin letters
     exactly as it is (it is a word Pooh misheard, or echoes back): do not
-    correct or translate it. Characters' names in their usual English form
-    (イーヨー -> Eeyore). Output only the translation."""
+    correct or translate it. Only words already in Latin letters in the
+    Japanese stay that way: katakana words are ordinary Japanese words, so
+    translate them too, never write them out in Latin letters (ハチミツ,
+    はちみつ, みつ -> honey; ツボ, 壺, つぼ -> pot). Characters' names in their
+    usual English form (イーヨー -> Eeyore). Output only the translation."""
 
     japanese: str = dspy.InputField()
     english: str = dspy.OutputField()
+
+
+# Japanese words the translation into English has been seen to write out in
+# Latin letters instead of translating ("a pot of hachimitsu", 2026-11-24),
+# and their English. Replaced only when the Japanese line did not have the
+# word in Latin letters itself (then it is a word Pooh misheard, kept as is).
+ROMANIZED_WORDS = {
+    "hachimitsu": "honey",
+    "hachi-mitsu": "honey",
+    "mitsu": "honey",
+    "tsubo": "pot",
+}
+
+
+def replace_romanized_words(english: str, japanese: str) -> str:
+    """``english`` with ROMANIZED_WORDS translated, keeping a capital."""
+    for word, translation in ROMANIZED_WORDS.items():
+        # Not \b: in "mitsuってなあに" the kana count as word characters too.
+        pattern = rf"(?<![A-Za-z]){re.escape(word)}(?![A-Za-z])"
+        if re.search(pattern, japanese, flags=re.IGNORECASE):
+            continue
+
+        def translated(match: re.Match) -> str:
+            return translation.capitalize() if match.group(0)[0].isupper() else translation
+
+        english = re.sub(pattern, translated, english, flags=re.IGNORECASE)
+    return english
 
 
 class Translator:
@@ -287,6 +317,7 @@ class Translator:
             return japanese
         if not english:
             return japanese
+        english = replace_romanized_words(english, japanese)
         with self._lock:
             self._cache[japanese] = english
         return english
