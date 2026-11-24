@@ -171,7 +171,7 @@ class StorybookTest(unittest.TestCase):
                                     opening_line=scenario.opening_line)
         texts = [placed.entry.text for page in book.pages for placed in page.placed]
         self.assertEqual(texts[0], "Eeyore's Birthday")
-        self.assertTrue(texts[2].startswith("“I've just seen Eeyore"))
+        self.assertTrue(texts[2].startswith("“I have just seen Eeyore"))
         self.assertIn("“Are you a robot?” you said.", texts)
         self.assertIn("“Let's go,” you said.", texts)
         self.assertIn("“Rabbit? Shall we invite Rabbit?”", texts)
