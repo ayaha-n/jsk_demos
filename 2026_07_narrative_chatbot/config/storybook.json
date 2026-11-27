@@ -87,6 +87,17 @@
   },
   "illustration_style": "Continue the exact established picture-book illustration style shown in the primary reference: clearly defined irregular black pen-and-ink contours, short sharp fur hatching, visible watercolor grain inside the subjects, bright honey-golden fur, natural brown ceramics and clear blue accents. Preserve the reference bear's face, snout, proportions and original ink density. Use a genuinely transparent background with only a small muted green-gray patch of ground. No full background, yellow or sepia wash, paper rectangle, haze, vignette, soft painted outlines or desaturated fur. No text, lettering, speech bubbles or thought bubbles.",
   "scenarios": {
+    "chat": {
+      "title": "プーと おしゃべり",
+      "beats": {
+        "opening": {
+          "narration": "プーは つくえの うえに すわって、おしゃべりの あいてを まって いました。",
+          "illustration": "tea_party/opening.png",
+          "prompt": "This bear from the reference image sits on a small desk with a honey pot beside him, smiling as if welcoming a friend to chat."
+        }
+      },
+      "closing": "おしまい"
+    },
     "tea_party": {
       "title": "もりの おちゃかい",
       "beats": {

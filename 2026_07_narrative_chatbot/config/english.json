@@ -1,6 +1,10 @@
 {
   "_comment": "English mode (docs/english_mode.md): what is shown or said in English instead of the scenario's Japanese. scenarios: the Web UI's title and scene description. storybook: the picture book's title, each beat's narration and the closing (config/storybook.json's, in English). lines: Pooh's fixed lines (by their Japanese text), said as written here; any other line is translated by the LM.",
   "scenarios": {
+    "chat": {
+      "title": "Just Chatting with Pooh",
+      "scene_intro": "Pooh is sitting on a desk in the lab, with a pot of honey beside him, ready to chat about anything."
+    },
     "tea_party": {
       "title": "A Tea Party in the Forest",
       "scene_intro": "A clearing in the forest. Pooh is sitting at a table. On the table are cups, plates and a pot of honey. A blue balloon is nearby."
@@ -15,6 +19,13 @@
     }
   },
   "storybook": {
+    "chat": {
+      "title": "A Chat with Pooh",
+      "closing": "The End",
+      "beats": {
+        "opening": "Pooh was sitting on a desk, waiting for a friend to talk with."
+      }
+    },
     "tea_party": {
       "title": "The Tea Party in the Forest",
       "closing": "The End",
@@ -49,6 +60,8 @@
     }
   },
   "lines": {
+    "さあ、なんでも聞いてね。": "Now, ask me anything!",
+    "またね。おしゃべりできて、たのしかったよ。": "Bye for now. I had fun talking with you.",
     "今日は来てくれて、ありがとう。今からお茶会をするところなんだ。": "Thank you for coming today. I'm just about to have a tea party.",
     "またね。いっしょに過ごせて、うれしかったよ。": "Bye for now. I was happy to spend time with you.",
       "いまね、イーヨーにあってきたんだけど、かわいそうに、ひどいことになってるのさ。今日はイーヨーのお誕生日だったんだよ。それなのに、誰も気が付かなかったってんで、とてもふさいじゃってるんだ。ぼくたち、なにか用意しなきゃ。きみは、なにかいい考えある？": "I have just seen Eeyore, and poor Eeyore is in a Very Sad Condition, because it's his birthday, and nobody has taken any notice of it. We must get something ready for him. Do you have a good idea?",

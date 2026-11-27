@@ -15,6 +15,22 @@
       "arm": "right_hand_bye"
     }
   },
+  "chat.opening": {
+    "text": "さあ、なんでも聞いてね。",
+    "wav": "chat.opening.wav",
+    "motion": {
+      "eyebrow": "happy",
+      "arm": "right_hand_up"
+    }
+  },
+  "chat.ending": {
+    "text": "またね。おしゃべりできて、たのしかったよ。",
+    "wav": "chat.ending.wav",
+    "motion": {
+      "eyebrow": "happy",
+      "arm": "right_hand_bye"
+    }
+  },
   "eeyore_birthday.opening": {
     "text": "いまね、イーヨーにあってきたんだけど、かわいそうに、ひどいことになってるのさ。今日はイーヨーのお誕生日だったんだよ。それなのに、誰も気が付かなかったってんで、とてもふさいじゃってるんだ。ぼくたち、なにか用意しなきゃ。きみは、なにかいい考えある？",
     "wav": "eeyore_birthday.opening.wav",

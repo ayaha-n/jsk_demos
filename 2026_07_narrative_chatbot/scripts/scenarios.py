@@ -284,10 +284,48 @@ def _footprints() -> Scenario:
     )
 
 
+def _chat() -> Scenario:
+    from pooh_chat_examples import (
+        CHAT_OPENING_LINE,
+        ChatAnalyzeInteraction,
+        ChatGenerateResponse,
+        CHAT_SITUATION,
+        INTERPRET_EXAMPLES,
+        MODE_EXAMPLES,
+        RESPONSE_EXAMPLES,
+        TRAINSET,
+    )
+    from pooh_examples import MISHEARING_EXAMPLES
+
+    # Just chatting: no story and no timed events, but the session still
+    # becomes a picture book and postcards like any other.
+    return Scenario(
+        key="chat",
+        label="プーとおしゃべり",
+        scene_intro=(
+            "研究室の机の上。プーが座っています。"
+            "そばにはハチミツの壺。なんでもおしゃべりできます。"
+        ),
+        initial_situation=CHAT_SITUATION,
+        opening_line=CHAT_OPENING_LINE,
+        ending_line=fixed_utterance("chat.ending"),
+        # No start cue: 「おしゃべりしよう」 is pooh_body's free_talk keyword;
+        # start it with the dashboard's Narrative button.
+        trainset=TRAINSET,
+        mode_examples=MODE_EXAMPLES,
+        mishearing_examples=MISHEARING_EXAMPLES,
+        response_examples=RESPONSE_EXAMPLES,
+        interpret_examples=INTERPRET_EXAMPLES,
+        classify_signature=ChatAnalyzeInteraction,
+        response_signature=ChatGenerateResponse,
+    )
+
+
 SCENARIOS: dict[str, Scenario] = {
     "tea_party": _tea_party(),
     "eeyore_birthday": _eeyore_birthday(),
     "footprints": _footprints(),
+    "chat": _chat(),
 }
 
 DEFAULT_SCENARIO = "tea_party"
