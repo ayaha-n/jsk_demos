@@ -91,9 +91,10 @@
       "title": "プーと おしゃべり",
       "beats": {
         "opening": {
-          "narration": "プーは つくえの うえに すわって、おしゃべりの あいてを まって いました。",
-          "illustration": "tea_party/opening.png",
-          "prompt": "This bear from the reference image sits on a small desk with a honey pot beside him, smiling as if welcoming a friend to chat."
+          "narration": "プーは テーブルの ところに すわって、おしゃべりの あいてを まって いました。",
+          "illustration": "chat/opening.png",
+          "prompt": "The bear sits alone at the small round table with only the honey pot on it: no teacups, saucers, plate, cookies or balloon. He raises one paw in a friendly wave and smiles, as if inviting a friend to sit in the empty chair and chat.",
+          "reference_illustration": "tea_party/opening.png"
         }
       },
       "closing": "おしまい"
