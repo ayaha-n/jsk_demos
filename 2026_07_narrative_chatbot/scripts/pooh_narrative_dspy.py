@@ -366,6 +366,10 @@ class PoohNarrativeAgent(dspy.Module):
             mode = str(classification.interaction_mode)
             current_scene = str(classification.current_scene)
             extracted_terms = [str(term) for term in classification.technical_terms]
+            if mishearing is not None:
+                # English mode: only the terms still in English (see
+                # english_mode.EnglishMishearing.own_terms).
+                extracted_terms = mishearing.own_terms(extracted_terms)
             known_terms = (find_known_technical_terms(user_action) if mishearing is None
                            else mishearing.find_terms(user_action))
             technical_terms = list(dict.fromkeys(extracted_terms + known_terms))

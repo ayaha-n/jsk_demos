@@ -87,6 +87,14 @@ class ForwardTest(unittest.TestCase):
         # Nothing natural: Pooh echoes a fragment, in Latin letters.
         self.assertEqual([c.heard_as for c in inputs["mishearing_candidates"]], ["dro"])
 
+    def test_a_word_translated_into_japanese_is_not_misheard(self):
+        # "research" is translated (研究), so it is no technical word: the
+        # English planner would hear it as a Japanese sound ("Ken?").
+        inputs, planner = self.run_turn("What kind of research do you do?",
+                                        "どんな研究をしているの？", ["研究"])
+        planner.assert_not_called()
+        self.assertEqual(inputs["mishearing_candidates"], [])
+
 
 class RomanizedWordTest(unittest.TestCase):
     def test_honey_written_out_in_latin_letters_is_translated(self):

@@ -215,6 +215,15 @@ class EnglishMishearing:
     def find_terms(self, _translated: str) -> list[str]:
         return find_english_technical_terms(self.user_text)
 
+    @staticmethod
+    def own_terms(extracted: list[str]) -> list[str]:
+        """Of the terms the classifier found in the translation, those still
+        in Latin letters: technical words are kept in English through the
+        translation, so one found in Japanese was an ordinary word translated
+        ("research" -> 研究), which the English planner would mishear as a
+        Japanese sound ("Ken?")."""
+        return [term for term in extracted if re.search(r"[A-Za-z]", term)]
+
     def known_candidates(self, technical_terms: list[str], history: str = ""):
         return english_known_candidates(technical_terms, history)
 
