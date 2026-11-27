@@ -249,6 +249,18 @@ class TranslateParticipantToJapanese(dspy.Signature):
     japanese: str = dspy.OutputField()
 
 
+class TranslateObservedAction(dspy.Signature):
+    """Put what the robot saw the participant do, written in Japanese as
+    「参加者が…」, into a short English verb phrase in the past tense without
+    its subject, as a picture book tells the reader what they did ("You
+    ..."). Plain words a child understands; Pooh stays Pooh (例:
+    参加者がぬいぐるみをプーに見せた -> showed Pooh a stuffed toy). Output only
+    the phrase."""
+
+    japanese: str = dspy.InputField()
+    english: str = dspy.OutputField()
+
+
 class TranslatePoohToEnglish(dspy.Signature):
     """Translate Pooh's Japanese line into English, as Pooh says it to an
     English-speaking participant. Pooh is a gentle, simple, warm little
@@ -300,14 +312,33 @@ class Translator:
     translated at all."""
 
     def __init__(self, to_japanese: Any = None, to_english: Any = None,
-                 lines: dict[str, str] | None = None) -> None:
+                 lines: dict[str, str] | None = None, observed: Any = None) -> None:
         self._to_japanese = to_japanese or dspy.Predict(TranslateParticipantToJapanese)
         self._to_english = to_english or dspy.Predict(TranslatePoohToEnglish)
+        self._observed = observed or dspy.Predict(TranslateObservedAction)
         # The fixed lines written in English (config/english.json) are said
         # as written.
         self._cache: dict[str, str] = dict(
             english_text().get("lines", {}) if lines is None else lines)
         self._lock = threading.Lock()
+
+    def observed_to_english(self, action: str) -> str:
+        """What the robot saw (「参加者がぬいぐるみをプーに見せた」) as an
+        English phrase for the picture book ("showed Pooh a stuffed toy"),
+        or "" if it could not be translated."""
+        key = "observed:" + action
+        with self._lock:
+            cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            english = str(self._observed(japanese=action).english).strip().rstrip(".")
+        except Exception as exc:
+            print(f"翻訳できませんでした: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return ""
+        with self._lock:
+            self._cache[key] = english
+        return english
 
     def to_japanese(self, english: str, pooh_said_before: str = "") -> str:
         result = self._to_japanese(english=english, pooh_said_before=pooh_said_before)

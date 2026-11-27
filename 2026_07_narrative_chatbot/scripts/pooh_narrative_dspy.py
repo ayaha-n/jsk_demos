@@ -875,6 +875,9 @@ class SessionOutput:
     # For source "observed": what the robot saw the participant do.
     observed_actions: list[str] = field(default_factory=list)
     observed_with_speech: bool = False
+    # English mode: each of observed_actions as an English phrase for the
+    # picture book ("touched Pooh's right hand"), "" if it has none.
+    observed_actions_en: list[str] = field(default_factory=list)
     # English mode: bot_response is what Pooh says (English), and these are
     # the line the session keeps (Japanese) and what the participant said.
     bot_response_ja: str | None = None
@@ -1384,14 +1387,18 @@ class NarrativeSession:
             return None
         self.current_situation = apply_situation_update(
             self.current_situation, SituationUpdate(add_events=actions))
-        append_session_record(self.log_path, {
+        actions_en = self._observed_in_english(actions)
+        record = {
             "scenario": self.scenario.key,
             "session_id": self.session_id,
             "source": "observed",
             "observed_actions": actions,
             "with_speech": with_speech,
             "updated_situation": self.current_situation.model_dump(),
-        })
+        }
+        if actions_en:
+            record["observed_actions_en"] = actions_en
+        append_session_record(self.log_path, record)
         output = SessionOutput(
             source="observed",
             bot_response="",
@@ -1400,9 +1407,21 @@ class NarrativeSession:
             updated_situation=self.current_situation,
             observed_actions=actions,
             observed_with_speech=with_speech,
+            observed_actions_en=actions_en,
         )
         self._notify_listeners(output)
         return output
+
+    def _observed_in_english(self, actions: list[str]) -> list[str]:
+        """English mode: what was seen, as the English book retells it; the
+        book's own table first, the translator for anything else (a stuffed
+        toy shown, ...). Empty in Japanese."""
+        if self.language != "en":
+            return []
+        from storybook import english_observed_clause
+
+        return [english_observed_clause(action) or self.translator.observed_to_english(action)
+                for action in actions]
 
     def seconds_until_due(self) -> float | None:
         if self.ended or self.controller is None:

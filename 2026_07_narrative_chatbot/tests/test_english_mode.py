@@ -116,12 +116,26 @@ class RomanizedWordTest(unittest.TestCase):
             "Mitsubishi made it.")
 
 
+class ObservedTranslationTest(unittest.TestCase):
+    def test_it_is_translated_once(self):
+        observed = Mock(return_value=dspy.Prediction(english="showed Pooh a stuffed toy."))
+        translator = english_mode.Translator(to_japanese=Mock(), to_english=Mock(), lines={},
+                                             observed=observed)
+        for _ in range(2):
+            self.assertEqual(translator.observed_to_english("参加者がぬいぐるみをプーに見せた"),
+                             "showed Pooh a stuffed toy")
+        observed.assert_called_once()
+
+
 class FakeTranslator:
     def to_japanese(self, english, pooh_said_before=""):
         return f"[ja]{english}"
 
     def to_english(self, japanese):
         return f"[en]{japanese}"
+
+    def observed_to_english(self, action):
+        return f"[en]{action}"
 
 
 class SessionTest(unittest.TestCase):
@@ -166,6 +180,18 @@ class SessionTest(unittest.TestCase):
                          ("いいね。", "[en]いいね。", "en"))
         self.assertEqual(close["bot_response"], session.scenario.ending_line)
         self.assertEqual(close["spoken_response"], f"[en]{session.scenario.ending_line}")
+
+    def test_what_was_seen_is_logged_in_english_too(self):
+        session, _agent = self.make_session("en")
+        with tempfile.TemporaryDirectory() as directory:
+            session.log_path = Path(directory) / "session.jsonl"
+            session.start()
+            output = session.observe(["参加者がプーの右手に触れた", "参加者がぬいぐるみをプーに見せた"])
+            records = [json.loads(line) for line in session.log_path.read_text().splitlines()]
+        # The book's own table first, the translator for anything else.
+        expected = ["touched Pooh's right hand", "[en]参加者がぬいぐるみをプーに見せた"]
+        self.assertEqual(output.observed_actions_en, expected)
+        self.assertEqual(records[-1]["observed_actions_en"], expected)
 
     def test_japanese_sessions_are_as_before(self):
         session, agent = self.make_session("ja")
@@ -241,6 +267,20 @@ class ObservedInEnglishTest(unittest.TestCase):
         self.assertEqual(
             storybook.english_observed_entries(["参加者がプーのおなかに触れた"], after=(touch,))[0].text,
             "Then you touched Pooh's tummy.")
+
+    def test_the_english_the_session_logged_is_used_for_anything_else(self):
+        entries = storybook.english_observed_entries(
+            ["参加者がぬいぐるみをプーに見せた"], given=["showed Pooh a stuffed toy"])
+        self.assertEqual([e.text for e in entries], ["You showed Pooh a stuffed toy."])
+
+    def test_what_is_handed_with_words_is_retold_before_them(self):
+        turn = storybook.StoryTurn(
+            source="participant", pooh_text="Thank you!", user_text="Here you go.",
+            observed_actions=("参加者がぬいぐるみをプーに差し出した",),
+            observed_actions_en=("held out a stuffed toy to Pooh",))
+        self.assertEqual([e.text for e in storybook.english_entries(turn)],
+                         ["You held out a stuffed toy to Pooh.", "“Here you go,” you said.",
+                          "“Thank you!”"])
 
     def test_what_cannot_be_put_into_english_is_left_out(self):
         self.assertEqual(storybook.english_observed_entries(["参加者がはちみつの歌を歌った"]), [])

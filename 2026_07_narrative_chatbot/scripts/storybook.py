@@ -429,6 +429,9 @@ class StoryTurn:
     # whether it came with the participant's next words
     observed_actions: tuple[str, ...] = ()
     with_speech: bool = False
+    # English mode: each of observed_actions in English, as the session
+    # logged it ("" where it has none); see english_observed_entries.
+    observed_actions_en: tuple[str, ...] = ()
     # The LM's closed-vocabulary report of story progress reached this turn
     # (e.g. footprints' "noticed_fourth_animal"); see StoryConfig.action_beats.
     narrative_actions: tuple[str, ...] = ()
@@ -478,6 +481,7 @@ def turn_from_output(output: Any) -> StoryTurn:
         situation=illustration_situation(getattr(output, "updated_situation", None)),
         observed_actions=tuple(getattr(output, "observed_actions", ())),
         with_speech=bool(getattr(output, "observed_with_speech", False)),
+        observed_actions_en=tuple(getattr(output, "observed_actions_en", ()) or ()),
         narrative_actions=tuple(getattr(output, "narrative_actions", ()) or ()),
         fixed_utterance_id=getattr(output, "fixed_utterance_id", None),
         settled_topics=_settled_topics(getattr(turn, "settled_details", None)),
@@ -501,6 +505,7 @@ def turn_from_record(record: dict[str, Any]) -> StoryTurn:
         situation=illustration_situation(record.get("updated_situation")),
         observed_actions=tuple(str(a) for a in record.get("observed_actions") or ()),
         with_speech=bool(record.get("with_speech")),
+        observed_actions_en=tuple(str(a) for a in record.get("observed_actions_en") or ()),
         narrative_actions=tuple(str(a) for a in record.get("narrative_actions") or ()),
         fixed_utterance_id=utterance_id,
         settled_topics=_settled_topics(record.get("settled_details")),
@@ -653,7 +658,8 @@ def participant_entries(
 
 # What the ROS side saw, retold in an English-mode book: the touches and the
 # handed or shown objects it words (pooh_body's handover_vision_relay.py),
-# in English. Anything else is left out, as in english_entries.
+# in English by this table; anything else by the English the session logged
+# with it (observed_actions_en), or else left out.
 ENGLISH_BODY_PLACES = {"右手": "right hand", "左手": "left hand", "右足": "right foot",
                        "左足": "left foot", "おなか": "tummy", "頭": "head", "手": "hand",
                        "足": "foot"}
@@ -704,13 +710,16 @@ def english_observed_clause(action: str) -> str | None:
 
 
 def english_observed_entries(
-    actions: Iterable[str], after: tuple[str, ...] = ()
+    actions: Iterable[str], after: tuple[str, ...] = (), given: Iterable[str] = ()
 ) -> list[StoryEntry]:
     """participant_entries for an English-mode book, without speech: "You
     touched Pooh's right hand, and then touched Pooh's tummy." ``after`` as
-    there ("Then you ...", "Once more, you ...")."""
+    there ("Then you ...", "Once more, you ..."); ``given``: each action's
+    English as the session logged it, for one the table does not know."""
     actions = list(actions)
-    clauses = [clause for clause in map(english_observed_clause, actions) if clause]
+    given = list(given) + [""] * len(actions)
+    clauses = [clause for clause in (english_observed_clause(action) or english
+                                     for action, english in zip(actions, given)) if clause]
     if not clauses:
         return []
     subject = "You "
@@ -720,9 +729,10 @@ def english_observed_entries(
 
 
 def english_entries(turn: StoryTurn) -> list[StoryEntry]:
-    """An English-mode turn retold in English: what was said. What the robot
-    saw and how Pooh moved are worded in Japanese only, so they are left out."""
-    entries = []
+    """An English-mode turn retold in English: what the robot saw (see
+    english_observed_entries) and what was said. How Pooh moved is worded in
+    Japanese only, so it is left out."""
+    entries = english_observed_entries(turn.observed_actions, given=turn.observed_actions_en)
     said = (spoken_part(turn.user_text) if turn.user_text else "").strip()
     if said:
         # “Hello,” you said. / “Are you a robot?” you said.
@@ -1084,6 +1094,8 @@ class StoryBuilder:
         self._seen: tuple[str, ...] = ()
         # What was just retold on its own, for a touch that follows it.
         self._just_seen: tuple[str, ...] = ()
+        # English mode: what was seen, in English as the session logged it.
+        self._seen_en: dict[str, str] = {}
         # Beats already given their own page (see narrate()'s covered_beats).
         self._covered_beats: set[str] = set()
         # What the participant has said in the epilogue, and its parts so far.
@@ -1105,12 +1117,17 @@ class StoryBuilder:
         if turn.source == "story_goal":
             return self._reach_goal(turn)
         events: list[PageEvent] = []
+        for action, english in zip(turn.observed_actions, turn.observed_actions_en):
+            if english:
+                self._seen_en[action] = english
         if turn.source == "observed" and turn.with_speech:
             events.extend(self._retell_seen())
             self._seen = turn.observed_actions
             return events
         if turn.source == "participant":
-            turn = replace(turn, observed_actions=self._seen + turn.observed_actions)
+            seen = self._seen + turn.observed_actions
+            turn = replace(turn, observed_actions=seen,
+                           observed_actions_en=tuple(self._seen_en.get(a, "") for a in seen))
             self._seen = ()
         else:
             events.extend(self._retell_seen())
@@ -1242,7 +1259,8 @@ class StoryBuilder:
     def _retell_on_its_own(self, actions: tuple[str, ...]) -> list[PageEvent]:
         if not actions or not self.pages:
             return []
-        entries = (english_observed_entries(actions, after=self._just_seen)
+        entries = (english_observed_entries(actions, after=self._just_seen,
+                                            given=[self._seen_en.get(a, "") for a in actions])
                    if self.config.language == "en"
                    else participant_entries(actions, after=self._just_seen))
         self._just_seen = actions
