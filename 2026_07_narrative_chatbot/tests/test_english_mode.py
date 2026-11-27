@@ -211,6 +211,41 @@ class StorybookTest(unittest.TestCase):
         self.assertEqual(japanese.pages[0].placed[0].entry.text, "イーヨーの おたんじょうび")
 
 
+class ObservedInEnglishTest(unittest.TestCase):
+    def setUp(self):
+        global storybook
+        import storybook
+
+    def test_touches_and_handed_objects_are_retold_in_english(self):
+        entries = storybook.english_observed_entries(
+            ["参加者がプーの右手に触れた", "参加者がプーのおなかに触れた"])
+        self.assertEqual([e.text for e in entries],
+                         ["You touched Pooh's right hand, and then touched Pooh's tummy."])
+        self.assertEqual(
+            storybook.english_observed_clause("参加者がはちみつの壺をプーに差し出した"),
+            "held out the honey pot to Pooh")
+        self.assertEqual(
+            storybook.english_observed_clause("参加者が風船をプーの右手に手渡した"),
+            "put the balloon in Pooh's right hand")
+
+    def test_a_colored_object_keeps_its_color(self):
+        self.assertEqual(storybook.english_observed_clause("参加者がピンクの風船をプーに差し出した"),
+                         "held out the pink balloon to Pooh")
+        self.assertEqual(storybook.english_observed_clause("参加者が黄色い風船をプーに見せた"),
+                         "showed Pooh the yellow balloon")
+
+    def test_it_goes_on_from_what_was_just_retold(self):
+        touch = "参加者がプーの右手に触れた"
+        self.assertEqual(storybook.english_observed_entries([touch], after=(touch,))[0].text,
+                         "Once more, you touched Pooh's right hand.")
+        self.assertEqual(
+            storybook.english_observed_entries(["参加者がプーのおなかに触れた"], after=(touch,))[0].text,
+            "Then you touched Pooh's tummy.")
+
+    def test_what_cannot_be_put_into_english_is_left_out(self):
+        self.assertEqual(storybook.english_observed_entries(["参加者がはちみつの歌を歌った"]), [])
+
+
 class PostcardTextTest(unittest.TestCase):
     def test_english_is_split_and_wrapped_by_its_words(self):
         import postcard

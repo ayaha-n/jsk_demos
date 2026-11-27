@@ -20,6 +20,7 @@ import json
 import hashlib
 import os
 import random
+import re
 import sys
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
@@ -650,6 +651,74 @@ def participant_entries(
     return entries
 
 
+# What the ROS side saw, retold in an English-mode book: the touches and the
+# handed or shown objects it words (pooh_body's handover_vision_relay.py),
+# in English. Anything else is left out, as in english_entries.
+ENGLISH_BODY_PLACES = {"右手": "right hand", "左手": "left hand", "右足": "right foot",
+                       "左足": "left foot", "おなか": "tummy", "頭": "head", "手": "hand",
+                       "足": "foot"}
+ENGLISH_OBJECTS = {"はちみつの壺": "the honey pot", "ハチミツの壺": "the honey pot",
+                   "タブレット": "the tablet", "赤い布": "the red cloth", "明かり": "the light",
+                   "白く光る電球": "the glowing light bulb", "ビーズの指輪": "the bead ring",
+                   "風船": "the balloon", "リボン": "the ribbon"}
+ENGLISH_TOUCH_VERBS = {"触れた": "touched", "なでた": "stroked", "握った": "held"}
+# The camera names a colored object by its color (「ピンクの風船」, 「黄色い風船」).
+ENGLISH_COLORS = {"ピンク": "pink", "黄色": "yellow", "黄": "yellow", "緑": "green",
+                  "青": "blue", "赤": "red", "白": "white", "オレンジ": "orange",
+                  "紫": "purple", "水色": "light blue", "茶色": "brown", "黒": "black"}
+
+
+def english_object(name: str) -> str | None:
+    """「はちみつの壺」 -> "the honey pot", 「ピンクの風船」 -> "the pink
+    balloon", or None for an object not known here."""
+    if name in ENGLISH_OBJECTS:
+        return ENGLISH_OBJECTS[name]
+    colored = re.fullmatch(r"(.+?)(?:の|い)(.+)", name)
+    if colored and colored.group(1) in ENGLISH_COLORS and colored.group(2) in ENGLISH_OBJECTS:
+        thing = ENGLISH_OBJECTS[colored.group(2)].removeprefix("the ")
+        return f"the {ENGLISH_COLORS[colored.group(1)]} {thing}"
+    return None
+
+
+def english_observed_clause(action: str) -> str | None:
+    """「参加者がプーの右手に触れた」 -> "touched Pooh's right hand",
+    「参加者がはちみつの壺をプーに差し出した」 -> "held out the honey pot to
+    Pooh", or None for what cannot be put into English here."""
+    body = action.strip().rstrip("。").removeprefix("参加者が")
+    touch = re.fullmatch(r"プーの(.+?)[にを](触れた|なでた|握った)", body)
+    if touch:
+        place = ENGLISH_BODY_PLACES.get(touch.group(1))
+        return f"{ENGLISH_TOUCH_VERBS[touch.group(2)]} Pooh's {place}" if place else None
+    handed = re.fullmatch(r"(.+?)を(?:プーの(.+?)に|プーに)(差し出した|見せた|手渡した)", body)
+    if handed:
+        thing = english_object(handed.group(1))
+        if thing is None:
+            return None
+        if handed.group(3) == "見せた":
+            return f"showed Pooh {thing}"
+        if handed.group(3) == "差し出した":
+            return f"held out {thing} to Pooh"
+        place = ENGLISH_BODY_PLACES.get(handed.group(2) or "")
+        return f"put {thing} in Pooh's {place}" if place else f"handed {thing} to Pooh"
+    return None
+
+
+def english_observed_entries(
+    actions: Iterable[str], after: tuple[str, ...] = ()
+) -> list[StoryEntry]:
+    """participant_entries for an English-mode book, without speech: "You
+    touched Pooh's right hand, and then touched Pooh's tummy." ``after`` as
+    there ("Then you ...", "Once more, you ...")."""
+    actions = list(actions)
+    clauses = [clause for clause in map(english_observed_clause, actions) if clause]
+    if not clauses:
+        return []
+    subject = "You "
+    if after:
+        subject = "Once more, you " if actions[:1] == [after[-1]] else "Then you "
+    return [StoryEntry("narration", subject + ", and then ".join(clauses) + ".")]
+
+
 def english_entries(turn: StoryTurn) -> list[StoryEntry]:
     """An English-mode turn retold in English: what was said. What the robot
     saw and how Pooh moved are worded in Japanese only, so they are left out."""
@@ -1173,9 +1242,11 @@ class StoryBuilder:
     def _retell_on_its_own(self, actions: tuple[str, ...]) -> list[PageEvent]:
         if not actions or not self.pages:
             return []
-        entries = participant_entries(actions, after=self._just_seen)
+        entries = (english_observed_entries(actions, after=self._just_seen)
+                   if self.config.language == "en"
+                   else participant_entries(actions, after=self._just_seen))
         self._just_seen = actions
-        return self._place(entries)
+        return self._place(entries) if entries else []
 
     def to_dict(self) -> dict[str, Any]:
         return {
