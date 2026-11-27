@@ -259,7 +259,8 @@ class TranslatePoohToEnglish(dspy.Signature):
     Japanese stay that way: katakana words are ordinary Japanese words, so
     translate them too, never write them out in Latin letters (ハチミツ,
     はちみつ, みつ -> honey; ツボ, 壺, つぼ -> pot). Characters' names in their
-    usual English form (イーヨー -> Eeyore). Output only the translation."""
+    usual English form (イーヨー -> Eeyore; あやは, who made Pooh,
+    -> Ayaha). Output only the translation."""
 
     japanese: str = dspy.InputField()
     english: str = dspy.OutputField()
